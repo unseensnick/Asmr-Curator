@@ -1,0 +1,42 @@
+# Data (SQLite db — back up separately)
+data/dictionary.db
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+.ruff_cache/
+*.log
+pip-log.txt
+pip-delete-this-directory.txt
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Backups
+backups of versions/
+
+# OS
+.DS_Store
+Thumbs.db
+*.lnk
+
+# IDE
+.vscode/
+.idea/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Node (if frontend uses npm)
+node_modules/
+.npm
+
+# Database backups
+*.db
+*.sqlite3
+.gitkeep

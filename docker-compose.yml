@@ -1,0 +1,21 @@
+services:
+  asmr-tool:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data                  # SQLite db — persists on host
+      - ./backend:/app/backend        # live backend — uvicorn reloads on save
+      - ./frontend:/app/frontend      # live frontend — just refresh browser
+    environment:
+      - DB_PATH=/data/dictionary.db
+      - PYTHONPATH=/app
+    command: >
+      uvicorn backend.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --reload-dir /app/backend
+    restart: unless-stopped
