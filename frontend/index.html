@@ -5,11 +5,27 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>ASMR Filename Generator</title>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.0/tesseract.min.js"></script>
-        <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet" />
+        <link
+            href="https://fonts.googleapis.com/icon?family=Material+Icons+Round"
+            rel="stylesheet"
+        />
         <style>
             @import url("https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:ital,wght@0,300;0,400;1,300&display=swap");
 
-            .mi { font-family: 'Material Icons Round'; font-style: normal; font-size: 18px; line-height: 1; letter-spacing: normal; text-transform: none; display: inline-block; white-space: nowrap; word-wrap: normal; direction: ltr; -webkit-font-smoothing: antialiased; vertical-align: middle; }
+            .mi {
+                font-family: "Material Icons Round";
+                font-style: normal;
+                font-size: 18px;
+                line-height: 1;
+                letter-spacing: normal;
+                text-transform: none;
+                display: inline-block;
+                white-space: nowrap;
+                word-wrap: normal;
+                direction: ltr;
+                -webkit-font-smoothing: antialiased;
+                vertical-align: middle;
+            }
 
             :root {
                 --bg: #0a0a0f;
@@ -407,7 +423,9 @@
                 word-break: break-all;
                 min-height: 52px;
             }
-            .copy-btn { display: none; } /* legacy - replaced by btn-row buttons */
+            .copy-btn {
+                display: none;
+            } /* legacy - replaced by btn-row buttons */
 
             /* Fields */
             .field-group {
@@ -576,37 +594,52 @@
                 color: var(--danger);
             }
 
-
-
             /* ── Dictionary Modal ── */
             .dict-trigger-icon {
-                width: 34px; height: 34px;
+                width: 34px;
+                height: 34px;
                 border-radius: 8px;
-                background: rgba(129,140,248,0.12);
-                display: flex; align-items: center; justify-content: center;
+                background: rgba(129, 140, 248, 0.12);
+                display: flex;
+                align-items: center;
+                justify-content: center;
                 color: var(--accent2);
                 flex-shrink: 0;
             }
             .dict-trigger-label {
                 font-family: "Syne", sans-serif;
-                font-size: 12px; font-weight: 700;
-                letter-spacing: 0.1em; text-transform: uppercase;
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 0.1em;
+                text-transform: uppercase;
                 color: var(--text);
             }
             .dict-trigger-sub {
-                font-size: 10px; color: var(--muted);
-                margin-top: 1px; letter-spacing: 0.03em;
+                font-size: 10px;
+                color: var(--muted);
+                margin-top: 1px;
+                letter-spacing: 0.03em;
             }
-            .dict-trigger-badges { display: flex; gap: 6px; align-items: center; }
+            .dict-trigger-badges {
+                display: flex;
+                gap: 6px;
+                align-items: center;
+            }
             .dict-badge {
-                font-size: 10px; padding: 3px 8px;
+                font-size: 10px;
+                padding: 3px 8px;
                 border-radius: 20px;
                 background: var(--surface2);
                 border: 1px solid var(--border);
                 color: var(--muted);
-                letter-spacing: 0.04em; white-space: nowrap;
+                letter-spacing: 0.04em;
+                white-space: nowrap;
             }
-            .dict-badge.active { background: rgba(129,140,248,0.12); border-color: rgba(129,140,248,0.3); color: var(--accent2); }
+            .dict-badge.active {
+                background: rgba(129, 140, 248, 0.12);
+                border-color: rgba(129, 140, 248, 0.3);
+                color: var(--accent2);
+            }
             .dict-modal-overlay {
                 display: none;
                 position: fixed;
@@ -643,18 +676,26 @@
                 flex-shrink: 0;
             }
             .dict-modal-close {
-                width: 32px; height: 32px;
+                width: 32px;
+                height: 32px;
                 border-radius: 8px;
                 border: 1px solid var(--border);
                 background: transparent;
                 color: var(--muted);
                 cursor: pointer;
-                display: flex; align-items: center; justify-content: center;
+                display: flex;
+                align-items: center;
+                justify-content: center;
                 transition: all 0.15s;
                 flex-shrink: 0;
             }
-            .dict-modal-close:hover { border-color: var(--danger); color: var(--danger); }
-            .dict-modal-close .mi { font-size: 18px; }
+            .dict-modal-close:hover {
+                border-color: var(--danger);
+                color: var(--danger);
+            }
+            .dict-modal-close .mi {
+                font-size: 18px;
+            }
             .dict-modal-body {
                 flex: 1;
                 overflow-y: auto;
@@ -678,42 +719,71 @@
                 overflow-x: auto;
                 scrollbar-width: none;
             }
-            .dict-tabbar::-webkit-scrollbar { display: none; }
+            .dict-tabbar::-webkit-scrollbar {
+                display: none;
+            }
             .dict-tab {
-                display: flex; align-items: center; gap: 6px;
+                display: flex;
+                align-items: center;
+                gap: 6px;
                 padding: 12px 18px;
                 font-family: "DM Mono", monospace;
-                font-size: 11px; letter-spacing: 0.04em;
-                cursor: pointer; border: none;
-                background: none; color: var(--muted);
+                font-size: 11px;
+                letter-spacing: 0.04em;
+                cursor: pointer;
+                border: none;
+                background: none;
+                color: var(--muted);
                 border-bottom: 2px solid transparent;
                 margin-bottom: -1px;
-                transition: color 0.15s, border-color 0.15s;
+                transition:
+                    color 0.15s,
+                    border-color 0.15s;
                 white-space: nowrap;
                 position: relative;
             }
-            .dict-tab .mi { font-size: 16px; opacity: 0.7; }
-            .dict-tab:hover { color: var(--text); }
-            .dict-tab:hover .mi { opacity: 1; }
-            .dict-tab.active { color: var(--accent2); border-bottom-color: var(--accent2); }
-            .dict-tab.active .mi { opacity: 1; color: var(--accent2); }
+            .dict-tab .mi {
+                font-size: 16px;
+                opacity: 0.7;
+            }
+            .dict-tab:hover {
+                color: var(--text);
+            }
+            .dict-tab:hover .mi {
+                opacity: 1;
+            }
+            .dict-tab.active {
+                color: var(--accent2);
+                border-bottom-color: var(--accent2);
+            }
+            .dict-tab.active .mi {
+                opacity: 1;
+                color: var(--accent2);
+            }
             .dict-tab-count {
-                font-size: 9px; padding: 1px 5px;
+                font-size: 9px;
+                padding: 1px 5px;
                 border-radius: 10px;
                 background: var(--surface2);
                 color: var(--muted);
                 border: 1px solid var(--border);
-                min-width: 18px; text-align: center;
+                min-width: 18px;
+                text-align: center;
             }
             .dict-tab.active .dict-tab-count {
-                background: rgba(129,140,248,0.15);
-                border-color: rgba(129,140,248,0.3);
+                background: rgba(129, 140, 248, 0.15);
+                border-color: rgba(129, 140, 248, 0.3);
                 color: var(--accent2);
             }
 
             /* Panel content */
-            .dict-pane { display: none; padding: 20px 22px; }
-            .dict-pane.active { display: block; }
+            .dict-pane {
+                display: none;
+                padding: 20px 22px;
+            }
+            .dict-pane.active {
+                display: block;
+            }
 
             /* Two-column layout for mapping panels */
             .dict-pane-2col {
@@ -722,28 +792,45 @@
                 gap: 20px;
                 align-items: start;
             }
-            @media (max-width: 700px) { .dict-pane-2col { grid-template-columns: 1fr; } }
+            @media (max-width: 700px) {
+                .dict-pane-2col {
+                    grid-template-columns: 1fr;
+                }
+            }
 
             /* Info callout */
             .dict-callout {
-                display: flex; gap: 10px; align-items: flex-start;
+                display: flex;
+                gap: 10px;
+                align-items: flex-start;
                 padding: 11px 14px;
-                background: rgba(129,140,248,0.06);
-                border: 1px solid rgba(129,140,248,0.18);
+                background: rgba(129, 140, 248, 0.06);
+                border: 1px solid rgba(129, 140, 248, 0.18);
                 border-radius: 8px;
                 margin-bottom: 16px;
-                font-size: 11px; color: var(--muted); line-height: 1.65;
+                font-size: 11px;
+                color: var(--muted);
+                line-height: 1.65;
             }
-            .dict-callout .mi { font-size: 16px; color: var(--accent2); flex-shrink: 0; margin-top: 1px; }
+            .dict-callout .mi {
+                font-size: 16px;
+                color: var(--accent2);
+                flex-shrink: 0;
+                margin-top: 1px;
+            }
             .dict-callout code {
-                color: var(--accent); font-size: 10px;
-                background: rgba(192,132,252,0.1);
-                padding: 1px 5px; border-radius: 3px;
+                color: var(--accent);
+                font-size: 10px;
+                background: rgba(192, 132, 252, 0.1);
+                padding: 1px 5px;
+                border-radius: 3px;
             }
 
             /* Entry list for phrases */
             .phrase-grid {
-                display: flex; flex-wrap: wrap; gap: 6px;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
                 min-height: 48px;
                 padding: 10px;
                 background: var(--surface2);
@@ -754,117 +841,466 @@
                 overflow-y: auto;
             }
             .phrase-chip {
-                display: inline-flex; align-items: center; gap: 4px;
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
                 background: var(--tag-bg);
                 border: 1px solid var(--tag-border);
                 border-radius: 20px;
                 padding: 4px 10px 4px 12px;
-                font-size: 11px; color: var(--text);
+                font-size: 11px;
+                color: var(--text);
                 transition: border-color 0.15s;
             }
-            .phrase-chip:hover { border-color: var(--danger); }
+            .phrase-chip:hover {
+                border-color: var(--danger);
+            }
             .phrase-chip-del {
-                cursor: pointer; color: var(--muted);
-                display: flex; align-items: center;
+                cursor: pointer;
+                color: var(--muted);
+                display: flex;
+                align-items: center;
                 transition: color 0.15s;
                 padding: 0 2px;
             }
-            .phrase-chip-del .mi { font-size: 13px; }
-            .phrase-chip-del:hover { color: var(--danger); }
+            .phrase-chip-del .mi {
+                font-size: 13px;
+            }
+            .phrase-chip-del:hover {
+                color: var(--danger);
+            }
 
             /* Mapping rows list */
-            .map-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; max-height: 260px; overflow-y: auto; }
+            .map-list {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+                margin-bottom: 12px;
+                max-height: 260px;
+                overflow-y: auto;
+            }
             .map-row {
-                display: grid; grid-template-columns: 1fr 28px 1fr 32px;
-                gap: 0; align-items: center;
+                display: grid;
+                grid-template-columns: 1fr 28px 1fr 32px;
+                gap: 0;
+                align-items: center;
                 padding: 7px 10px;
                 background: var(--surface2);
                 border: 1px solid var(--border);
                 border-radius: 7px;
                 transition: border-color 0.15s;
             }
-            .map-row:hover { border-color: rgba(42,42,80,0.8); }
+            .map-row:hover {
+                border-color: rgba(42, 42, 80, 0.8);
+            }
             .map-from-val {
-                font-size: 11px; color: var(--accent2);
-                overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                font-size: 11px;
+                color: var(--accent2);
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
             }
-            .map-arr { color: var(--muted); font-size: 10px; text-align: center; }
+            .map-arr {
+                color: var(--muted);
+                font-size: 10px;
+                text-align: center;
+            }
             .map-to-val {
-                font-size: 11px; color: var(--text);
-                overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                font-size: 11px;
+                color: var(--text);
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
             }
-            .map-to-null { font-size: 10px; color: var(--danger); font-style: italic; }
+            .map-to-null {
+                font-size: 10px;
+                color: var(--danger);
+                font-style: italic;
+            }
             .map-row-del {
-                display: flex; align-items: center; justify-content: flex-end;
-                background: none; border: none; cursor: pointer;
-                color: var(--muted); padding: 2px;
+                display: flex;
+                align-items: center;
+                justify-content: flex-end;
+                background: none;
+                border: none;
+                cursor: pointer;
+                color: var(--muted);
+                padding: 2px;
                 border-radius: 4px;
-                transition: color 0.15s, background 0.15s;
+                transition:
+                    color 0.15s,
+                    background 0.15s;
             }
-            .map-row-del .mi { font-size: 15px; }
-            .map-row-del:hover { color: var(--danger); background: rgba(248,113,113,0.08); }
+            .map-row-del .mi {
+                font-size: 15px;
+            }
+            .map-row-del:hover {
+                color: var(--danger);
+                background: rgba(248, 113, 113, 0.08);
+            }
 
             /* Add-entry form */
             .dict-add-form {
-                background: rgba(255,255,255,0.02);
+                background: rgba(255, 255, 255, 0.02);
                 border: 1px solid var(--border);
                 border-radius: 8px;
                 padding: 14px;
             }
             .dict-add-form-title {
-                font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
-                color: var(--muted); margin-bottom: 10px;
-                display: flex; align-items: center; gap: 6px;
+                font-size: 9px;
+                letter-spacing: 0.12em;
+                text-transform: uppercase;
+                color: var(--muted);
+                margin-bottom: 10px;
+                display: flex;
+                align-items: center;
+                gap: 6px;
             }
-            .dict-add-form-title .mi { font-size: 13px; color: var(--accent2); }
-            .dict-add-fields { display: flex; flex-direction: column; gap: 7px; }
-            .dict-add-fields input[type="text"] { font-size: 11px; padding: 8px 10px; }
+            .dict-add-form-title .mi {
+                font-size: 13px;
+                color: var(--accent2);
+            }
+            .dict-add-fields {
+                display: flex;
+                flex-direction: column;
+                gap: 7px;
+            }
+            .dict-add-fields input[type="text"] {
+                font-size: 11px;
+                padding: 8px 10px;
+            }
             .dict-add-fields .field-hint {
-                font-size: 9px; color: var(--muted); letter-spacing: 0.04em;
+                font-size: 9px;
+                color: var(--muted);
+                letter-spacing: 0.04em;
             }
             .dict-add-fields .suppress-row {
-                display: flex; align-items: center; gap: 8px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
             }
             .dict-add-fields .suppress-row label {
-                display: flex; align-items: center; gap: 5px;
-                font-size: 10px; color: var(--muted); cursor: pointer;
+                display: flex;
+                align-items: center;
+                gap: 5px;
+                font-size: 10px;
+                color: var(--muted);
+                cursor: pointer;
             }
             .dict-add-fields .suppress-row input[type="checkbox"] {
-                width: auto; accent-color: var(--danger);
+                width: auto;
+                accent-color: var(--danger);
             }
             .dict-add-btn {
-                margin-top: 8px; width: 100%;
-                display: flex; align-items: center; justify-content: center; gap: 6px;
+                margin-top: 8px;
+                width: 100%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
             }
-            .dict-add-btn .mi { font-size: 16px; }
+            .dict-add-btn .mi {
+                font-size: 16px;
+            }
 
             /* Import/export footer */
             .dict-footer {
-                display: flex; gap: 8px; align-items: center;
+                display: flex;
+                gap: 8px;
+                align-items: center;
                 padding: 14px 22px 18px;
                 border-top: 1px solid var(--border);
                 flex-wrap: wrap;
             }
             .dict-footer-label {
-                font-size: 10px; color: var(--muted);
-                letter-spacing: 0.06em; text-transform: uppercase;
+                font-size: 10px;
+                color: var(--muted);
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
                 flex: 1;
-                display: flex; align-items: center; gap: 6px;
+                display: flex;
+                align-items: center;
+                gap: 6px;
             }
-            .dict-footer-label .mi { font-size: 14px; color: var(--muted); }
+            .dict-footer-label .mi {
+                font-size: 14px;
+                color: var(--muted);
+            }
             .btn-io {
-                display: inline-flex; align-items: center; gap: 5px;
+                display: inline-flex;
+                align-items: center;
+                gap: 5px;
                 background: transparent;
                 border: 1px solid var(--border);
                 color: var(--muted);
                 border-radius: 6px;
                 padding: 6px 13px;
-                font-family: "DM Mono", monospace; font-size: 11px;
-                cursor: pointer; transition: all 0.15s;
+                font-family: "DM Mono", monospace;
+                font-size: 11px;
+                cursor: pointer;
+                transition: all 0.15s;
             }
-            .btn-io .mi { font-size: 15px; }
-            .btn-io:hover { border-color: var(--accent2); color: var(--accent2); }
-            .btn-io.danger:hover { border-color: var(--danger); color: var(--danger); }
+            .btn-io .mi {
+                font-size: 15px;
+            }
+            .btn-io:hover {
+                border-color: var(--accent2);
+                color: var(--accent2);
+            }
+            .btn-io.danger:hover {
+                border-color: var(--danger);
+                color: var(--danger);
+            }
+
+            /* ── File Rename ── */
+            /* ── File Browser & Rename ── */
+            .rename-card {
+                background: var(--surface);
+                border: 1px solid var(--border);
+                border-radius: 12px;
+                padding: 22px;
+                margin-bottom: 16px;
+            }
+            .fb-search-row {
+                display: flex;
+                gap: 8px;
+                margin-bottom: 10px;
+                align-items: center;
+            }
+            .fb-search-row input {
+                flex: 1;
+                font-size: 12px;
+            }
+            .fb-count {
+                font-size: 10px;
+                color: var(--muted);
+                letter-spacing: 0.04em;
+                white-space: nowrap;
+            }
+            .fb-list {
+                background: var(--surface2);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                max-height: 240px;
+                overflow-y: auto;
+            }
+            .fb-empty {
+                padding: 24px;
+                text-align: center;
+                font-size: 11px;
+                color: var(--muted);
+            }
+            .fb-entry {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 8px 12px;
+                cursor: pointer;
+                border-bottom: 1px solid rgba(42, 42, 58, 0.5);
+                transition: background 0.12s;
+                font-size: 12px;
+            }
+            .fb-entry:last-child {
+                border-bottom: none;
+            }
+            .fb-entry:hover {
+                background: rgba(129, 140, 248, 0.06);
+            }
+            .fb-entry.selected {
+                background: rgba(52, 211, 153, 0.08);
+                border-left: 2px solid var(--success);
+            }
+            .fb-entry .mi {
+                font-size: 18px;
+                flex-shrink: 0;
+                color: var(--muted);
+            }
+            .fb-entry-info {
+                flex: 1;
+                min-width: 0;
+            }
+            .fb-entry-name {
+                font-size: 12px;
+                color: var(--text);
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .fb-entry-folder {
+                font-size: 10px;
+                color: var(--muted);
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                margin-top: 1px;
+            }
+            .fb-loading {
+                padding: 20px;
+                text-align: center;
+                font-size: 11px;
+                color: var(--muted);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+            }
+            .fb-error {
+                padding: 12px;
+                font-size: 11px;
+                color: var(--danger);
+                background: rgba(248, 113, 113, 0.07);
+                border-radius: 6px;
+                margin-bottom: 8px;
+            }
+            .rename-drop-zone {
+                border: 1.5px dashed var(--border);
+                border-radius: 8px;
+                padding: 18px 16px;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                cursor: pointer;
+                transition: all 0.2s;
+                background: var(--surface2);
+                min-height: 60px;
+            }
+            .rename-drop-zone:hover {
+                border-color: var(--success);
+                background: rgba(52, 211, 153, 0.04);
+            }
+            .rename-drop-zone .drop-icon {
+                color: var(--success);
+                opacity: 0.6;
+                flex-shrink: 0;
+            }
+            .rename-drop-zone .drop-text {
+                font-size: 12px;
+                color: var(--muted);
+                line-height: 1.5;
+            }
+            .rename-drop-zone .drop-text strong {
+                color: var(--success);
+                font-weight: 400;
+            }
+            .rename-file-loaded {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                background: var(--surface2);
+                border: 1px solid rgba(52, 211, 153, 0.25);
+                border-radius: 8px;
+                padding: 11px 14px;
+            }
+            .rename-file-loaded .file-icon {
+                color: var(--success);
+                flex-shrink: 0;
+            }
+            .rename-file-info {
+                flex: 1;
+                min-width: 0;
+            }
+            .rename-file-name {
+                font-size: 12px;
+                color: var(--text);
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .rename-file-meta {
+                font-size: 10px;
+                color: var(--muted);
+                margin-top: 2px;
+            }
+            .rename-actions {
+                margin-top: 12px;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+            .rename-sep-row {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 10px;
+                color: var(--muted);
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+            }
+            .rename-sep-row .sep-choice {
+                display: flex;
+                gap: 6px;
+                margin-left: auto;
+            }
+            .sep-btn {
+                padding: 3px 10px;
+                border-radius: 4px;
+                border: 1px solid var(--border);
+                background: transparent;
+                color: var(--muted);
+                font-family: "DM Mono", monospace;
+                font-size: 10px;
+                cursor: pointer;
+                transition: all 0.15s;
+            }
+            .sep-btn.active {
+                border-color: var(--success);
+                color: var(--success);
+                background: rgba(52, 211, 153, 0.1);
+            }
+            .sep-btn:hover:not(.active) {
+                border-color: var(--muted);
+                color: var(--text);
+            }
+            .btn-success {
+                background: linear-gradient(135deg, #34d399, #059669);
+                color: #fff;
+                font-weight: 500;
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                justify-content: center;
+            }
+            .btn-success:hover {
+                opacity: 0.85;
+                transform: translateY(-1px);
+            }
+            .btn-success:disabled {
+                opacity: 0.35;
+                cursor: not-allowed;
+                transform: none;
+            }
+            .rename-preview {
+                font-size: 10px;
+                color: var(--muted);
+                letter-spacing: 0.03em;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .rename-preview span {
+                color: var(--success);
+            }
+            .filename-length {
+                font-size: 10px;
+                color: var(--muted);
+                letter-spacing: 0.03em;
+                margin-top: 4px;
+            }
+            .filename-length.warn {
+                color: #fb923c;
+            }
+            .filename-length.over {
+                color: var(--danger);
+                font-weight: 500;
+            }
+            .rename-unsupported {
+                font-size: 11px;
+                color: var(--danger);
+                padding: 10px 12px;
+                background: rgba(248, 113, 113, 0.08);
+                border: 1px solid rgba(248, 113, 113, 0.2);
+                border-radius: 6px;
+            }
 
             /* Modal */
             .modal-overlay {
@@ -957,7 +1393,17 @@
                     </div>
                     <div class="upload-zone" id="uploadZone">
                         <input type="file" id="fileInput" accept="image/*" />
-                        <div class="upload-icon"><span class="mi" style="font-size:28px;opacity:0.4;color:var(--accent)">add_photo_alternate</span></div>
+                        <div class="upload-icon">
+                            <span
+                                class="mi"
+                                style="
+                                    font-size: 28px;
+                                    opacity: 0.4;
+                                    color: var(--accent);
+                                "
+                                >add_photo_alternate</span
+                            >
+                        </div>
                         <div class="upload-text">
                             <strong>Click</strong>, drag & drop, or
                             <strong>Ctrl+V</strong> to paste
@@ -970,7 +1416,10 @@
                             id="extractBtn"
                             disabled
                         >
-                            <span class="mi" style="font-size:16px">auto_awesome</span> Extract
+                            <span class="mi" style="font-size: 16px"
+                                >auto_awesome</span
+                            >
+                            Extract
                         </button>
                     </div>
                     <div class="status" id="extractStatus"></div>
@@ -987,46 +1436,135 @@
                     <div class="card">
                         <div class="card-title">
                             <span class="dot"></span> Filename
-                            <span style="opacity: 0.45; font-size: 9px; letter-spacing: 0.08em;">— dash separator</span>
+                            <span
+                                style="
+                                    opacity: 0.45;
+                                    font-size: 9px;
+                                    letter-spacing: 0.08em;
+                                "
+                                >— dash separator</span
+                            >
                         </div>
-                        <div class="output-placeholder" id="outputPlaceholderDash">
-                            <div class="ph-icon"><span class="mi" style="font-size:28px;opacity:0.25">draft</span></div>
-                            <span>Fill in the details below<br />and click Generate</span>
+                        <div
+                            class="output-placeholder"
+                            id="outputPlaceholderDash"
+                        >
+                            <div class="ph-icon">
+                                <span
+                                    class="mi"
+                                    style="font-size: 28px; opacity: 0.25"
+                                    >draft</span
+                                >
+                            </div>
+                            <span
+                                >Fill in the details below<br />and click
+                                Generate</span
+                            >
                         </div>
-                        <div class="output-result" id="outputResultDash" style="display: none">
-                            <div class="output-filename" id="outputFilenameDash">
+                        <div
+                            class="output-result"
+                            id="outputResultDash"
+                            style="display: none"
+                        >
+                            <div
+                                class="output-filename"
+                                id="outputFilenameDash"
+                            >
                                 <span id="outputTextDash"></span>
                             </div>
                             <div class="btn-row" style="margin-top: 10px">
-                                <button class="btn btn-primary btn-sm" id="copyBtnDash">
-                                    <span class="mi" style="font-size:14px">content_copy</span> Copy
+                                <button
+                                    class="btn btn-primary btn-sm"
+                                    id="copyBtnDash"
+                                >
+                                    <span class="mi" style="font-size: 14px"
+                                        >content_copy</span
+                                    >
+                                    Copy
                                 </button>
-                                <button class="btn btn-ghost btn-sm" id="regenerateBtnDash">
-                                    <span class="mi" style="font-size:14px">refresh</span> Regenerate
+                                <button
+                                    class="btn btn-ghost btn-sm"
+                                    id="regenerateBtnDash"
+                                >
+                                    <span class="mi" style="font-size: 14px"
+                                        >refresh</span
+                                    >
+                                    Regenerate
                                 </button>
                             </div>
                         </div>
                     </div>
                     <div class="card">
                         <div class="card-title">
-                            <span class="dot" style="background: var(--accent2)"></span>
+                            <span
+                                class="dot"
+                                style="background: var(--accent2)"
+                            ></span>
                             Metadata
-                            <span style="opacity: 0.45; font-size: 9px; letter-spacing: 0.08em;">— pipe separator</span>
+                            <span
+                                style="
+                                    opacity: 0.45;
+                                    font-size: 9px;
+                                    letter-spacing: 0.08em;
+                                "
+                                >— pipe separator</span
+                            >
                         </div>
-                        <div class="output-placeholder" id="outputPlaceholderPipe">
-                            <div class="ph-icon"><span class="mi" style="font-size:28px;opacity:0.25">folder_open</span></div>
-                            <span>Fill in the details below<br />and click Generate</span>
+                        <div
+                            class="output-placeholder"
+                            id="outputPlaceholderPipe"
+                        >
+                            <div class="ph-icon">
+                                <span
+                                    class="mi"
+                                    style="font-size: 28px; opacity: 0.25"
+                                    >folder_open</span
+                                >
+                            </div>
+                            <span
+                                >Fill in the details below<br />and click
+                                Generate</span
+                            >
                         </div>
-                        <div class="output-result" id="outputResultPipe" style="display: none">
-                            <div class="output-filename" style="border-color: rgba(129, 140, 248, 0.35)" id="outputFilenamePipe">
+                        <div
+                            class="output-result"
+                            id="outputResultPipe"
+                            style="display: none"
+                        >
+                            <div
+                                class="output-filename"
+                                style="border-color: rgba(129, 140, 248, 0.35)"
+                                id="outputFilenamePipe"
+                            >
                                 <span id="outputTextPipe"></span>
                             </div>
                             <div class="btn-row" style="margin-top: 10px">
-                                <button class="btn btn-sm" id="copyBtnPipe" style="background:rgba(129,140,248,0.15);border:1px solid rgba(129,140,248,0.3);color:var(--accent2);display:inline-flex;align-items:center;gap:6px;">
-                                    <span class="mi" style="font-size:14px">content_copy</span> Copy
+                                <button
+                                    class="btn btn-sm"
+                                    id="copyBtnPipe"
+                                    style="
+                                        background: rgba(129, 140, 248, 0.15);
+                                        border: 1px solid
+                                            rgba(129, 140, 248, 0.3);
+                                        color: var(--accent2);
+                                        display: inline-flex;
+                                        align-items: center;
+                                        gap: 6px;
+                                    "
+                                >
+                                    <span class="mi" style="font-size: 14px"
+                                        >content_copy</span
+                                    >
+                                    Copy
                                 </button>
-                                <button class="btn btn-ghost btn-sm" id="regenerateBtnPipe">
-                                    <span class="mi" style="font-size:14px">refresh</span> Regenerate
+                                <button
+                                    class="btn btn-ghost btn-sm"
+                                    id="regenerateBtnPipe"
+                                >
+                                    <span class="mi" style="font-size: 14px"
+                                        >refresh</span
+                                    >
+                                    Regenerate
                                 </button>
                             </div>
                         </div>
@@ -1034,6 +1572,113 @@
                 </div>
             </div>
 
+            <!-- File to Rename -->
+            <div class="rename-card" id="renameCard">
+                <div class="card-title">
+                    <span class="dot" style="background: var(--success)"></span>
+                    File to Rename
+                    <span
+                        style="
+                            opacity: 0.45;
+                            font-size: 9px;
+                            letter-spacing: 0.08em;
+                        "
+                        >— server-side · any browser</span
+                    >
+                </div>
+
+                <!-- Error banner -->
+                <div id="fbError" class="fb-error" style="display: none"></div>
+
+                <!-- Search + refresh -->
+                <div class="fb-search-row">
+                    <input
+                        type="text"
+                        id="fbSearch"
+                        placeholder="Search files… (leave empty to show all)"
+                    />
+                    <span class="fb-count" id="fbCount"></span>
+                    <button
+                        class="btn btn-ghost btn-sm"
+                        id="fbRefreshBtn"
+                        style="padding: 6px 10px"
+                        title="Refresh"
+                    >
+                        <span class="mi" style="font-size: 16px">refresh</span>
+                    </button>
+                </div>
+
+                <!-- File listing -->
+                <div class="fb-list" id="fbList">
+                    <div class="fb-loading">
+                        <div class="spinner"></div>
+                        Scanning folders…
+                    </div>
+                </div>
+
+                <!-- Selected file + rename actions -->
+                <div
+                    id="renameFileLoaded"
+                    style="display: none; margin-top: 12px"
+                >
+                    <div class="rename-file-loaded">
+                        <span
+                            class="mi file-icon"
+                            style="font-size: 22px; color: var(--success)"
+                            >audio_file</span
+                        >
+                        <div class="rename-file-info">
+                            <div class="rename-file-name" id="renameFileName">
+                                —
+                            </div>
+                            <div class="rename-file-meta" id="renameFileMeta">
+                                —
+                            </div>
+                        </div>
+                        <button
+                            class="btn btn-ghost btn-sm"
+                            id="renameClearBtn"
+                        >
+                            <span class="mi" style="font-size: 14px"
+                                >close</span
+                            >
+                        </button>
+                    </div>
+                    <div class="rename-actions">
+                        <div class="rename-sep-row">
+                            Use separator:
+                            <div class="sep-choice">
+                                <button class="sep-btn active" data-sep="dash">
+                                    — dash
+                                </button>
+                                <button class="sep-btn" data-sep="pipe">
+                                    | pipe
+                                </button>
+                            </div>
+                        </div>
+                        <div class="rename-preview" id="renamePreview">
+                            Generate a filename above first
+                        </div>
+                        <div
+                            class="filename-length"
+                            id="filenameLengthInfo"
+                        ></div>
+                        <button
+                            class="btn btn-success"
+                            id="renameBtn"
+                            disabled
+                            style="width: 100%; padding: 10px 18px"
+                        >
+                            <span class="mi" style="font-size: 16px"
+                                >drive_file_rename_outline</span
+                            >
+                            Rename File
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Title & Tags -->
             <!-- Title & Tags -->
             <div class="card">
                 <div class="card-title">
@@ -1086,27 +1731,40 @@
                         />
                         <p class="field-note">Appended before .mp3</p>
                     </div>
-                    <div style="display:flex;gap:8px;align-items:flex-end;">
+                    <div style="display: flex; gap: 8px; align-items: flex-end">
                         <button
                             class="btn btn-ghost"
                             id="openDictBtn"
                             title="Tag Dictionary"
-                            style="padding: 11px 14px; flex-shrink:0; justify-content:center;"
+                            style="
+                                padding: 11px 14px;
+                                flex-shrink: 0;
+                                justify-content: center;
+                            "
                         >
-                            <span class="mi" style="font-size:18px">menu_book</span>
+                            <span class="mi" style="font-size: 18px"
+                                >menu_book</span
+                            >
                         </button>
                         <button
                             class="btn btn-primary"
                             id="generateBtn"
-                            style="flex:1; justify-content: center; padding: 11px 18px;"
+                            style="
+                                flex: 1;
+                                justify-content: center;
+                                padding: 11px 18px;
+                            "
                         >
-                            <span class="mi" style="font-size:16px">auto_awesome</span> Generate Filename
+                            <span class="mi" style="font-size: 16px"
+                                >auto_awesome</span
+                            >
+                            Generate Filename
                         </button>
                     </div>
                 </div>
             </div>
-
-        </div><!-- /.container -->
+        </div>
+        <!-- /.container -->
 
         <div class="modal-overlay" id="imgModal">
             <div class="modal-inner">
@@ -1120,16 +1778,28 @@
             <div class="dict-modal">
                 <!-- Modal header -->
                 <div class="dict-modal-header">
-                    <div class="dict-trigger-icon" style="width:32px;height:32px;border-radius:7px;">
-                        <span class="mi" style="font-size:17px">menu_book</span>
+                    <div
+                        class="dict-trigger-icon"
+                        style="width: 32px; height: 32px; border-radius: 7px"
+                    >
+                        <span class="mi" style="font-size: 17px"
+                            >menu_book</span
+                        >
                     </div>
-                    <div style="flex:1;">
+                    <div style="flex: 1">
                         <div class="dict-trigger-label">Tag Dictionary</div>
-                        <div class="dict-trigger-sub">Phrases, synonyms &amp; OCR corrections · saved in browser</div>
+                        <div class="dict-trigger-sub">
+                            Phrases, synonyms &amp; OCR corrections · saved in
+                            browser
+                        </div>
                     </div>
-                    <div class="dict-trigger-badges" style="margin-right:8px;">
-                        <span class="dict-badge active" id="badgePhrases">— phrases</span>
-                        <span class="dict-badge" id="badgeMappings">— mappings</span>
+                    <div class="dict-trigger-badges" style="margin-right: 8px">
+                        <span class="dict-badge active" id="badgePhrases"
+                            >— phrases</span
+                        >
+                        <span class="dict-badge" id="badgeMappings"
+                            >— mappings</span
+                        >
                     </div>
                     <button class="dict-modal-close" id="dictModalClose">
                         <span class="mi">close</span>
@@ -1152,27 +1822,48 @@
                     </button>
                     <button class="dict-tab" data-pane="splitfixes">
                         <span class="mi">content_cut</span> Split Fixes
-                        <span class="dict-tab-count" id="countSplitfixes">0</span>
+                        <span class="dict-tab-count" id="countSplitfixes"
+                            >0</span
+                        >
                     </button>
                 </div>
 
                 <!-- Modal body (scrollable) -->
                 <div class="dict-modal-body">
-
                     <!-- Pane: Known Phrases -->
                     <div class="dict-pane active" id="pane-phrases">
                         <div class="dict-callout">
                             <span class="mi">info</span>
-                            <div>Multi-word tags the OCR scanner hunts for after <code>happy listening</code> / <code>much appreciated</code>. Stored lowercase; displayed in Title Case in the output.</div>
+                            <div>
+                                Multi-word tags the OCR scanner hunts for after
+                                <code>happy listening</code> /
+                                <code>much appreciated</code>. Stored lowercase;
+                                displayed in Title Case in the output.
+                            </div>
                         </div>
                         <div class="dict-pane-2col">
                             <div class="phrase-grid" id="phraseGrid"></div>
                             <div class="dict-add-form">
-                                <div class="dict-add-form-title"><span class="mi">add_circle</span> Add phrase</div>
+                                <div class="dict-add-form-title">
+                                    <span class="mi">add_circle</span> Add
+                                    phrase
+                                </div>
                                 <div class="dict-add-fields">
-                                    <input type="text" id="pillAddInput" placeholder="e.g. cozy rain sounds" />
-                                    <span class="field-hint">Lowercase · multi-word OK · Enter to add</span>
-                                    <button class="btn btn-ghost btn-sm dict-add-btn" id="pillAddBtn"><span class="mi">add</span> Add Phrase</button>
+                                    <input
+                                        type="text"
+                                        id="pillAddInput"
+                                        placeholder="e.g. cozy rain sounds"
+                                    />
+                                    <span class="field-hint"
+                                        >Lowercase · multi-word OK · Enter to
+                                        add</span
+                                    >
+                                    <button
+                                        class="btn btn-ghost btn-sm dict-add-btn"
+                                        id="pillAddBtn"
+                                    >
+                                        <span class="mi">add</span> Add Phrase
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -1182,19 +1873,50 @@
                     <div class="dict-pane" id="pane-synonyms">
                         <div class="dict-callout">
                             <span class="mi">info</span>
-                            <div>Maps a raw OCR <strong style="color:var(--accent2)">word</strong> to a proper tag — or suppresses it. <code>dommy → Dominant</code> · <code>f4a → suppressed</code></div>
+                            <div>
+                                Maps a raw OCR
+                                <strong style="color: var(--accent2)"
+                                    >word</strong
+                                >
+                                to a proper tag — or suppresses it.
+                                <code>dommy → Dominant</code> ·
+                                <code>f4a → suppressed</code>
+                            </div>
                         </div>
                         <div class="dict-pane-2col">
                             <div class="map-list" id="synonymsList"></div>
                             <div class="dict-add-form">
-                                <div class="dict-add-form-title"><span class="mi">add_circle</span> Add synonym</div>
+                                <div class="dict-add-form-title">
+                                    <span class="mi">add_circle</span> Add
+                                    synonym
+                                </div>
                                 <div class="dict-add-fields">
-                                    <input type="text" id="synFromInput" placeholder="OCR word (e.g. dommy)" />
-                                    <input type="text" id="synToInput" placeholder="Output tag (e.g. Dominant)" />
+                                    <input
+                                        type="text"
+                                        id="synFromInput"
+                                        placeholder="OCR word (e.g. dommy)"
+                                    />
+                                    <input
+                                        type="text"
+                                        id="synToInput"
+                                        placeholder="Output tag (e.g. Dominant)"
+                                    />
                                     <div class="suppress-row">
-                                        <label><input type="checkbox" id="synNullCheck" /> Suppress — drop this word from output</label>
+                                        <label
+                                            ><input
+                                                type="checkbox"
+                                                id="synNullCheck"
+                                            />
+                                            Suppress — drop this word from
+                                            output</label
+                                        >
                                     </div>
-                                    <button class="btn btn-ghost btn-sm dict-add-btn" id="synAddBtn"><span class="mi">add</span> Add Synonym</button>
+                                    <button
+                                        class="btn btn-ghost btn-sm dict-add-btn"
+                                        id="synAddBtn"
+                                    >
+                                        <span class="mi">add</span> Add Synonym
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -1204,16 +1926,39 @@
                     <div class="dict-pane" id="pane-variants">
                         <div class="dict-callout">
                             <span class="mi">info</span>
-                            <div>Maps a run-together OCR <strong style="color:var(--accent2)">string</strong> to its display name. <code>friendstolovers → Friends to Lovers</code></div>
+                            <div>
+                                Maps a run-together OCR
+                                <strong style="color: var(--accent2)"
+                                    >string</strong
+                                >
+                                to its display name.
+                                <code>friendstolovers → Friends to Lovers</code>
+                            </div>
                         </div>
                         <div class="dict-pane-2col">
                             <div class="map-list" id="variantsList"></div>
                             <div class="dict-add-form">
-                                <div class="dict-add-form-title"><span class="mi">add_circle</span> Add variant</div>
+                                <div class="dict-add-form-title">
+                                    <span class="mi">add_circle</span> Add
+                                    variant
+                                </div>
                                 <div class="dict-add-fields">
-                                    <input type="text" id="varFromInput" placeholder="OCR string (e.g. gothgirl)" />
-                                    <input type="text" id="varToInput" placeholder="Display name (e.g. Goth Girl)" />
-                                    <button class="btn btn-ghost btn-sm dict-add-btn" id="varAddBtn"><span class="mi">add</span> Add Variant</button>
+                                    <input
+                                        type="text"
+                                        id="varFromInput"
+                                        placeholder="OCR string (e.g. gothgirl)"
+                                    />
+                                    <input
+                                        type="text"
+                                        id="varToInput"
+                                        placeholder="Display name (e.g. Goth Girl)"
+                                    />
+                                    <button
+                                        class="btn btn-ghost btn-sm dict-add-btn"
+                                        id="varAddBtn"
+                                    >
+                                        <span class="mi">add</span> Add Variant
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -1223,31 +1968,68 @@
                     <div class="dict-pane" id="pane-splitfixes">
                         <div class="dict-callout">
                             <span class="mi">info</span>
-                            <div>Regex patterns that normalise garbled OCR text <em>before</em> phrase matching. Use <code>\s+</code> for spaces, <code>\b</code> for boundaries.</div>
+                            <div>
+                                Regex patterns that normalise garbled OCR text
+                                <em>before</em> phrase matching. Use
+                                <code>\s+</code> for spaces, <code>\b</code> for
+                                boundaries.
+                            </div>
                         </div>
                         <div class="dict-pane-2col">
                             <div class="map-list" id="splitfixesList"></div>
                             <div class="dict-add-form">
-                                <div class="dict-add-form-title"><span class="mi">add_circle</span> Add split fix</div>
+                                <div class="dict-add-form-title">
+                                    <span class="mi">add_circle</span> Add split
+                                    fix
+                                </div>
                                 <div class="dict-add-fields">
-                                    <input type="text" id="sfPatInput" placeholder="Pattern (e.g. friends\s+tolovers)" />
-                                    <input type="text" id="sfRepInput" placeholder="Replace with (e.g. friends to lovers)" />
-                                    <span class="field-hint">No slashes needed · wrapped in \b…\b automatically</span>
-                                    <button class="btn btn-ghost btn-sm dict-add-btn" id="sfAddBtn"><span class="mi">add</span> Add Fix</button>
+                                    <input
+                                        type="text"
+                                        id="sfPatInput"
+                                        placeholder="Pattern (e.g. friends\s+tolovers)"
+                                    />
+                                    <input
+                                        type="text"
+                                        id="sfRepInput"
+                                        placeholder="Replace with (e.g. friends to lovers)"
+                                    />
+                                    <span class="field-hint"
+                                        >No slashes needed · wrapped in \b…\b
+                                        automatically</span
+                                    >
+                                    <button
+                                        class="btn btn-ghost btn-sm dict-add-btn"
+                                        id="sfAddBtn"
+                                    >
+                                        <span class="mi">add</span> Add Fix
+                                    </button>
                                 </div>
                             </div>
                         </div>
                     </div>
-
-                </div><!-- /.dict-modal-body -->
+                </div>
+                <!-- /.dict-modal-body -->
 
                 <!-- Modal footer -->
                 <div class="dict-modal-footer">
-                    <span class="dict-footer-label"><span class="mi">storage</span> Dictionary</span>
-                    <button class="btn-io" id="dictExportBtn"><span class="mi">download</span> Export JSON</button>
-                    <button class="btn-io" id="dictImportBtn"><span class="mi">upload</span> Import JSON</button>
-                    <input type="file" id="dictImportFile" accept=".json" style="display:none" />
-                    <button class="btn-io danger" id="dictResetBtn"><span class="mi">restart_alt</span> Reset defaults</button>
+                    <span class="dict-footer-label"
+                        ><span class="mi">storage</span> Dictionary</span
+                    >
+                    <button class="btn-io" id="dictExportBtn">
+                        <span class="mi">download</span> Export JSON
+                    </button>
+                    <button class="btn-io" id="dictImportBtn">
+                        <span class="mi">upload</span> Import JSON
+                    </button>
+                    <input
+                        type="file"
+                        id="dictImportFile"
+                        accept=".json"
+                        style="display: none"
+                    />
+                    <button class="btn-io danger" id="dictResetBtn">
+                        <span class="mi">restart_alt</span> Reset defaults
+                    </button>
                 </div>
             </div>
         </div>
@@ -1393,11 +2175,14 @@
 
             // dict holds live data with IDs for deletes
             let dict = {
-                pills: [],       // [{id, phrase}]
-                synonyms: [],    // [{id, from_word, to_word}]
-                variants: [],    // [{id, from_str, to_str}]
-                splitFixes: [],  // [{id, pattern, replacement}]
-                _pillPhrases: [], _synMap: {}, _varMap: {}, _fixList: [],
+                pills: [], // [{id, phrase}]
+                synonyms: [], // [{id, from_word, to_word}]
+                variants: [], // [{id, from_str, to_str}]
+                splitFixes: [], // [{id, pattern, replacement}]
+                _pillPhrases: [],
+                _synMap: {},
+                _varMap: {},
+                _fixList: [],
             };
 
             async function apiGet(path) {
@@ -1431,14 +2216,14 @@
 
             async function loadDict() {
                 const data = await apiGet("/api/dictionary");
-                dict.pills      = data._pills;
-                dict.synonyms   = data._synonyms;
-                dict.variants   = data._variants;
+                dict.pills = data._pills;
+                dict.synonyms = data._synonyms;
+                dict.variants = data._variants;
                 dict.splitFixes = data._splitFixes;
                 dict._pillPhrases = data.pills;
-                dict._synMap      = data.synonyms;
-                dict._varMap      = data.variants;
-                dict._fixList     = data.splitFixes;
+                dict._synMap = data.synonyms;
+                dict._varMap = data.variants;
+                dict._fixList = data.splitFixes;
                 renderAll();
             }
 
@@ -1457,66 +2242,105 @@
             }
             openDictBtn.addEventListener("click", openDictionary);
             dictModalClose.addEventListener("click", closeDictionary);
-            dictModal.addEventListener("click", e => { if (e.target === dictModal) closeDictionary(); });
-            document.addEventListener("keydown", e => { if (e.key === "Escape" && dictModal.classList.contains("open")) closeDictionary(); });
+            dictModal.addEventListener("click", (e) => {
+                if (e.target === dictModal) closeDictionary();
+            });
+            document.addEventListener("keydown", (e) => {
+                if (e.key === "Escape" && dictModal.classList.contains("open"))
+                    closeDictionary();
+            });
 
             // Tabs
-            document.querySelectorAll(".dict-tab").forEach(tab => {
+            document.querySelectorAll(".dict-tab").forEach((tab) => {
                 tab.addEventListener("click", () => {
-                    document.querySelectorAll(".dict-tab").forEach(t => t.classList.remove("active"));
-                    document.querySelectorAll(".dict-pane").forEach(p => p.classList.remove("active"));
+                    document
+                        .querySelectorAll(".dict-tab")
+                        .forEach((t) => t.classList.remove("active"));
+                    document
+                        .querySelectorAll(".dict-pane")
+                        .forEach((p) => p.classList.remove("active"));
                     tab.classList.add("active");
-                    document.getElementById("pane-" + tab.dataset.pane).classList.add("active");
+                    document
+                        .getElementById("pane-" + tab.dataset.pane)
+                        .classList.add("active");
                 });
             });
 
             function updateBadge() {
-                document.getElementById("badgePhrases").textContent = dict.pills.length + " phrases";
-                document.getElementById("badgeMappings").textContent = (dict.synonyms.length + dict.variants.length + dict.splitFixes.length) + " mappings";
-                document.getElementById("countPhrases").textContent = dict.pills.length;
-                document.getElementById("countSynonyms").textContent = dict.synonyms.length;
-                document.getElementById("countVariants").textContent = dict.variants.length;
-                document.getElementById("countSplitfixes").textContent = dict.splitFixes.length;
+                document.getElementById("badgePhrases").textContent =
+                    dict.pills.length + " phrases";
+                document.getElementById("badgeMappings").textContent =
+                    dict.synonyms.length +
+                    dict.variants.length +
+                    dict.splitFixes.length +
+                    " mappings";
+                document.getElementById("countPhrases").textContent =
+                    dict.pills.length;
+                document.getElementById("countSynonyms").textContent =
+                    dict.synonyms.length;
+                document.getElementById("countVariants").textContent =
+                    dict.variants.length;
+                document.getElementById("countSplitfixes").textContent =
+                    dict.splitFixes.length;
             }
 
             // ── Render phrases ──
             function renderPills() {
                 const grid = document.getElementById("phraseGrid");
                 grid.innerHTML = "";
-                dict.pills.forEach(p => {
+                dict.pills.forEach((p) => {
                     const el = document.createElement("span");
                     el.className = "phrase-chip";
                     el.innerHTML = `${p.phrase}<span class="phrase-chip-del"><span class="mi">close</span></span>`;
-                    el.querySelector(".phrase-chip-del").addEventListener("click", async () => {
-                        await apiDelete(`/api/pills/${p.id}`);
-                        dict.pills = dict.pills.filter(x => x.id !== p.id);
-                        dict._pillPhrases = dict.pills.map(x => x.phrase);
-                        renderPills(); updateBadge();
-                    });
+                    el.querySelector(".phrase-chip-del").addEventListener(
+                        "click",
+                        async () => {
+                            await apiDelete(`/api/pills/${p.id}`);
+                            dict.pills = dict.pills.filter(
+                                (x) => x.id !== p.id,
+                            );
+                            dict._pillPhrases = dict.pills.map((x) => x.phrase);
+                            renderPills();
+                            updateBadge();
+                        },
+                    );
                     grid.appendChild(el);
                 });
             }
 
-            document.getElementById("pillAddBtn").addEventListener("click", async () => {
-                const val = document.getElementById("pillAddInput").value.trim().toLowerCase();
-                if (!val) return;
-                try {
-                    const row = await apiPost("/api/pills", { phrase: val });
-                    dict.pills.push(row);
-                    dict._pillPhrases = dict.pills.map(x => x.phrase);
-                    renderPills(); updateBadge();
-                    document.getElementById("pillAddInput").value = "";
-                } catch(e) { alert(e.message); }
-            });
-            document.getElementById("pillAddInput").addEventListener("keydown", e => {
-                if (e.key === "Enter") document.getElementById("pillAddBtn").click();
-            });
+            document
+                .getElementById("pillAddBtn")
+                .addEventListener("click", async () => {
+                    const val = document
+                        .getElementById("pillAddInput")
+                        .value.trim()
+                        .toLowerCase();
+                    if (!val) return;
+                    try {
+                        const row = await apiPost("/api/pills", {
+                            phrase: val,
+                        });
+                        dict.pills.push(row);
+                        dict._pillPhrases = dict.pills.map((x) => x.phrase);
+                        renderPills();
+                        updateBadge();
+                        document.getElementById("pillAddInput").value = "";
+                    } catch (e) {
+                        alert(e.message);
+                    }
+                });
+            document
+                .getElementById("pillAddInput")
+                .addEventListener("keydown", (e) => {
+                    if (e.key === "Enter")
+                        document.getElementById("pillAddBtn").click();
+                });
 
             // ── Render synonyms ──
             function renderSynonyms() {
                 const list = document.getElementById("synonymsList");
                 list.innerHTML = "";
-                dict.synonyms.forEach(s => {
+                dict.synonyms.forEach((s) => {
                     const row = document.createElement("div");
                     row.className = "map-row";
                     row.innerHTML = `
@@ -1524,42 +2348,73 @@
                         <div class="map-arr">→</div>
                         <div class="map-to-val">${s.to_word === null ? '<span class="map-to-null">suppressed</span>' : s.to_word}</div>
                         <button class="map-row-del"><span class="mi">delete</span></button>`;
-                    row.querySelector(".map-row-del").addEventListener("click", async () => {
-                        await apiDelete(`/api/synonyms/${s.id}`);
-                        dict.synonyms = dict.synonyms.filter(x => x.id !== s.id);
-                        dict._synMap = Object.fromEntries(dict.synonyms.map(x => [x.from_word, x.to_word]));
-                        renderSynonyms(); updateBadge();
-                    });
+                    row.querySelector(".map-row-del").addEventListener(
+                        "click",
+                        async () => {
+                            await apiDelete(`/api/synonyms/${s.id}`);
+                            dict.synonyms = dict.synonyms.filter(
+                                (x) => x.id !== s.id,
+                            );
+                            dict._synMap = Object.fromEntries(
+                                dict.synonyms.map((x) => [
+                                    x.from_word,
+                                    x.to_word,
+                                ]),
+                            );
+                            renderSynonyms();
+                            updateBadge();
+                        },
+                    );
                     list.appendChild(row);
                 });
             }
 
-            document.getElementById("synAddBtn").addEventListener("click", async () => {
-                const from_word = document.getElementById("synFromInput").value.trim().toLowerCase();
-                const isNull = document.getElementById("synNullCheck").checked;
-                const to_word = isNull ? null : document.getElementById("synToInput").value.trim();
-                if (!from_word || (!isNull && !to_word)) return;
-                try {
-                    const row = await apiPost("/api/synonyms", { from_word, to_word });
-                    dict.synonyms.push(row);
-                    dict._synMap = Object.fromEntries(dict.synonyms.map(x => [x.from_word, x.to_word]));
-                    renderSynonyms(); updateBadge();
-                    document.getElementById("synFromInput").value = "";
-                    document.getElementById("synToInput").value = "";
-                    document.getElementById("synNullCheck").checked = false;
-                    document.getElementById("synToInput").disabled = false;
-                } catch(e) { alert(e.message); }
-            });
-            document.getElementById("synNullCheck").addEventListener("change", e => {
-                document.getElementById("synToInput").disabled = e.target.checked;
-                if (e.target.checked) document.getElementById("synToInput").value = "";
-            });
+            document
+                .getElementById("synAddBtn")
+                .addEventListener("click", async () => {
+                    const from_word = document
+                        .getElementById("synFromInput")
+                        .value.trim()
+                        .toLowerCase();
+                    const isNull =
+                        document.getElementById("synNullCheck").checked;
+                    const to_word = isNull
+                        ? null
+                        : document.getElementById("synToInput").value.trim();
+                    if (!from_word || (!isNull && !to_word)) return;
+                    try {
+                        const row = await apiPost("/api/synonyms", {
+                            from_word,
+                            to_word,
+                        });
+                        dict.synonyms.push(row);
+                        dict._synMap = Object.fromEntries(
+                            dict.synonyms.map((x) => [x.from_word, x.to_word]),
+                        );
+                        renderSynonyms();
+                        updateBadge();
+                        document.getElementById("synFromInput").value = "";
+                        document.getElementById("synToInput").value = "";
+                        document.getElementById("synNullCheck").checked = false;
+                        document.getElementById("synToInput").disabled = false;
+                    } catch (e) {
+                        alert(e.message);
+                    }
+                });
+            document
+                .getElementById("synNullCheck")
+                .addEventListener("change", (e) => {
+                    document.getElementById("synToInput").disabled =
+                        e.target.checked;
+                    if (e.target.checked)
+                        document.getElementById("synToInput").value = "";
+                });
 
             // ── Render variants ──
             function renderVariants() {
                 const list = document.getElementById("variantsList");
                 list.innerHTML = "";
-                dict.variants.forEach(v => {
+                dict.variants.forEach((v) => {
                     const row = document.createElement("div");
                     row.className = "map-row";
                     row.innerHTML = `
@@ -1567,113 +2422,227 @@
                         <div class="map-arr">→</div>
                         <div class="map-to-val">${v.to_str}</div>
                         <button class="map-row-del"><span class="mi">delete</span></button>`;
-                    row.querySelector(".map-row-del").addEventListener("click", async () => {
-                        await apiDelete(`/api/variants/${v.id}`);
-                        dict.variants = dict.variants.filter(x => x.id !== v.id);
-                        dict._varMap = Object.fromEntries(dict.variants.map(x => [x.from_str, x.to_str]));
-                        renderVariants(); updateBadge();
-                    });
+                    row.querySelector(".map-row-del").addEventListener(
+                        "click",
+                        async () => {
+                            await apiDelete(`/api/variants/${v.id}`);
+                            dict.variants = dict.variants.filter(
+                                (x) => x.id !== v.id,
+                            );
+                            dict._varMap = Object.fromEntries(
+                                dict.variants.map((x) => [
+                                    x.from_str,
+                                    x.to_str,
+                                ]),
+                            );
+                            renderVariants();
+                            updateBadge();
+                        },
+                    );
                     list.appendChild(row);
                 });
             }
 
-            document.getElementById("varAddBtn").addEventListener("click", async () => {
-                const from_str = document.getElementById("varFromInput").value.trim().toLowerCase();
-                const to_str = document.getElementById("varToInput").value.trim();
-                if (!from_str || !to_str) return;
-                try {
-                    const row = await apiPost("/api/variants", { from_str, to_str });
-                    dict.variants.push(row);
-                    dict._varMap = Object.fromEntries(dict.variants.map(x => [x.from_str, x.to_str]));
-                    renderVariants(); updateBadge();
-                    document.getElementById("varFromInput").value = "";
-                    document.getElementById("varToInput").value = "";
-                } catch(e) { alert(e.message); }
-            });
-            document.getElementById("varFromInput").addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("varAddBtn").click(); });
-            document.getElementById("varToInput").addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("varAddBtn").click(); });
+            document
+                .getElementById("varAddBtn")
+                .addEventListener("click", async () => {
+                    const from_str = document
+                        .getElementById("varFromInput")
+                        .value.trim()
+                        .toLowerCase();
+                    const to_str = document
+                        .getElementById("varToInput")
+                        .value.trim();
+                    if (!from_str || !to_str) return;
+                    try {
+                        const row = await apiPost("/api/variants", {
+                            from_str,
+                            to_str,
+                        });
+                        dict.variants.push(row);
+                        dict._varMap = Object.fromEntries(
+                            dict.variants.map((x) => [x.from_str, x.to_str]),
+                        );
+                        renderVariants();
+                        updateBadge();
+                        document.getElementById("varFromInput").value = "";
+                        document.getElementById("varToInput").value = "";
+                    } catch (e) {
+                        alert(e.message);
+                    }
+                });
+            document
+                .getElementById("varFromInput")
+                .addEventListener("keydown", (e) => {
+                    if (e.key === "Enter")
+                        document.getElementById("varAddBtn").click();
+                });
+            document
+                .getElementById("varToInput")
+                .addEventListener("keydown", (e) => {
+                    if (e.key === "Enter")
+                        document.getElementById("varAddBtn").click();
+                });
 
             // ── Render splitFixes ──
             function renderSplitFixes() {
                 const list = document.getElementById("splitfixesList");
                 list.innerHTML = "";
-                dict.splitFixes.forEach(f => {
+                dict.splitFixes.forEach((f) => {
                     const row = document.createElement("div");
                     row.className = "map-row";
                     row.innerHTML = `
-                        <div class="map-from-val" style="font-size:10px;font-style:italic">${f.pattern.replace(/</g,"&lt;")}</div>
+                        <div class="map-from-val" style="font-size:10px;font-style:italic">${f.pattern.replace(/</g, "&lt;")}</div>
                         <div class="map-arr">→</div>
                         <div class="map-to-val">${f.replacement}</div>
                         <button class="map-row-del"><span class="mi">delete</span></button>`;
-                    row.querySelector(".map-row-del").addEventListener("click", async () => {
-                        await apiDelete(`/api/splitfixes/${f.id}`);
-                        dict.splitFixes = dict.splitFixes.filter(x => x.id !== f.id);
-                        dict._fixList = dict.splitFixes.map(x => [x.pattern, x.replacement]);
-                        renderSplitFixes(); updateBadge();
-                    });
+                    row.querySelector(".map-row-del").addEventListener(
+                        "click",
+                        async () => {
+                            await apiDelete(`/api/splitfixes/${f.id}`);
+                            dict.splitFixes = dict.splitFixes.filter(
+                                (x) => x.id !== f.id,
+                            );
+                            dict._fixList = dict.splitFixes.map((x) => [
+                                x.pattern,
+                                x.replacement,
+                            ]);
+                            renderSplitFixes();
+                            updateBadge();
+                        },
+                    );
                     list.appendChild(row);
                 });
             }
 
-            document.getElementById("sfAddBtn").addEventListener("click", async () => {
-                const pattern = document.getElementById("sfPatInput").value.trim();
-                const replacement = document.getElementById("sfRepInput").value.trim();
-                if (!pattern || !replacement) return;
-                try { new RegExp(pattern, "gi"); } catch { alert("Invalid regex pattern"); return; }
-                try {
-                    const row = await apiPost("/api/splitfixes", { pattern, replacement });
-                    dict.splitFixes.push(row);
-                    dict._fixList = dict.splitFixes.map(x => [x.pattern, x.replacement]);
-                    renderSplitFixes(); updateBadge();
-                    document.getElementById("sfPatInput").value = "";
-                    document.getElementById("sfRepInput").value = "";
-                } catch(e) { alert(e.message); }
-            });
-            document.getElementById("sfPatInput").addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("sfAddBtn").click(); });
-            document.getElementById("sfRepInput").addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("sfAddBtn").click(); });
+            document
+                .getElementById("sfAddBtn")
+                .addEventListener("click", async () => {
+                    const pattern = document
+                        .getElementById("sfPatInput")
+                        .value.trim();
+                    const replacement = document
+                        .getElementById("sfRepInput")
+                        .value.trim();
+                    if (!pattern || !replacement) return;
+                    try {
+                        new RegExp(pattern, "gi");
+                    } catch {
+                        alert("Invalid regex pattern");
+                        return;
+                    }
+                    try {
+                        const row = await apiPost("/api/splitfixes", {
+                            pattern,
+                            replacement,
+                        });
+                        dict.splitFixes.push(row);
+                        dict._fixList = dict.splitFixes.map((x) => [
+                            x.pattern,
+                            x.replacement,
+                        ]);
+                        renderSplitFixes();
+                        updateBadge();
+                        document.getElementById("sfPatInput").value = "";
+                        document.getElementById("sfRepInput").value = "";
+                    } catch (e) {
+                        alert(e.message);
+                    }
+                });
+            document
+                .getElementById("sfPatInput")
+                .addEventListener("keydown", (e) => {
+                    if (e.key === "Enter")
+                        document.getElementById("sfAddBtn").click();
+                });
+            document
+                .getElementById("sfRepInput")
+                .addEventListener("keydown", (e) => {
+                    if (e.key === "Enter")
+                        document.getElementById("sfAddBtn").click();
+                });
 
             // ── Export ──
-            document.getElementById("dictExportBtn").addEventListener("click", async () => {
-                const data = await apiGet("/api/dictionary");
-                const blob = new Blob([JSON.stringify({
-                    pills: data.pills, synonyms: data.synonyms,
-                    variants: data.variants, splitFixes: data.splitFixes,
-                }, null, 2)], { type: "application/json" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url; a.download = "asmr-tag-dictionary.json"; a.click();
-                setTimeout(() => URL.revokeObjectURL(url), 3000);
-            });
+            document
+                .getElementById("dictExportBtn")
+                .addEventListener("click", async () => {
+                    const data = await apiGet("/api/dictionary");
+                    const blob = new Blob(
+                        [
+                            JSON.stringify(
+                                {
+                                    pills: data.pills,
+                                    synonyms: data.synonyms,
+                                    variants: data.variants,
+                                    splitFixes: data.splitFixes,
+                                },
+                                null,
+                                2,
+                            ),
+                        ],
+                        { type: "application/json" },
+                    );
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = "asmr-tag-dictionary.json";
+                    a.click();
+                    setTimeout(() => URL.revokeObjectURL(url), 3000);
+                });
 
             // ── Import ──
-            document.getElementById("dictImportBtn").addEventListener("click", () => {
-                document.getElementById("dictImportFile").click();
-            });
-            document.getElementById("dictImportFile").addEventListener("change", e => {
-                const file = e.target.files[0]; if (!file) return;
-                const reader = new FileReader();
-                reader.onload = async ev => {
-                    try {
-                        const imported = JSON.parse(ev.target.result);
-                        if (!imported.pills || !imported.synonyms || !imported.variants || !imported.splitFixes)
-                            throw new Error("Missing required keys");
-                        await apiPut("/api/dictionary", imported);
-                        await loadDict();
-                        alert("Dictionary imported successfully.");
-                    } catch (err) { alert("Import failed: " + err.message); }
-                };
-                reader.readAsText(file); e.target.value = "";
-            });
+            document
+                .getElementById("dictImportBtn")
+                .addEventListener("click", () => {
+                    document.getElementById("dictImportFile").click();
+                });
+            document
+                .getElementById("dictImportFile")
+                .addEventListener("change", (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = async (ev) => {
+                        try {
+                            const imported = JSON.parse(ev.target.result);
+                            if (
+                                !imported.pills ||
+                                !imported.synonyms ||
+                                !imported.variants ||
+                                !imported.splitFixes
+                            )
+                                throw new Error("Missing required keys");
+                            await apiPut("/api/dictionary", imported);
+                            await loadDict();
+                            alert("Dictionary imported successfully.");
+                        } catch (err) {
+                            alert("Import failed: " + err.message);
+                        }
+                    };
+                    reader.readAsText(file);
+                    e.target.value = "";
+                });
 
             // ── Reset ──
-            document.getElementById("dictResetBtn").addEventListener("click", async () => {
-                if (!confirm("Reset dictionary to built-in defaults? All custom entries will be lost.")) return;
-                await apiPost("/api/dictionary/reset", {});
-                await loadDict();
-            });
+            document
+                .getElementById("dictResetBtn")
+                .addEventListener("click", async () => {
+                    if (
+                        !confirm(
+                            "Reset dictionary to built-in defaults? All custom entries will be lost.",
+                        )
+                    )
+                        return;
+                    await apiPost("/api/dictionary/reset", {});
+                    await loadDict();
+                });
 
             function renderAll() {
-                renderPills(); renderSynonyms(); renderVariants(); renderSplitFixes(); updateBadge();
+                renderPills();
+                renderSynonyms();
+                renderVariants();
+                renderSplitFixes();
+                updateBadge();
             }
 
             // Boot: load from API
@@ -1755,7 +2724,10 @@
                 const blob = pillTokens.join(" ").toLowerCase();
                 const foundPills = [];
                 let rem = blob;
-                const splitFixes = dict._fixList.map(([pat, rep]) => [new RegExp("\\b" + pat + "\\b", "gi"), rep]);
+                const splitFixes = dict._fixList.map(([pat, rep]) => [
+                    new RegExp("\\b" + pat + "\\b", "gi"),
+                    rep,
+                ]);
                 for (const [p, r] of splitFixes) rem = rem.replace(p, r);
                 for (const p of [...knownPills].sort(
                     (a, b) => b.length - a.length,
@@ -1937,15 +2909,16 @@
                 btn.addEventListener("click", () => {
                     navigator.clipboard.writeText(getText()).then(() => {
                         const orig = btn.innerHTML;
-                        btn.innerHTML = '<span class="mi" style="font-size:14px">check</span> Copied!';
-                        btn.style.background = 'rgba(52,211,153,0.15)';
-                        btn.style.borderColor = 'rgba(52,211,153,0.4)';
-                        btn.style.color = 'var(--success)';
+                        btn.innerHTML =
+                            '<span class="mi" style="font-size:14px">check</span> Copied!';
+                        btn.style.background = "rgba(52,211,153,0.15)";
+                        btn.style.borderColor = "rgba(52,211,153,0.4)";
+                        btn.style.color = "var(--success)";
                         setTimeout(() => {
                             btn.innerHTML = orig;
-                            btn.style.background = '';
-                            btn.style.borderColor = '';
-                            btn.style.color = '';
+                            btn.style.background = "";
+                            btn.style.borderColor = "";
+                            btn.style.color = "";
                         }, 2000);
                     });
                 });
@@ -1953,6 +2926,246 @@
             makeCopyHandler(copyBtnDash, () => outputTextDash.textContent);
             makeCopyHandler(copyBtnPipe, () => outputTextPipe.textContent);
 
+            // ── File Browser & Rename (recursive search) ────────────────
+            let fbAllFiles = []; // full list from server
+            let fbFiltered = []; // after search filter
+            let fbSelectedPath = null;
+            let fbSelectedName = null;
+            let renameSep = "dash";
+            let fbSearchTimer = null;
+
+            const fbList = document.getElementById("fbList");
+            const fbSearch = document.getElementById("fbSearch");
+            const fbCount = document.getElementById("fbCount");
+            const fbRefreshBtn = document.getElementById("fbRefreshBtn");
+            const fbError = document.getElementById("fbError");
+            const renameFileLoaded =
+                document.getElementById("renameFileLoaded");
+            const renameFileName = document.getElementById("renameFileName");
+            const renameFileMeta = document.getElementById("renameFileMeta");
+            const renameClearBtn = document.getElementById("renameClearBtn");
+            const renameBtn = document.getElementById("renameBtn");
+            const renamePreview = document.getElementById("renamePreview");
+
+            function showFbError(msg) {
+                fbError.textContent = msg;
+                fbError.style.display = msg ? "block" : "none";
+            }
+
+            async function fbLoadAll() {
+                fbList.innerHTML =
+                    '<div class="fb-loading"><div class="spinner"></div> Scanning all folders…</div>';
+                fbCount.textContent = "";
+                showFbError("");
+                try {
+                    const q = fbSearch.value.trim();
+                    const url =
+                        "/api/files/search" +
+                        (q ? "?q=" + encodeURIComponent(q) : "");
+                    const data = await (await fetch(url)).json();
+                    if (data.detail) throw new Error(data.detail);
+                    fbAllFiles = data.files;
+                    fbRender(fbAllFiles);
+                } catch (e) {
+                    showFbError(
+                        "Could not load files: " +
+                            e.message +
+                            " — check AUDIO_ROOT mount in devcontainer.json / docker-compose.yml",
+                    );
+                    fbList.innerHTML =
+                        '<div class="fb-empty">No files found</div>';
+                    fbCount.textContent = "";
+                }
+            }
+
+            function fbRender(files) {
+                fbCount.textContent =
+                    files.length + " file" + (files.length !== 1 ? "s" : "");
+                if (!files.length) {
+                    fbList.innerHTML =
+                        '<div class="fb-empty">No matching files</div>';
+                    return;
+                }
+                fbList.innerHTML = "";
+                files.forEach((file) => {
+                    const el = document.createElement("div");
+                    el.className = "fb-entry";
+                    if (file.path === fbSelectedPath)
+                        el.classList.add("selected");
+                    const icon = [
+                        ".mp3",
+                        ".wav",
+                        ".flac",
+                        ".aac",
+                        ".ogg",
+                        ".m4a",
+                        ".wma",
+                    ].includes(file.ext)
+                        ? "audio_file"
+                        : [".mp4", ".mov", ".avi", ".mkv", ".webm"].includes(
+                                file.ext,
+                            )
+                          ? "video_file"
+                          : "insert_drive_file";
+                    el.innerHTML = `
+                        <span class="mi">${icon}</span>
+                        <div class="fb-entry-info">
+                            <div class="fb-entry-name">${file.name}</div>
+                            ${file.folder ? `<div class="fb-entry-folder">${file.folder}</div>` : ""}
+                        </div>`;
+                    el.addEventListener("click", () => {
+                        fbList
+                            .querySelectorAll(".fb-entry")
+                            .forEach((e) => e.classList.remove("selected"));
+                        el.classList.add("selected");
+                        fbSelectFile(file);
+                    });
+                    fbList.appendChild(el);
+                });
+            }
+
+            function fbSelectFile(file) {
+                fbSelectedPath = file.path;
+                fbSelectedName = file.name;
+                renameFileName.textContent = file.name;
+                renameFileMeta.textContent = file.folder
+                    ? file.folder + "/" + file.name
+                    : file.name;
+                renameFileLoaded.style.display = "block";
+                updateRenamePreview();
+            }
+
+            // Debounced live search
+            fbSearch.addEventListener("input", () => {
+                clearTimeout(fbSearchTimer);
+                fbSearchTimer = setTimeout(fbLoadAll, 300);
+            });
+
+            fbRefreshBtn.addEventListener("click", fbLoadAll);
+
+            function getExt(name) {
+                const m = name.match(/(\.[^.]+)$/);
+                return m ? m[1] : "";
+            }
+
+            function getNewName() {
+                const text =
+                    renameSep === "dash"
+                        ? outputTextDash.textContent.trim()
+                        : outputTextPipe.textContent.trim();
+                if (!text || !fbSelectedName) return null;
+                return text + getExt(fbSelectedName);
+            }
+
+            const filenameLengthInfo =
+                document.getElementById("filenameLengthInfo");
+            const MAX_BYTES = 255;
+
+            function getByteLength(str) {
+                return new TextEncoder().encode(str).length;
+            }
+
+            function updateRenamePreview() {
+                const newName = getNewName();
+                if (!newName) {
+                    renamePreview.innerHTML = "Generate a filename above first";
+                    filenameLengthInfo.textContent = "";
+                    filenameLengthInfo.className = "filename-length";
+                    renameBtn.disabled = true;
+                    return;
+                }
+                const bytes = getByteLength(newName);
+                const over = bytes > MAX_BYTES;
+                const warn = bytes > 200 && !over;
+                renamePreview.innerHTML = `→ <span style="color:var(--success)">${newName}</span>`;
+                filenameLengthInfo.textContent = `${bytes} / ${MAX_BYTES} bytes${over ? " — too long, remove some tags" : warn ? " — approaching limit" : ""}`;
+                filenameLengthInfo.className =
+                    "filename-length" + (over ? " over" : warn ? " warn" : "");
+                renameBtn.disabled = over;
+            }
+
+            renameClearBtn.addEventListener("click", () => {
+                fbSelectedPath = null;
+                fbSelectedName = null;
+                renameFileLoaded.style.display = "none";
+                renamePreview.innerHTML = "Generate a filename above first";
+                renameBtn.disabled = true;
+                fbList
+                    .querySelectorAll(".fb-entry")
+                    .forEach((e) => e.classList.remove("selected"));
+            });
+
+            document.querySelectorAll(".sep-btn").forEach((btn) => {
+                btn.addEventListener("click", () => {
+                    renameSep = btn.dataset.sep;
+                    document
+                        .querySelectorAll(".sep-btn")
+                        .forEach((b) =>
+                            b.classList.toggle("active", b === btn),
+                        );
+                    updateRenamePreview();
+                });
+            });
+
+            renameBtn.addEventListener("click", async () => {
+                const newName = getNewName();
+                if (!newName || !fbSelectedPath) return;
+                showFbError("");
+                try {
+                    const res = await fetch("/api/rename", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            path: fbSelectedPath,
+                            new_name: newName,
+                        }),
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || res.statusText);
+
+                    // Update selection to renamed file
+                    fbSelectedPath = data.path;
+                    fbSelectedName = data.new_name;
+                    renameFileName.textContent = data.new_name;
+
+                    // Refresh list and re-highlight
+                    await fbLoadAll();
+                    const match = fbList.querySelector(
+                        `[data-path="${data.path}"]`,
+                    );
+
+                    // Visual feedback
+                    const orig = renameBtn.innerHTML;
+                    renameBtn.innerHTML =
+                        '<span class="mi" style="font-size:16px">check_circle</span> Renamed!';
+                    renameBtn.style.background = "rgba(52,211,153,0.2)";
+                    renameBtn.style.color = "var(--success)";
+                    renameBtn.style.border = "1px solid rgba(52,211,153,0.4)";
+                    setTimeout(() => {
+                        renameBtn.innerHTML = orig;
+                        renameBtn.style.background = "";
+                        renameBtn.style.color = "";
+                        renameBtn.style.border = "";
+                        updateRenamePreview();
+                    }, 2500);
+                } catch (e) {
+                    showFbError("Rename failed: " + e.message);
+                }
+            });
+
+            // Update rename preview whenever a filename is generated
+            generateBtn.addEventListener("click", () =>
+                setTimeout(updateRenamePreview, 50),
+            );
+            regenerateBtnDash.addEventListener("click", () =>
+                setTimeout(updateRenamePreview, 50),
+            );
+            regenerateBtnPipe.addEventListener("click", () =>
+                setTimeout(updateRenamePreview, 50),
+            );
+
+            // Initial load
+            fbLoadAll();
         </script>
     </body>
 </html>

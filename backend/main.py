@@ -4,12 +4,16 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 from pathlib import Path
+import os
 from backend import database
 
 app = FastAPI(title="ASMR Filename Generator API")
 
 # Resolve frontend path relative to this file so it works in any working dir
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+
+# Root for audio files — set via AUDIO_ROOT env var
+AUDIO_ROOT = Path(os.environ.get("AUDIO_ROOT", "/mnt/audio"))
 
 # ── Serve frontend ────────────────────────────────────────────────────────────
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
@@ -22,6 +26,151 @@ def root():
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+# ── File browser ──────────────────────────────────────────────────────────────
+AUDIO_EXTS = {".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".wma",
+              ".mp4", ".mov", ".avi", ".mkv", ".webm"}
+
+@app.get("/api/files")
+def list_files(subdir: str = ""):
+    """List files and subdirectories inside AUDIO_ROOT/subdir (one level)."""
+    target = (AUDIO_ROOT / subdir).resolve()
+    audio_root_str = str(AUDIO_ROOT.resolve())
+
+    if not str(target).startswith(audio_root_str):
+        raise HTTPException(403, "Access denied")
+    if not target.exists():
+        raise HTTPException(404, "Directory not found")
+    if not target.is_dir():
+        raise HTTPException(400, "Not a directory")
+
+    entries = []
+    for entry in sorted(target.iterdir(), key=lambda e: (e.is_file(), e.name.lower())):
+        entries.append({
+            "name": entry.name,
+            "type": "file" if entry.is_file() else "dir",
+            "ext": entry.suffix.lower() if entry.is_file() else None,
+            "path": str(entry.relative_to(AUDIO_ROOT)),
+        })
+
+    return {
+        "current": str(target.relative_to(AUDIO_ROOT)) if target != AUDIO_ROOT else "",
+        "entries": entries,
+    }
+
+
+@app.get("/api/files/search")
+def search_files(q: str = ""):
+    """
+    Recursively walk AUDIO_ROOT and return all audio/video files.
+    If q is provided, filter by filename containing q (case-insensitive).
+    """
+    audio_root = AUDIO_ROOT.resolve()
+    if not audio_root.exists():
+        raise HTTPException(404, f"Audio root not found at {audio_root} — check AUDIO_ROOT mount")
+
+    results = []
+    q_lower = q.strip().lower()
+
+    try:
+        all_files = sorted(audio_root.rglob("*"), key=lambda e: str(e).lower())
+    except PermissionError as e:
+        raise HTTPException(500, f"Permission error scanning files: {e}")
+
+    for entry in all_files:
+        try:
+            if not entry.is_file():
+                continue
+            if entry.suffix.lower() not in AUDIO_EXTS:
+                continue
+            if q_lower and q_lower not in entry.name.lower():
+                continue
+            rel = entry.relative_to(audio_root)
+            results.append({
+                "name": entry.name,
+                "ext": entry.suffix.lower(),
+                "path": str(rel),
+                "folder": str(rel.parent) if str(rel.parent) != "." else "",
+            })
+        except (PermissionError, OSError):
+            continue
+
+    return {"query": q, "total": len(results), "files": results}
+
+
+@app.get("/api/files/debug")
+def debug_files():
+    """Show what's visible at AUDIO_ROOT — use to diagnose mount issues."""
+    audio_root = AUDIO_ROOT.resolve()
+    if not audio_root.exists():
+        return {"error": f"AUDIO_ROOT does not exist: {audio_root}", "audio_root": str(audio_root)}
+
+    top_level = []
+    try:
+        for entry in sorted(audio_root.iterdir(), key=lambda e: e.name.lower())[:20]:
+            top_level.append({
+                "name": entry.name,
+                "type": "dir" if entry.is_dir() else "file",
+            })
+    except Exception as e:
+        return {"error": str(e), "audio_root": str(audio_root)}
+
+    return {
+        "audio_root": str(audio_root),
+        "exists": True,
+        "top_level_entries": top_level,
+        "top_level_count": len(top_level),
+    }
+
+# ── Rename ────────────────────────────────────────────────────────────────────
+class RenameIn(BaseModel):
+    path: str       # relative path to file inside AUDIO_ROOT
+    new_name: str   # new filename (just the name, no path)
+
+@app.post("/api/rename")
+def rename_file(body: RenameIn):
+    src = (AUDIO_ROOT / body.path.strip()).resolve()
+    audio_root_str = str(AUDIO_ROOT.resolve())
+
+    # Security: must stay inside AUDIO_ROOT
+    if not str(src).startswith(audio_root_str):
+        raise HTTPException(403, "Access denied")
+    if not src.exists():
+        raise HTTPException(404, f"File not found: {body.path}")
+    if not src.is_file():
+        raise HTTPException(400, "Path is not a file")
+
+    new_name = body.new_name.strip()
+    if not new_name or "/" in new_name or "\\" in new_name:
+        raise HTTPException(400, "Invalid filename")
+
+    dest = src.parent / new_name
+
+    # Check dest is still inside AUDIO_ROOT
+    if not str(dest.resolve()).startswith(audio_root_str):
+        raise HTTPException(403, "Access denied")
+
+    if dest.exists():
+        raise HTTPException(409, f"A file named '{new_name}' already exists")
+
+    # Linux max filename length is 255 bytes (not chars — encode to check)
+    name_bytes = len(new_name.encode("utf-8"))
+    if name_bytes > 255:
+        raise HTTPException(422, f"Filename too long: {name_bytes} bytes (max 255). Remove some tags to shorten it.")
+
+    try:
+        src.rename(dest)
+    except OSError as e:
+        if e.errno == 36:  # ENAMETOOLONG
+            raise HTTPException(422, f"Filename too long ({len(new_name)} chars). Remove some tags to shorten it.")
+        raise HTTPException(500, f"Rename failed: {e}")
+
+    return {
+        "renamed": True,
+        "old_name": src.name,
+        "new_name": dest.name,
+        "path": str(dest.relative_to(AUDIO_ROOT)),
+    }
 
 # ── Dictionary: full load ─────────────────────────────────────────────────────
 @app.get("/api/dictionary")
@@ -56,7 +205,7 @@ def delete_pill(pill_id: int):
 # ── Synonyms ──────────────────────────────────────────────────────────────────
 class SynonymIn(BaseModel):
     from_word: str
-    to_word: Optional[str] = None  # None means suppress
+    to_word: Optional[str] = None
 
 @app.get("/api/synonyms")
 def get_synonyms():

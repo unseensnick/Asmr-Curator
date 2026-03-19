@@ -10,10 +10,14 @@
     "DB_PATH": "/workspaces/asmr-filename-gen/data/dictionary.db",
     "PYTHONPATH": "/workspaces/asmr-filename-gen",
     "UV_LINK_MODE": "copy",
-    "VIRTUAL_ENV": "/home/devuser/.venv"
+    "VIRTUAL_ENV": "/home/devuser/.venv",
+    "AUDIO_ROOT": "/mnt/audio"
   },
   "forwardPorts": [
     8000
+  ],
+  "mounts": [
+    "source=C:\\Users\\unseensnick\\Desktop\\projects\\asmr,target=/mnt/audio,type=bind,consistency=cached"
   ],
   "postStartCommand": "/home/devuser/.local/bin/uv pip install --python /home/devuser/.venv/bin/python -r /workspaces/asmr-filename-gen/backend/requirements.txt -q",
   "customizations": {
