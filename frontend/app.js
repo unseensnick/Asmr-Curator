@@ -252,7 +252,7 @@ function renderPills() {
     dict.pills.forEach((p) => {
         const el = document.createElement("span");
         el.className = "phrase-chip";
-        el.innerHTML = `<span class="phrase-chip-label">${p.phrase}</span><span class="phrase-chip-edit" title="Edit"><span class="mi">edit</span></span><span class="phrase-chip-del" title="Delete"><span class="mi">close</span></span>`;
+        el.innerHTML = `<span class="phrase-chip-label" title="Click to edit">${p.phrase}</span><span class="phrase-chip-del" title="Delete"><span class="mi">close</span></span>`;
 
         // Delete
         el.querySelector(".phrase-chip-del").addEventListener(
@@ -267,8 +267,8 @@ function renderPills() {
             },
         );
 
-        // Edit — swap chip into an inline input
-        el.querySelector(".phrase-chip-edit").addEventListener("click", (e) => {
+        // Edit — click the label text to edit inline
+        const enterEdit = (e) => {
             e.stopPropagation();
             const inp = document.createElement("input");
             inp.className = "phrase-chip-inp";
@@ -315,7 +315,12 @@ function renderPills() {
                 if (e.key === "Enter") doSave();
                 if (e.key === "Escape") renderPills();
             });
-        });
+        };
+
+        el.querySelector(".phrase-chip-label").addEventListener(
+            "click",
+            enterEdit,
+        );
 
         grid.appendChild(el);
     });
@@ -353,11 +358,10 @@ function renderSynonyms() {
                 ? '<span class="map-to-null">suppressed</span>'
                 : s.to_word;
         row.innerHTML = `
-            <div class="map-from-val">${s.from_word}</div>
+            <div class="map-from-val map-val-editable" title="Click to edit">${s.from_word}</div>
             <div class="map-arr">→</div>
-            <div class="map-to-val">${toHtml}</div>
+            <div class="map-to-val map-val-editable" title="Click to edit">${toHtml}</div>
             <div class="map-row-actions">
-              <button class="map-row-edit" title="Edit"><span class="mi">edit</span></button>
               <button class="map-row-del" title="Delete"><span class="mi">delete</span></button>
             </div>`;
 
@@ -375,14 +379,19 @@ function renderSynonyms() {
             },
         );
 
-        // Edit
-        row.querySelector(".map-row-edit").addEventListener("click", () => {
+        // Edit — clicking either value cell opens the inline editor
+        const enterEdit = (focusTo = false) => {
+            const isSuppressed = s.to_word === null;
+            row.classList.add("is-editing");
             row.innerHTML = `
                 <input class="map-edit-inp" id="seFrom" value="${s.from_word}" placeholder="OCR word">
                 <div class="map-arr">→</div>
-                <input class="map-edit-inp" id="seTo" value="${s.to_word ?? ""}" placeholder="Output tag" ${s.to_word === null ? "disabled" : ""}>
+                <input class="map-edit-inp" id="seTo" value="${s.to_word ?? ""}" placeholder="Output tag" ${isSuppressed ? "disabled" : ""}>
                 <div class="map-edit-controls">
-                  <label class="map-edit-null-lbl"><input type="checkbox" id="seNull" ${s.to_word === null ? "checked" : ""}> suppress</label>
+                  <label class="suppress-toggle" title="Suppress — drop this word from output">
+                    <input type="checkbox" id="seNull" ${isSuppressed ? "checked" : ""}>
+                    <span class="suppress-toggle-pill">suppress</span>
+                  </label>
                   <button class="map-row-save" title="Save"><span class="mi">check</span></button>
                   <button class="map-row-cancel" title="Cancel"><span class="mi">close</span></button>
                 </div>`;
@@ -392,6 +401,10 @@ function renderSynonyms() {
             nullC.addEventListener("change", () => {
                 toI.disabled = nullC.checked;
                 if (nullC.checked) toI.value = "";
+                else {
+                    toI.focus();
+                    toI.select();
+                }
             });
             const doSave = async () => {
                 const fw = fromI.value.trim().toLowerCase();
@@ -420,17 +433,27 @@ function renderSynonyms() {
             row.querySelector(".map-row-cancel").addEventListener("click", () =>
                 renderSynonyms(),
             );
-            row.querySelectorAll(
-                "input[type=text], input:not([type=checkbox])",
-            ).forEach((inp) => {
+            row.querySelectorAll("input").forEach((inp) => {
                 inp.addEventListener("keydown", (e) => {
                     if (e.key === "Enter") doSave();
                     if (e.key === "Escape") renderSynonyms();
                 });
             });
-            fromI.focus();
-            fromI.select();
-        });
+            if (focusTo && !isSuppressed) {
+                toI.focus();
+                toI.select();
+            } else {
+                fromI.focus();
+                fromI.select();
+            }
+        };
+
+        row.querySelector(".map-from-val").addEventListener("click", () =>
+            enterEdit(false),
+        );
+        row.querySelector(".map-to-val").addEventListener("click", () =>
+            enterEdit(true),
+        );
 
         list.appendChild(row);
     });
@@ -478,11 +501,10 @@ function renderVariants() {
         const row = document.createElement("div");
         row.className = "map-row";
         row.innerHTML = `
-            <div class="map-from-val">${v.from_str}</div>
+            <div class="map-from-val map-val-editable" title="Click to edit">${v.from_str}</div>
             <div class="map-arr">→</div>
-            <div class="map-to-val">${v.to_str}</div>
+            <div class="map-to-val map-val-editable" title="Click to edit">${v.to_str}</div>
             <div class="map-row-actions">
-              <button class="map-row-edit" title="Edit"><span class="mi">edit</span></button>
               <button class="map-row-del" title="Delete"><span class="mi">delete</span></button>
             </div>`;
 
@@ -500,8 +522,9 @@ function renderVariants() {
             },
         );
 
-        // Edit
-        row.querySelector(".map-row-edit").addEventListener("click", () => {
+        // Edit — clicking either value cell opens the inline editor
+        const enterEdit = (focusTo = false) => {
+            row.classList.add("is-editing");
             row.innerHTML = `
                 <input class="map-edit-inp" id="veFrom" value="${v.from_str}" placeholder="OCR string">
                 <div class="map-arr">→</div>
@@ -545,9 +568,21 @@ function renderVariants() {
             row.querySelector(".map-row-cancel").addEventListener("click", () =>
                 renderVariants(),
             );
-            fromI.focus();
-            fromI.select();
-        });
+            if (focusTo) {
+                toI.focus();
+                toI.select();
+            } else {
+                fromI.focus();
+                fromI.select();
+            }
+        };
+
+        row.querySelector(".map-from-val").addEventListener("click", () =>
+            enterEdit(false),
+        );
+        row.querySelector(".map-to-val").addEventListener("click", () =>
+            enterEdit(true),
+        );
 
         list.appendChild(row);
     });
@@ -592,11 +627,10 @@ function renderSplitFixes() {
         const row = document.createElement("div");
         row.className = "map-row";
         row.innerHTML = `
-            <div class="map-from-val" style="font-size:10px;font-style:italic">${f.pattern.replace(/</g, "&lt;")}</div>
+            <div class="map-from-val map-val-editable" title="Click to edit" style="font-size:10px;font-style:italic">${f.pattern.replace(/</g, "&lt;")}</div>
             <div class="map-arr">→</div>
-            <div class="map-to-val">${f.replacement}</div>
+            <div class="map-to-val map-val-editable" title="Click to edit">${f.replacement}</div>
             <div class="map-row-actions">
-              <button class="map-row-edit" title="Edit"><span class="mi">edit</span></button>
               <button class="map-row-del" title="Delete"><span class="mi">delete</span></button>
             </div>`;
 
@@ -615,8 +649,9 @@ function renderSplitFixes() {
             },
         );
 
-        // Edit
-        row.querySelector(".map-row-edit").addEventListener("click", () => {
+        // Edit — clicking either value cell opens the inline editor
+        const enterEdit = (focusTo = false) => {
+            row.classList.add("is-editing");
             row.innerHTML = `
                 <input class="map-edit-inp" id="sfFrom" value="${f.pattern.replace(/"/g, "&quot;")}" placeholder="Regex pattern" style="font-size:10px;font-style:italic">
                 <div class="map-arr">→</div>
@@ -667,9 +702,21 @@ function renderSplitFixes() {
             row.querySelector(".map-row-cancel").addEventListener("click", () =>
                 renderSplitFixes(),
             );
-            patI.focus();
-            patI.select();
-        });
+            if (focusTo) {
+                repI.focus();
+                repI.select();
+            } else {
+                patI.focus();
+                patI.select();
+            }
+        };
+
+        row.querySelector(".map-from-val").addEventListener("click", () =>
+            enterEdit(false),
+        );
+        row.querySelector(".map-to-val").addEventListener("click", () =>
+            enterEdit(true),
+        );
 
         list.appendChild(row);
     });

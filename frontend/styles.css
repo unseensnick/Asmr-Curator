@@ -639,7 +639,7 @@ input[type="text"]:focus {
     border: 1px solid var(--border);
     border-radius: 16px;
     width: 100%;
-    max-width: 860px;
+    max-width: 1060px;
     max-height: 88vh;
     display: flex;
     flex-direction: column;
@@ -1357,23 +1357,14 @@ input[type="text"]:focus {
 .phrase-chip-label {
     flex: 1;
     min-width: 0;
+    cursor: text;
+    border-bottom: 1px dashed transparent;
+    transition:
+        border-color 0.15s,
+        color 0.15s;
 }
-.phrase-chip-edit {
-    cursor: pointer;
-    color: var(--muted);
-    display: flex;
-    align-items: center;
-    padding: 0 2px;
-    transition: color 0.15s;
-    opacity: 0;
-}
-.phrase-chip:hover .phrase-chip-edit {
-    opacity: 1;
-}
-.phrase-chip-edit .mi {
-    font-size: 12px;
-}
-.phrase-chip-edit:hover {
+.phrase-chip:hover .phrase-chip-label {
+    border-bottom-color: var(--accent);
     color: var(--accent);
 }
 .phrase-chip-inp {
@@ -1409,40 +1400,37 @@ input[type="text"]:focus {
 }
 
 /* ── Inline edit — map rows ────────────────────────────────────────────────── */
+/* Clickable value cells */
+.map-val-editable {
+    cursor: text;
+    border-bottom: 1px dashed transparent;
+    transition:
+        border-color 0.15s,
+        color 0.15s;
+}
+.map-row:hover .map-val-editable {
+    border-bottom-color: currentColor;
+    opacity: 0.85;
+}
+.map-val-editable:hover {
+    border-bottom-color: var(--accent) !important;
+    color: var(--accent) !important;
+    opacity: 1 !important;
+}
 .map-row-actions {
     display: flex;
     align-items: center;
     justify-content: flex-end;
     gap: 2px;
 }
-.map-row-edit {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    background: none;
-    border: none;
-    cursor: pointer;
-    color: var(--muted);
-    padding: 2px;
-    border-radius: 4px;
-    transition:
-        color 0.15s,
-        background 0.15s;
-    opacity: 0;
-}
-.map-row:hover .map-row-edit {
-    opacity: 1;
-}
-.map-row-edit .mi {
-    font-size: 14px;
-}
-.map-row-edit:hover {
-    color: var(--accent);
-    background: rgba(139, 92, 246, 0.08);
-}
-/* widen the grid when actions column has two buttons */
+/* Normal display: from | arrow | to | delete */
 .map-row {
-    grid-template-columns: 1fr 28px 1fr 60px;
+    grid-template-columns: 1fr 28px 1fr 32px;
+    gap: 6px;
+}
+/* Edit state: inputs need more room in the controls column */
+.map-row.is-editing {
+    grid-template-columns: 1fr 28px 1fr auto;
 }
 .map-edit-inp {
     font-size: 11px;
@@ -1462,16 +1450,45 @@ input[type="text"]:focus {
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 3px;
+    gap: 6px;
+    padding-left: 6px;
+}
+/* suppress toggle lives in the controls column alongside save/cancel */
+.suppress-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.suppress-toggle input[type="checkbox"] {
+    margin: 0;
+    accent-color: var(--accent);
+    cursor: pointer;
+    width: 11px;
+    height: 11px;
+}
+.suppress-toggle-pill {
+    font-size: 9px;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    background: rgba(248, 113, 113, 0.08);
+    border: 1px solid rgba(248, 113, 113, 0.2);
+    border-radius: 10px;
+    padding: 1px 7px;
+    white-space: nowrap;
+    transition:
+        background 0.15s,
+        color 0.15s,
+        border-color 0.15s;
+}
+.suppress-toggle input:checked ~ .suppress-toggle-pill {
+    background: rgba(248, 113, 113, 0.18);
+    border-color: rgba(248, 113, 113, 0.5);
+    color: var(--danger);
 }
 .map-edit-null-lbl {
-    font-size: 9px;
-    color: var(--muted);
-    white-space: nowrap;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 3px;
+    display: none;
 }
 .map-row-save,
 .map-row-cancel {
@@ -1500,4 +1517,70 @@ input[type="text"]:focus {
 .map-row-cancel:hover {
     color: var(--danger);
     background: rgba(248, 113, 113, 0.08);
+}
+
+/* ── Scrollbars ─────────────────────────────────────────────────────────────
+   Firefox: scrollbar-width + scrollbar-color
+   Chromium/Safari: ::-webkit-scrollbar-* pseudo-elements
+   Both target the same palette so they look identical across browsers.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* Global defaults for every scrollable element */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 999px;
+    transition: background 0.2s;
+}
+*::-webkit-scrollbar-thumb:hover {
+    background: var(--muted);
+}
+*::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+/* Dictionary modal body — slightly more visible since it's a large scroll area */
+.dict-modal-body {
+    scrollbar-color: var(--muted) transparent;
+}
+.dict-modal-body::-webkit-scrollbar-thumb {
+    background: var(--muted);
+}
+.dict-modal-body::-webkit-scrollbar-thumb:hover {
+    background: var(--accent2);
+}
+
+/* Map lists and phrase grid scroll areas */
+.map-list,
+.phrase-grid {
+    scrollbar-color: var(--border) transparent;
+}
+.map-list::-webkit-scrollbar-thumb,
+.phrase-grid::-webkit-scrollbar-thumb {
+    background: var(--border);
+}
+.map-list::-webkit-scrollbar-thumb:hover,
+.phrase-grid::-webkit-scrollbar-thumb:hover {
+    background: var(--muted);
+}
+
+/* File browser list */
+#fbList {
+    scrollbar-color: var(--border) transparent;
+}
+#fbList::-webkit-scrollbar-thumb {
+    background: var(--border);
+}
+#fbList::-webkit-scrollbar-thumb:hover {
+    background: var(--muted);
 }
