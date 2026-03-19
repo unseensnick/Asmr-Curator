@@ -141,14 +141,17 @@ def get_pills():
         return [dict(r) for r in rows]
 
 def add_pill(phrase: str):
+    """Store phrase with its original casing. Uniqueness is case-insensitive."""
     with get_conn() as conn:
-        try:
-            cur = conn.execute(
-                "INSERT INTO pills (phrase) VALUES (?) RETURNING id, phrase", (phrase,)
-            )
-            return dict(cur.fetchone())
-        except sqlite3.IntegrityError:
+        existing = conn.execute(
+            "SELECT id FROM pills WHERE LOWER(phrase)=LOWER(?)", (phrase,)
+        ).fetchone()
+        if existing:
             raise ValueError(f"Phrase already exists: {phrase}")
+        cur = conn.execute(
+            "INSERT INTO pills (phrase) VALUES (?) RETURNING id, phrase", (phrase,)
+        )
+        return dict(cur.fetchone())
 
 def delete_pill(pill_id: int) -> bool:
     with get_conn() as conn:
@@ -304,3 +307,64 @@ def reset_to_defaults():
 
 # Init on import
 init_db()
+
+
+# ── Edit (PATCH) helpers ──────────────────────────────────────────────────────
+def edit_pill(pill_id: int, phrase: str) -> Optional[dict]:
+    with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT id FROM pills WHERE LOWER(phrase)=LOWER(?) AND id!=?", (phrase, pill_id)
+        ).fetchone()
+        if existing:
+            raise ValueError(f"Phrase already exists: {phrase}")
+        cur = conn.execute(
+            "UPDATE pills SET phrase=? WHERE id=? RETURNING id, phrase",
+            (phrase, pill_id),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def edit_synonym(synonym_id: int, from_word: str, to_word) -> Optional[dict]:
+    with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT id FROM synonyms WHERE LOWER(from_word)=LOWER(?) AND id!=?",
+            (from_word, synonym_id),
+        ).fetchone()
+        if existing:
+            raise ValueError(f"Synonym already exists: {from_word}")
+        cur = conn.execute(
+            "UPDATE synonyms SET from_word=?, to_word=? WHERE id=? "
+            "RETURNING id, from_word, to_word",
+            (from_word, to_word, synonym_id),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def edit_variant(variant_id: int, from_str: str, to_str: str) -> Optional[dict]:
+    with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT id FROM variants WHERE LOWER(from_str)=LOWER(?) AND id!=?",
+            (from_str, variant_id),
+        ).fetchone()
+        if existing:
+            raise ValueError(f"Variant already exists: {from_str}")
+        cur = conn.execute(
+            "UPDATE variants SET from_str=?, to_str=? WHERE id=? "
+            "RETURNING id, from_str, to_str",
+            (from_str, to_str, variant_id),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def edit_splitfix(fix_id: int, pattern: str, replacement: str) -> Optional[dict]:
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE splitfixes SET pattern=?, replacement=? WHERE id=? "
+            "RETURNING id, pattern, replacement",
+            (pattern, replacement, fix_id),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None

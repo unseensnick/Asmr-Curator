@@ -168,6 +168,15 @@ async function apiPut(path, body) {
     if (!r.ok) throw new Error(await r.text());
     return r.json();
 }
+async function apiPatch(path, body) {
+    const r = await fetch(API + path, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+}
 
 async function loadDict() {
     const data = await apiGet("/api/dictionary");
@@ -175,7 +184,7 @@ async function loadDict() {
     dict.synonyms = data._synonyms;
     dict.variants = data._variants;
     dict.splitFixes = data._splitFixes;
-    dict._pillPhrases = data.pills;
+    dict._pillPhrases = data._pills.map((p) => p.phrase);
     dict._synMap = data.synonyms;
     dict._varMap = data.variants;
     dict._fixList = data.splitFixes;
@@ -243,10 +252,13 @@ function renderPills() {
     dict.pills.forEach((p) => {
         const el = document.createElement("span");
         el.className = "phrase-chip";
-        el.innerHTML = `${p.phrase}<span class="phrase-chip-del"><span class="mi">close</span></span>`;
+        el.innerHTML = `<span class="phrase-chip-label">${p.phrase}</span><span class="phrase-chip-edit" title="Edit"><span class="mi">edit</span></span><span class="phrase-chip-del" title="Delete"><span class="mi">close</span></span>`;
+
+        // Delete
         el.querySelector(".phrase-chip-del").addEventListener(
             "click",
-            async () => {
+            async (e) => {
+                e.stopPropagation();
                 await apiDelete(`/api/pills/${p.id}`);
                 dict.pills = dict.pills.filter((x) => x.id !== p.id);
                 dict._pillPhrases = dict.pills.map((x) => x.phrase);
@@ -254,15 +266,63 @@ function renderPills() {
                 updateBadge();
             },
         );
+
+        // Edit — swap chip into an inline input
+        el.querySelector(".phrase-chip-edit").addEventListener("click", (e) => {
+            e.stopPropagation();
+            const inp = document.createElement("input");
+            inp.className = "phrase-chip-inp";
+            inp.value = p.phrase;
+            el.innerHTML = "";
+            el.appendChild(inp);
+
+            const save = document.createElement("span");
+            save.className = "phrase-chip-save";
+            save.innerHTML = '<span class="mi">check</span>';
+            el.appendChild(save);
+
+            const cancel = document.createElement("span");
+            cancel.className = "phrase-chip-cancel";
+            cancel.innerHTML = '<span class="mi">close</span>';
+            el.appendChild(cancel);
+
+            inp.focus();
+            inp.select();
+
+            const doSave = async () => {
+                const val = inp.value.trim();
+                if (!val || val === p.phrase) {
+                    renderPills();
+                    return;
+                }
+                try {
+                    const updated = await apiPatch(`/api/pills/${p.id}`, {
+                        phrase: val,
+                    });
+                    const idx = dict.pills.findIndex((x) => x.id === p.id);
+                    if (idx !== -1) dict.pills[idx] = updated;
+                    dict._pillPhrases = dict.pills.map((x) => x.phrase);
+                    renderPills();
+                } catch (err) {
+                    alert(err.message);
+                    renderPills();
+                }
+            };
+
+            save.addEventListener("click", doSave);
+            cancel.addEventListener("click", () => renderPills());
+            inp.addEventListener("keydown", (e) => {
+                if (e.key === "Enter") doSave();
+                if (e.key === "Escape") renderPills();
+            });
+        });
+
         grid.appendChild(el);
     });
 }
 
 document.getElementById("pillAddBtn").addEventListener("click", async () => {
-    const val = document
-        .getElementById("pillAddInput")
-        .value.trim()
-        .toLowerCase();
+    const val = document.getElementById("pillAddInput").value.trim(); // preserve user casing — stored as-is
     if (!val) return;
     try {
         const row = await apiPost("/api/pills", {
@@ -288,11 +348,20 @@ function renderSynonyms() {
     dict.synonyms.forEach((s) => {
         const row = document.createElement("div");
         row.className = "map-row";
+        const toHtml =
+            s.to_word === null
+                ? '<span class="map-to-null">suppressed</span>'
+                : s.to_word;
         row.innerHTML = `
             <div class="map-from-val">${s.from_word}</div>
             <div class="map-arr">→</div>
-            <div class="map-to-val">${s.to_word === null ? '<span class="map-to-null">suppressed</span>' : s.to_word}</div>
-            <button class="map-row-del"><span class="mi">delete</span></button>`;
+            <div class="map-to-val">${toHtml}</div>
+            <div class="map-row-actions">
+              <button class="map-row-edit" title="Edit"><span class="mi">edit</span></button>
+              <button class="map-row-del" title="Delete"><span class="mi">delete</span></button>
+            </div>`;
+
+        // Delete
         row.querySelector(".map-row-del").addEventListener(
             "click",
             async () => {
@@ -305,6 +374,64 @@ function renderSynonyms() {
                 updateBadge();
             },
         );
+
+        // Edit
+        row.querySelector(".map-row-edit").addEventListener("click", () => {
+            row.innerHTML = `
+                <input class="map-edit-inp" id="seFrom" value="${s.from_word}" placeholder="OCR word">
+                <div class="map-arr">→</div>
+                <input class="map-edit-inp" id="seTo" value="${s.to_word ?? ""}" placeholder="Output tag" ${s.to_word === null ? "disabled" : ""}>
+                <div class="map-edit-controls">
+                  <label class="map-edit-null-lbl"><input type="checkbox" id="seNull" ${s.to_word === null ? "checked" : ""}> suppress</label>
+                  <button class="map-row-save" title="Save"><span class="mi">check</span></button>
+                  <button class="map-row-cancel" title="Cancel"><span class="mi">close</span></button>
+                </div>`;
+            const fromI = row.querySelector("#seFrom");
+            const toI = row.querySelector("#seTo");
+            const nullC = row.querySelector("#seNull");
+            nullC.addEventListener("change", () => {
+                toI.disabled = nullC.checked;
+                if (nullC.checked) toI.value = "";
+            });
+            const doSave = async () => {
+                const fw = fromI.value.trim().toLowerCase();
+                const tw = nullC.checked ? null : toI.value.trim();
+                if (!fw) return;
+                try {
+                    const updated = await apiPatch(`/api/synonyms/${s.id}`, {
+                        from_word: fw,
+                        to_word: tw,
+                    });
+                    const idx = dict.synonyms.findIndex((x) => x.id === s.id);
+                    if (idx !== -1) dict.synonyms[idx] = updated;
+                    dict._synMap = Object.fromEntries(
+                        dict.synonyms.map((x) => [x.from_word, x.to_word]),
+                    );
+                    renderSynonyms();
+                } catch (err) {
+                    alert(err.message);
+                    renderSynonyms();
+                }
+            };
+            row.querySelector(".map-row-save").addEventListener(
+                "click",
+                doSave,
+            );
+            row.querySelector(".map-row-cancel").addEventListener("click", () =>
+                renderSynonyms(),
+            );
+            row.querySelectorAll(
+                "input[type=text], input:not([type=checkbox])",
+            ).forEach((inp) => {
+                inp.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter") doSave();
+                    if (e.key === "Escape") renderSynonyms();
+                });
+            });
+            fromI.focus();
+            fromI.select();
+        });
+
         list.appendChild(row);
     });
 }
@@ -354,7 +481,12 @@ function renderVariants() {
             <div class="map-from-val">${v.from_str}</div>
             <div class="map-arr">→</div>
             <div class="map-to-val">${v.to_str}</div>
-            <button class="map-row-del"><span class="mi">delete</span></button>`;
+            <div class="map-row-actions">
+              <button class="map-row-edit" title="Edit"><span class="mi">edit</span></button>
+              <button class="map-row-del" title="Delete"><span class="mi">delete</span></button>
+            </div>`;
+
+        // Delete
         row.querySelector(".map-row-del").addEventListener(
             "click",
             async () => {
@@ -367,6 +499,56 @@ function renderVariants() {
                 updateBadge();
             },
         );
+
+        // Edit
+        row.querySelector(".map-row-edit").addEventListener("click", () => {
+            row.innerHTML = `
+                <input class="map-edit-inp" id="veFrom" value="${v.from_str}" placeholder="OCR string">
+                <div class="map-arr">→</div>
+                <input class="map-edit-inp" id="veTo" value="${v.to_str}" placeholder="Display name">
+                <div class="map-edit-controls">
+                  <button class="map-row-save" title="Save"><span class="mi">check</span></button>
+                  <button class="map-row-cancel" title="Cancel"><span class="mi">close</span></button>
+                </div>`;
+            const fromI = row.querySelector("#veFrom");
+            const toI = row.querySelector("#veTo");
+            const doSave = async () => {
+                const fs = fromI.value.trim().toLowerCase();
+                const ts = toI.value.trim();
+                if (!fs || !ts) return;
+                try {
+                    const updated = await apiPatch(`/api/variants/${v.id}`, {
+                        from_str: fs,
+                        to_str: ts,
+                    });
+                    const idx = dict.variants.findIndex((x) => x.id === v.id);
+                    if (idx !== -1) dict.variants[idx] = updated;
+                    dict._varMap = Object.fromEntries(
+                        dict.variants.map((x) => [x.from_str, x.to_str]),
+                    );
+                    renderVariants();
+                } catch (err) {
+                    alert(err.message);
+                    renderVariants();
+                }
+            };
+            row.querySelectorAll("input").forEach((inp) => {
+                inp.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter") doSave();
+                    if (e.key === "Escape") renderVariants();
+                });
+            });
+            row.querySelector(".map-row-save").addEventListener(
+                "click",
+                doSave,
+            );
+            row.querySelector(".map-row-cancel").addEventListener("click", () =>
+                renderVariants(),
+            );
+            fromI.focus();
+            fromI.select();
+        });
+
         list.appendChild(row);
     });
 }
@@ -413,7 +595,12 @@ function renderSplitFixes() {
             <div class="map-from-val" style="font-size:10px;font-style:italic">${f.pattern.replace(/</g, "&lt;")}</div>
             <div class="map-arr">→</div>
             <div class="map-to-val">${f.replacement}</div>
-            <button class="map-row-del"><span class="mi">delete</span></button>`;
+            <div class="map-row-actions">
+              <button class="map-row-edit" title="Edit"><span class="mi">edit</span></button>
+              <button class="map-row-del" title="Delete"><span class="mi">delete</span></button>
+            </div>`;
+
+        // Delete
         row.querySelector(".map-row-del").addEventListener(
             "click",
             async () => {
@@ -427,6 +614,63 @@ function renderSplitFixes() {
                 updateBadge();
             },
         );
+
+        // Edit
+        row.querySelector(".map-row-edit").addEventListener("click", () => {
+            row.innerHTML = `
+                <input class="map-edit-inp" id="sfFrom" value="${f.pattern.replace(/"/g, "&quot;")}" placeholder="Regex pattern" style="font-size:10px;font-style:italic">
+                <div class="map-arr">→</div>
+                <input class="map-edit-inp" id="sfTo" value="${f.replacement}" placeholder="Replacement">
+                <div class="map-edit-controls">
+                  <button class="map-row-save" title="Save"><span class="mi">check</span></button>
+                  <button class="map-row-cancel" title="Cancel"><span class="mi">close</span></button>
+                </div>`;
+            const patI = row.querySelector("#sfFrom");
+            const repI = row.querySelector("#sfTo");
+            const doSave = async () => {
+                const pat = patI.value.trim();
+                const rep = repI.value.trim();
+                if (!pat || !rep) return;
+                try {
+                    new RegExp(pat, "gi");
+                } catch {
+                    alert("Invalid regex pattern");
+                    return;
+                }
+                try {
+                    const updated = await apiPatch(`/api/splitfixes/${f.id}`, {
+                        pattern: pat,
+                        replacement: rep,
+                    });
+                    const idx = dict.splitFixes.findIndex((x) => x.id === f.id);
+                    if (idx !== -1) dict.splitFixes[idx] = updated;
+                    dict._fixList = dict.splitFixes.map((x) => [
+                        x.pattern,
+                        x.replacement,
+                    ]);
+                    renderSplitFixes();
+                } catch (err) {
+                    alert(err.message);
+                    renderSplitFixes();
+                }
+            };
+            row.querySelectorAll("input").forEach((inp) => {
+                inp.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter") doSave();
+                    if (e.key === "Escape") renderSplitFixes();
+                });
+            });
+            row.querySelector(".map-row-save").addEventListener(
+                "click",
+                doSave,
+            );
+            row.querySelector(".map-row-cancel").addEventListener("click", () =>
+                renderSplitFixes(),
+            );
+            patI.focus();
+            patI.select();
+        });
+
         list.appendChild(row);
     });
 }
@@ -543,7 +787,6 @@ loadDict();
 
 // Parser
 
-// Parser
 function toTitleCase(str) {
     const minors = new Set([
         "a",
@@ -577,22 +820,54 @@ function toTitleCase(str) {
         .join(" ");
 }
 
+// Build compiled splitFixes once per parse (avoids re-compiling per token)
+function compileSplitFixes() {
+    return dict._fixList.map(([pat, rep]) => [
+        new RegExp("\\b" + pat + "\\b", "gi"),
+        rep,
+    ]);
+}
+
+// Apply all splitFixes to a string
+function applySplitFixes(str, fixes) {
+    let s = str;
+    for (const [rx, rep] of fixes) s = s.replace(rx, rep);
+    return s.replace(/\s+/g, " ").trim();
+}
+
 function parseOcrText(raw) {
     const flat = raw.replace(/\n+/g, " ").replace(/\s+/g, " ").trim();
+
+    const compiledFixes = compileSplitFixes();
+    const synonyms = dict._synMap;
+    const variants = dict._varMap;
+
+    // ── Build a lookup: lowercase key → display form ──────────────────────
+    // Pills store their desired display casing in _pillPhrases.
+    // We map lower → phrase so normalize() can use the stored display form.
+    const pillDisplayMap = {};
+    for (const p of dict._pillPhrases) {
+        pillDisplayMap[p.toLowerCase()] = p;
+    }
+
+    // ── Extract paren tags — apply splitFixes so "friends and lovers" → "friends to lovers" ──
     const parenTags = [];
     const rx = /\(([^)]{2,80})\)/g;
     let m;
     while ((m = rx.exec(flat)) !== null) {
-        const inner = m[1].trim();
+        const inner = applySplitFixes(m[1].trim(), compiledFixes);
         if (/^\d+\s*(days?|hours?|ago)/i.test(inner) || /^[;:,.]/.test(inner))
             continue;
         parenTags.push(inner);
     }
+
     const fp = flat.indexOf("(");
     const coreTitle = (fp > 0 ? flat.slice(0, fp) : flat.slice(0, 120))
         .trim()
         .replace(/[-–\s]+$/, "")
         .trim();
+
+    // ── Pill section (text after common signoff phrases) ──────────────────
     const soIdx = flat.search(
         /happy listening|feedback as always|much appreciated/i,
     );
@@ -605,36 +880,49 @@ function parseOcrText(raw) {
         .split(/\s+/)
         .map((t) => t.replace(/[^a-zA-Z\s\-]/g, "").trim())
         .filter((t) => t.length >= 2);
-    const knownPills = dict._pillPhrases;
-    const blob = pillTokens.join(" ").toLowerCase();
+
+    // Apply splitFixes to the whole blob first so multi-word phrases are
+    // already joined before we try to match pills greedily.
+    let rem = applySplitFixes(
+        pillTokens.join(" ").toLowerCase(),
+        compiledFixes,
+    );
+
     const foundPills = [];
-    let rem = blob;
-    const splitFixes = dict._fixList.map(([pat, rep]) => [
-        new RegExp("\\b" + pat + "\\b", "gi"),
-        rep,
-    ]);
-    for (const [p, r] of splitFixes) rem = rem.replace(p, r);
-    for (const p of [...knownPills].sort((a, b) => b.length - a.length)) {
-        if (rem.includes(p)) {
-            foundPills.push(p);
-            rem = rem.replace(p, "").replace(/\s+/g, " ").trim();
+    // Sort longest-first so "friends to lovers" matches before "friends" or "lovers"
+    const knownPillsSorted = [...dict._pillPhrases].sort(
+        (a, b) => b.length - a.length,
+    );
+    for (const p of knownPillsSorted) {
+        const pLow = p.toLowerCase();
+        if (rem.includes(pLow)) {
+            foundPills.push(pLow); // store lowercase key; normalize() will restore display form
+            rem = rem.replace(pLow, "").replace(/\s+/g, " ").trim();
         }
     }
+    // Remaining single tokens (unknown tags)
     rem.split(/\s+/).forEach((t) => {
         if (t.length >= 3 && t.length <= 30 && /^[a-z]/.test(t))
             foundPills.push(t);
     });
-    const synonyms = dict._synMap;
-    const variants = dict._varMap;
+
+    // ── Normalize: restore proper display casing ──────────────────────────
     const normalize = (t) => {
         const k = t.toLowerCase().trim();
+        // 1. Explicit variant mapping (highest priority — exact display form)
         if (k in variants) return variants[k];
+        // 2. Synonym mapping (may return null → suppress)
         if (k in synonyms) return synonyms[k];
+        // 3. Known pill — return its stored display form
+        if (k in pillDisplayMap) return pillDisplayMap[k];
+        // 4. ALL-CAPS special cases
         if (/^(sfw|nsfw)$/i.test(t)) return t.toUpperCase();
+        // 5. Fallback: title-case
         return toTitleCase(t);
     };
-    const seen = new Set(),
-        finalTags = [];
+
+    const seen = new Set();
+    const finalTags = [];
     for (const t of [...parenTags, ...foundPills]) {
         const n = normalize(t);
         if (n === null) continue;
@@ -644,6 +932,7 @@ function parseOcrText(raw) {
             finalTags.push(n);
         }
     }
+
     return {
         title: coreTitle,
         tags: finalTags,

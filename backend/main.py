@@ -187,7 +187,7 @@ def get_pills():
 
 @app.post("/api/pills", status_code=201)
 def add_pill(body: PillIn):
-    phrase = body.phrase.strip().lower()
+    phrase = body.phrase.strip()  # preserve casing — stored as-is
     if not phrase:
         raise HTTPException(400, "phrase cannot be empty")
     try:
@@ -279,6 +279,77 @@ def delete_splitfix(fix_id: int):
         raise HTTPException(404, "splitfix not found")
     return {"deleted": fix_id}
 
+# ── Edit (PATCH) ─────────────────────────────────────────────────────────────
+class PillEdit(BaseModel):
+    phrase: str
+
+@app.patch("/api/pills/{pill_id}")
+def edit_pill(pill_id: int, body: PillEdit):
+    phrase = body.phrase.strip()
+    if not phrase:
+        raise HTTPException(400, "phrase cannot be empty")
+    try:
+        row = database.edit_pill(pill_id, phrase)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    if not row:
+        raise HTTPException(404, "pill not found")
+    return row
+
+
+class SynonymEdit(BaseModel):
+    from_word: str
+    to_word: Optional[str] = None
+
+@app.patch("/api/synonyms/{synonym_id}")
+def edit_synonym(synonym_id: int, body: SynonymEdit):
+    from_word = body.from_word.strip().lower()
+    if not from_word:
+        raise HTTPException(400, "from_word cannot be empty")
+    try:
+        row = database.edit_synonym(synonym_id, from_word, body.to_word)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    if not row:
+        raise HTTPException(404, "synonym not found")
+    return row
+
+
+class VariantEdit(BaseModel):
+    from_str: str
+    to_str: str
+
+@app.patch("/api/variants/{variant_id}")
+def edit_variant(variant_id: int, body: VariantEdit):
+    from_str = body.from_str.strip().lower()
+    to_str = body.to_str.strip()
+    if not from_str or not to_str:
+        raise HTTPException(400, "from_str and to_str are required")
+    try:
+        row = database.edit_variant(variant_id, from_str, to_str)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    if not row:
+        raise HTTPException(404, "variant not found")
+    return row
+
+
+class SplitFixEdit(BaseModel):
+    pattern: str
+    replacement: str
+
+@app.patch("/api/splitfixes/{fix_id}")
+def edit_splitfix(fix_id: int, body: SplitFixEdit):
+    pattern = body.pattern.strip()
+    replacement = body.replacement.strip()
+    if not pattern or not replacement:
+        raise HTTPException(400, "pattern and replacement are required")
+    row = database.edit_splitfix(fix_id, pattern, replacement)
+    if not row:
+        raise HTTPException(404, "splitfix not found")
+    return row
+
+
 # ── Bulk import ───────────────────────────────────────────────────────────────
 class DictImport(BaseModel):
     pills: list[str]
@@ -288,7 +359,15 @@ class DictImport(BaseModel):
 
 @app.put("/api/dictionary")
 def import_dictionary(body: DictImport):
-    database.replace_full_dict(body.model_dump())
+    # Pydantic v2 model_dump() converts camelCase -> snake_case, breaking "splitFixes".
+    # Build the dict manually to preserve the camelCase key that replace_full_dict expects.
+    raw = {
+        "pills": body.pills,
+        "synonyms": body.synonyms,
+        "variants": body.variants,
+        "splitFixes": body.splitFixes,
+    }
+    database.replace_full_dict(raw)
     return database.get_full_dict()
 
 # ── Reset to defaults ─────────────────────────────────────────────────────────

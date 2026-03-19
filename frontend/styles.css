@@ -1352,3 +1352,152 @@ input[type="text"]:focus {
     border-color: var(--accent);
     color: var(--accent);
 }
+
+/* ── Inline edit — phrase chips ────────────────────────────────────────────── */
+.phrase-chip-label {
+    flex: 1;
+    min-width: 0;
+}
+.phrase-chip-edit {
+    cursor: pointer;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    padding: 0 2px;
+    transition: color 0.15s;
+    opacity: 0;
+}
+.phrase-chip:hover .phrase-chip-edit {
+    opacity: 1;
+}
+.phrase-chip-edit .mi {
+    font-size: 12px;
+}
+.phrase-chip-edit:hover {
+    color: var(--accent);
+}
+.phrase-chip-inp {
+    width: 120px;
+    font-size: 11px;
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    color: var(--text);
+    padding: 1px 5px;
+    outline: none;
+}
+.phrase-chip-save,
+.phrase-chip-cancel {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    padding: 0 2px;
+    color: var(--muted);
+    transition: color 0.15s;
+}
+.phrase-chip-save .mi {
+    font-size: 13px;
+}
+.phrase-chip-cancel .mi {
+    font-size: 13px;
+}
+.phrase-chip-save:hover {
+    color: var(--success);
+}
+.phrase-chip-cancel:hover {
+    color: var(--danger);
+}
+
+/* ── Inline edit — map rows ────────────────────────────────────────────────── */
+.map-row-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 2px;
+}
+.map-row-edit {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--muted);
+    padding: 2px;
+    border-radius: 4px;
+    transition:
+        color 0.15s,
+        background 0.15s;
+    opacity: 0;
+}
+.map-row:hover .map-row-edit {
+    opacity: 1;
+}
+.map-row-edit .mi {
+    font-size: 14px;
+}
+.map-row-edit:hover {
+    color: var(--accent);
+    background: rgba(139, 92, 246, 0.08);
+}
+/* widen the grid when actions column has two buttons */
+.map-row {
+    grid-template-columns: 1fr 28px 1fr 60px;
+}
+.map-edit-inp {
+    font-size: 11px;
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    color: var(--text);
+    padding: 2px 6px;
+    outline: none;
+    width: 100%;
+    min-width: 0;
+}
+.map-edit-inp:focus {
+    border-color: var(--accent2);
+}
+.map-edit-controls {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 3px;
+}
+.map-edit-null-lbl {
+    font-size: 9px;
+    color: var(--muted);
+    white-space: nowrap;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+.map-row-save,
+.map-row-cancel {
+    display: flex;
+    align-items: center;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--muted);
+    padding: 2px;
+    border-radius: 4px;
+    transition:
+        color 0.15s,
+        background 0.15s;
+}
+.map-row-save .mi {
+    font-size: 15px;
+}
+.map-row-cancel .mi {
+    font-size: 15px;
+}
+.map-row-save:hover {
+    color: var(--success);
+    background: rgba(52, 211, 153, 0.08);
+}
+.map-row-cancel:hover {
+    color: var(--danger);
+    background: rgba(248, 113, 113, 0.08);
+}
