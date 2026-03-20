@@ -1084,9 +1084,15 @@ function applySplitFixes(str, fixes) {
 
 function parseOcrText(raw, debug = false) {
     // Normalise curly/smart quotes to straight quotes before any matching
+    // Patreon's font makes capital I look like | to OCR — fix all pipe variants:
+    //   " | "  → " I "   (spaced pipe — most common)
+    //   "|"    → "I"     (pipe inside a word like "never have|ever" — rarer)
+    // We do this before collapsing whitespace so word boundaries are intact.
     const flat = raw
         .replace(/[\u2018\u2019]/g, "'")
         .replace(/[\u201c\u201d]/g, '"')
+        .replace(/ \| /g, " I ") // spaced pipe → capital I
+        .replace(/([a-z])\|([a-z])/gi, "$1I$2") // unspaced pipe between letters
         .replace(/\n+/g, " ")
         .replace(/\s+/g, " ")
         .trim();
