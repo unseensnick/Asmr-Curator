@@ -1374,6 +1374,24 @@ tagInput.addEventListener("keydown", (e) => {
 });
 
 // Generate
+// Characters illegal in filenames on Windows, macOS, and Linux.
+// Windows forbids: \ / : * ? " < > |
+// Also strip leading/trailing dots and spaces per-segment (Windows quirk),
+// collapse multiple spaces, and trim the whole string.
+function sanitizeFilename(str) {
+    return str
+        .replace(/[\\/:*?"<>]/g, "") // remove hard-illegal chars (| kept — used as separator)
+        .replace(/\.{2,}/g, ".") // collapse multiple dots
+        .replace(/\s{2,}/g, " ") // collapse multiple spaces
+        .trim()
+        .replace(/[. ]+$/, ""); // no trailing dots or spaces (Windows Explorer quirk)
+}
+
+// Sanitize each part individually so a bad title doesn't corrupt tag text
+function sanitizeParts(parts) {
+    return parts.map((p) => sanitizeFilename(String(p))).filter(Boolean);
+}
+
 function generate() {
     const title = titleInput.value.trim();
     if (!title) {
@@ -1383,10 +1401,13 @@ function generate() {
         return;
     }
     const suffix = suffixInput.value.trim() || "F4A";
-    outputTextDash.textContent = [title, ...tags, suffix].join(" - ") + "";
+    const parts = [title, ...tags, suffix];
+    // Dash output: sanitized for use as a real filename on Windows/macOS/Linux
+    outputTextDash.textContent = sanitizeParts(parts).join(" - ");
     outputPlaceholderDash.style.display = "none";
     outputResultDash.style.display = "block";
-    outputTextPipe.textContent = [title, ...tags, suffix].join(" | ") + "";
+    // Pipe output: raw, unsanitized — used for metadata/descriptions where special chars are fine
+    outputTextPipe.textContent = parts.join(" | ");
     outputPlaceholderPipe.style.display = "none";
     outputResultPipe.style.display = "block";
 }
@@ -1536,7 +1557,9 @@ function getNewName() {
             ? outputTextDash.textContent.trim()
             : outputTextPipe.textContent.trim();
     if (!text || !fbSelectedName) return null;
-    return text + getExt(fbSelectedName);
+    // Sanitize for the filesystem — illegal chars stripped only here,
+    // not in the display/metadata output above
+    return sanitizeFilename(text) + getExt(fbSelectedName);
 }
 
 const filenameLengthInfo = document.getElementById("filenameLengthInfo");
