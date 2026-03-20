@@ -64,11 +64,11 @@ DEFAULT_SPLITFIXES = [
     (r"cozy\s+cabin", "cozy cabin"),
     (r"thick\s+girl", "thick girl"),
     (r"friends\s+to\s+more", "friends to more"),
-    (r"friends\s+to?", "friends to ?"),
     (r"soft\s+spotforyou", "soft spot for you"),
     (r"watching\s+porn", "watching porn"),
     (r"sisters\s+best\s+friend", "sister's best friend"),
     (r"friends\s+lovers", "friends to lovers"),
+    (r"friends\s+to\?", "friends to ?"),  # must come AFTER all specific "friends to X" patterns
 ]
 
 
@@ -305,8 +305,40 @@ def reset_to_defaults():
         )
 
 
+def migrate_db():
+    """Fix known bad data in existing databases."""
+    with get_conn() as conn:
+        # Fix: friends\s+to? had unescaped ? making "o" optional, breaking "friends to lovers"
+        # Replace the bad pattern with the correct escaped version
+        conn.execute(
+            "UPDATE splitfixes SET pattern=? WHERE pattern=?",
+            (r"friends\s+to\?", r"friends\s+to?")
+        )
+        # Also fix ordering: move the friends\s+to\? fix to after friends\s+lovers
+        # We do this by giving it a high ID — delete and re-insert at end
+        row = conn.execute(
+            "SELECT id, replacement FROM splitfixes WHERE pattern=?",
+            (r"friends\s+to\?",)
+        ).fetchone()
+        if row:
+            # Check if there are any "friends\s+lovers" or "friends\s+to\s+more" entries with higher IDs
+            later = conn.execute(
+                "SELECT id FROM splitfixes WHERE pattern IN (?,?) AND id > ?",
+                (r"friends\s+lovers", r"friends\s+to\s+more", row["id"])
+            ).fetchone()
+            if not later:
+                # friends\s+to\? fires before friends\s+lovers — fix by moving it to end
+                rep = row["replacement"]
+                conn.execute("DELETE FROM splitfixes WHERE pattern=?", (r"friends\s+to\?",))
+                conn.execute(
+                    "INSERT INTO splitfixes (pattern, replacement) VALUES (?,?)",
+                    (r"friends\s+to\?", rep)
+                )
+
+
 # Init on import
 init_db()
+migrate_db()
 
 
 # ── Edit (PATCH) helpers ──────────────────────────────────────────────────────

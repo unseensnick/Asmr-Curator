@@ -1,5 +1,6 @@
 # Data (SQLite db — back up separately)
 data/dictionary.db
+data/asmr-tag-dictionary.json
 
 # Python
 __pycache__/
