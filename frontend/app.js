@@ -1337,12 +1337,23 @@ function renderTags() {
 function addTag() {
     const val = tagInput.value.trim();
     if (!val) return;
-    const titled = val.replace(
-        /\w\S*/g,
-        (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase(),
-    );
-    if (!tags.map((t) => t.toLowerCase()).includes(titled.toLowerCase())) {
-        tags.push(titled);
+    // Use the same normalize() logic as the parser:
+    // check variants → synonyms → pill display map → SFW/NSFW → toTitleCase
+    // but if the user typed mixed/upper case that doesn't match any dictionary
+    // entry, preserve their casing exactly rather than forcing title-case.
+    const k = val.toLowerCase();
+    let display;
+    if (k in dict._varMap) display = dict._varMap[k];
+    else if (k in dict._synMap) display = dict._synMap[k] ?? val;
+    else {
+        const pillMatch = dict._pillPhrases.find((p) => p.toLowerCase() === k);
+        if (pillMatch) display = pillMatch;
+        else if (/^(sfw|nsfw)$/i.test(val)) display = val.toUpperCase();
+        else display = val; // keep exactly as typed
+    }
+    if (!display) display = val; // synonym was null — keep the input
+    if (!tags.map((t) => t.toLowerCase()).includes(display.toLowerCase())) {
+        tags.push(display);
         renderTags();
     }
     tagInput.value = "";
