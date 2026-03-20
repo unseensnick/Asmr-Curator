@@ -1136,7 +1136,7 @@ function parseOcrText(raw, debug = false) {
     const pillRaw = tailM ? tailM[1].trim() : "";
     const pillTokens = pillRaw
         .split(/\s+/)
-        .map((t) => t.replace(/[^a-zA-Z\s\-']/g, "").trim())
+        .map((t) => t.replace(/[^a-zA-Z0-9\s\-']/g, "").trim())
         .filter((t) => t.length >= 2);
 
     const blobBefore = pillTokens.join(" ").toLowerCase();
