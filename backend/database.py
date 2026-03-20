@@ -16,6 +16,10 @@ DEFAULT_PILLS = [
     "yandere", "tsundere", "kuudere", "spoonsex", "spoon sex", "shy girl",
     "thick girl", "friends to more", "goth girl", "watching porn",
     "sisters best friend", "multiple orgasms", "nipple sucking",
+    # common tags missing from original defaults
+    "aftercare", "blowjob", "kissing", "cheerleader", "popular girl",
+    "hair pulling", "gagging", "public", "sweet aftercare", "flirting",
+    "car cuddles", "drive-in movie", "rough sex", "dirty talk",
 ]
 
 DEFAULT_SYNONYMS = [
@@ -46,6 +50,10 @@ DEFAULT_VARIANTS = [
     ("chairsex", "Chair Sex"),
     ("friends to lovers", "Friends to Lovers"),
     ("friendslovers", "Friends to Lovers"),
+    ("populargirl", "Popular Girl"),
+    ("hairpulling", "Hair Pulling"),
+    ("hairpuling", "Hair Pulling"),
+    ("sweetaftercare", "Sweet Aftercare"),
 ]
 
 DEFAULT_SPLITFIXES = [
@@ -68,7 +76,10 @@ DEFAULT_SPLITFIXES = [
     (r"watching\s+porn", "watching porn"),
     (r"sisters\s+best\s+friend", "sister's best friend"),
     (r"friends\s+lovers", "friends to lovers"),
-    (r"friends\s+to\?", "friends to ?"),  # must come AFTER all specific "friends to X" patterns
+    (r"friends\s+to\?", "friends to ?"),  
+    (r"popular\s+girl", "popular girl"),
+    (r"hair\s+pulling", "hair pulling"),
+    (r"sweet\s+aftercare", "sweet aftercare"),
 ]
 
 
