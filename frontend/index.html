@@ -61,6 +61,13 @@
                     <div class="status" id="extractStatus"></div>
                     <div class="debug-toggle" id="debugToggle">
                         <span id="debugArrow">▶</span> Raw OCR output
+                        <button
+                            class="debug-copy-btn"
+                            id="debugCopyBtn"
+                            title="Copy raw OCR text"
+                        >
+                            <span class="mi">content_copy</span>
+                        </button>
                     </div>
                     <div class="debug-body" id="debugBody">
                         <pre class="debug-pre" id="ocrRawText"></pre>
@@ -462,6 +469,9 @@
                             >0</span
                         >
                     </button>
+                    <button class="dict-tab" data-pane="test">
+                        <span class="mi">science</span> Test
+                    </button>
                 </div>
 
                 <!-- Modal body (scrollable) -->
@@ -640,6 +650,42 @@
                                     >
                                         <span class="mi">add</span> Add Fix
                                     </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Pane: Test -->
+                    <div class="dict-pane" id="pane-test">
+                        <div class="dict-callout">
+                            <span class="mi">info</span>
+                            <div>
+                                Paste raw OCR text and run the parser to see
+                                exactly how each tag is matched. Use the
+                                quick-add buttons next to unrecognised tokens to
+                                jump straight to the right dictionary tab with
+                                the form pre-filled. <kbd>Ctrl+Enter</kbd> to
+                                run.
+                            </div>
+                        </div>
+                        <div class="test-layout">
+                            <div class="test-input-col">
+                                <label class="test-label">Raw OCR text</label>
+                                <textarea
+                                    id="testOcrInput"
+                                    class="test-textarea"
+                                    placeholder="Paste OCR output here…&#10;&#10;e.g.&#10;My Title (Friends to Lovers) (SFW)&#10;Happy listening&#10;carcuddles drivein movie flirting"
+                                ></textarea>
+                                <button
+                                    class="btn btn-ghost btn-sm"
+                                    id="testRunBtn"
+                                >
+                                    <span class="mi">play_arrow</span> Run
+                                    parser
+                                </button>
+                            </div>
+                            <div class="test-output-col" id="testOutput">
+                                <div class="test-empty">
+                                    Run the parser to see results
                                 </div>
                             </div>
                         </div>

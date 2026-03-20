@@ -119,10 +119,27 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeModal();
 });
 
-debugToggle.addEventListener("click", () => {
+debugToggle.addEventListener("click", (e) => {
+    if (e.target.closest("#debugCopyBtn")) return;
     const open = debugBody.style.display !== "none";
     debugBody.style.display = open ? "none" : "block";
     debugArrow.textContent = open ? "▶" : "▼";
+});
+
+document.getElementById("debugCopyBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const text = ocrRawText.textContent;
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById("debugCopyBtn");
+        const icon = btn.querySelector(".mi");
+        icon.textContent = "check";
+        btn.classList.add("copied");
+        setTimeout(() => {
+            icon.textContent = "content_copy";
+            btn.classList.remove("copied");
+        }, 2000);
+    });
 });
 
 // ── Dictionary (SQLite via API) ───────────────────────────────
@@ -832,6 +849,189 @@ function renderAll() {
 // Boot: load from API
 loadDict();
 
+// ── Test pane ─────────────────────────────────────────────────────────────────
+const HOW_META = {
+    paren: {
+        label: "( )",
+        cls: "how-paren",
+        tip: "Extracted from parentheses in the title",
+    },
+    phrase: {
+        label: "phrase",
+        cls: "how-phrase",
+        tip: "Matched a known phrase from the dictionary",
+    },
+    variant: {
+        label: "variant",
+        cls: "how-variant",
+        tip: "Normalised via a Variants mapping",
+    },
+    synonym: {
+        label: "synonym",
+        cls: "how-synonym",
+        tip: "Replaced via a Synonyms mapping",
+    },
+    suppressed: {
+        label: "suppress",
+        cls: "how-suppress",
+        tip: "Suppressed by a Synonyms null mapping",
+    },
+    titlecase: {
+        label: "fallback",
+        cls: "how-fallback",
+        tip: "Unknown token — title-cased as fallback",
+    },
+    special: {
+        label: "SFW/NSFW",
+        cls: "how-special",
+        tip: "Matched the SFW/NSFW special case",
+    },
+    unknown: {
+        label: "unknown",
+        cls: "how-unknown",
+        tip: "Not in dictionary — passed through",
+    },
+};
+
+function escHtml(str) {
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+}
+
+function renderTestOutput(result) {
+    const out = document.getElementById("testOutput");
+    const d = result._debug;
+
+    // Tag chips
+    let chipsHtml = result.tags
+        .map((tag) => {
+            const td = d.tagDebug.find((x) => x.display === tag);
+            const how = td
+                ? td.source === "paren"
+                    ? "paren"
+                    : td.how
+                : "titlecase";
+            const meta = HOW_META[how] || HOW_META.titlecase;
+            return `<span class="test-chip" title="${meta.tip}">
+            ${escHtml(tag)}<span class="test-chip-how ${meta.cls}">${meta.label}</span>
+        </span>`;
+        })
+        .join("");
+
+    const suppressed = d.tagDebug.filter((x) => x.how === "suppressed");
+    if (suppressed.length) {
+        chipsHtml += suppressed
+            .map(
+                (x) =>
+                    `<span class="test-chip test-chip-suppressed" title="Suppressed by synonyms mapping">
+                ${escHtml(x.original)}<span class="test-chip-how how-suppress">suppress</span>
+            </span>`,
+            )
+            .join("");
+    }
+
+    // Blob diff
+    const blobSection = d.blobFixApplied
+        ? `<div class="test-section">
+            <div class="test-section-title"><span class="mi" style="font-size:13px;vertical-align:-2px">content_cut</span> Split fix applied to pill blob</div>
+            <div class="test-diff"><span class="test-diff-before">${escHtml(d.blobBefore)}</span><span class="test-diff-arrow">→</span><span class="test-diff-after">${escHtml(d.blobFixed)}</span></div>
+           </div>`
+        : "";
+
+    // Paren fix diffs
+    const parenFixes = d.parenDebug.filter((x) => x.fixApplied);
+    const parenFixSection = parenFixes.length
+        ? `<div class="test-section">
+            <div class="test-section-title"><span class="mi" style="font-size:13px;vertical-align:-2px">content_cut</span> Split fixes applied to paren tags</div>
+            ${parenFixes.map((x) => `<div class="test-diff"><span class="test-diff-before">${escHtml(x.raw)}</span><span class="test-diff-arrow">→</span><span class="test-diff-after">${escHtml(x.fixed)}</span></div>`).join("")}
+           </div>`
+        : "";
+
+    // Unknown tokens
+    const unknownSection = d.unknownTokens.length
+        ? `<div class="test-section test-section-warn">
+            <div class="test-section-title"><span class="mi" style="font-size:13px;vertical-align:-2px">warning</span> Unrecognised tokens — add a rule to fix these</div>
+            <div class="test-unknown-list">
+                ${d.unknownTokens
+                    .map(
+                        (t) => `
+                <div class="test-unknown-row">
+                    <span class="test-unknown-token">${escHtml(t)}</span>
+                    <button class="test-qf-btn" data-token="${escHtml(t)}" data-action="splitfix"><span class="mi">content_cut</span> split fix</button>
+                    <button class="test-qf-btn" data-token="${escHtml(t)}" data-action="variant"><span class="mi">auto_fix_high</span> variant</button>
+                    <button class="test-qf-btn" data-token="${escHtml(t)}" data-action="phrase"><span class="mi">label</span> phrase</button>
+                </div>`,
+                    )
+                    .join("")}
+            </div>
+           </div>`
+        : "";
+
+    // Remainder
+    const remSection = d.remainderAfterMatch.trim()
+        ? `<div class="test-section test-section-muted">
+            <div class="test-section-title">Unmatched remainder after greedy pill scan</div>
+            <code class="test-rem">${escHtml(d.remainderAfterMatch)}</code>
+           </div>`
+        : "";
+
+    out.innerHTML = `
+        <div class="test-section">
+            <div class="test-section-title">Title extracted</div>
+            <div class="test-title-val">${escHtml(result.title) || "<em>none</em>"}</div>
+        </div>
+        <div class="test-section">
+            <div class="test-section-title">Final tags (${result.tags.length})</div>
+            <div class="test-chips">${chipsHtml || '<em class="test-empty-inline">no tags found</em>'}</div>
+        </div>
+        ${blobSection}${parenFixSection}${unknownSection}${remSection}`;
+
+    // Quick-fix buttons — jump to the right tab and pre-fill the add form
+    out.querySelectorAll(".test-qf-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            const token = btn.dataset.token;
+            const action = btn.dataset.action;
+            if (action === "splitfix") {
+                document
+                    .querySelector('.dict-tab[data-pane="splitfixes"]')
+                    .click();
+                const pat = document.getElementById("sfPatInput");
+                pat.value = token.replace(/([.*+?^${}()|[\]\\])/g, "\\$&");
+                document.getElementById("sfRepInput").focus();
+            } else if (action === "variant") {
+                document
+                    .querySelector('.dict-tab[data-pane="variants"]')
+                    .click();
+                const from = document.getElementById("varFromInput");
+                from.value = token;
+                document.getElementById("varToInput").focus();
+            } else if (action === "phrase") {
+                document
+                    .querySelector('.dict-tab[data-pane="phrases"]')
+                    .click();
+                const inp = document.getElementById("pillAddInput");
+                inp.value = token;
+                inp.focus();
+            }
+            btn.closest(".test-unknown-row").style.opacity = "0.45";
+        });
+    });
+}
+
+document.getElementById("testRunBtn").addEventListener("click", () => {
+    const raw = document.getElementById("testOcrInput").value;
+    if (!raw.trim()) return;
+    const result = parseOcrText(raw, true);
+    renderTestOutput(result);
+});
+
+document.getElementById("testOcrInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey))
+        document.getElementById("testRunBtn").click();
+});
+
 // Parser
 
 function toTitleCase(str) {
@@ -882,30 +1082,35 @@ function applySplitFixes(str, fixes) {
     return s.replace(/\s+/g, " ").trim();
 }
 
-function parseOcrText(raw) {
+function parseOcrText(raw, debug = false) {
     const flat = raw.replace(/\n+/g, " ").replace(/\s+/g, " ").trim();
 
     const compiledFixes = compileSplitFixes();
     const synonyms = dict._synMap;
     const variants = dict._varMap;
 
-    // ── Build a lookup: lowercase key → display form ──────────────────────
-    // Pills store their desired display casing in _pillPhrases.
-    // We map lower → phrase so normalize() can use the stored display form.
     const pillDisplayMap = {};
     for (const p of dict._pillPhrases) {
         pillDisplayMap[p.toLowerCase()] = p;
     }
 
-    // ── Extract paren tags — apply splitFixes so "friends and lovers" → "friends to lovers" ──
+    // ── Paren tags ────────────────────────────────────────────────────────
     const parenTags = [];
+    const parenDebug = [];
     const rx = /\(([^)]{2,80})\)/g;
     let m;
     while ((m = rx.exec(flat)) !== null) {
-        const inner = applySplitFixes(m[1].trim(), compiledFixes);
-        if (/^\d+\s*(days?|hours?|ago)/i.test(inner) || /^[;:,.]/.test(inner))
+        const rawInner = m[1].trim();
+        const fixed = applySplitFixes(rawInner, compiledFixes);
+        if (/^\d+\s*(days?|hours?|ago)/i.test(fixed) || /^[;:,.]/.test(fixed))
             continue;
-        parenTags.push(inner);
+        parenTags.push(fixed);
+        if (debug)
+            parenDebug.push({
+                raw: rawInner,
+                fixed,
+                fixApplied: fixed !== rawInner,
+            });
     }
 
     const fp = flat.indexOf("(");
@@ -914,7 +1119,7 @@ function parseOcrText(raw) {
         .replace(/[-–\s]+$/, "")
         .trim();
 
-    // ── Pill section (text after common signoff phrases) ──────────────────
+    // ── Pill blob ─────────────────────────────────────────────────────────
     const soIdx = flat.search(
         /happy listening|feedback as always|much appreciated/i,
     );
@@ -928,56 +1133,107 @@ function parseOcrText(raw) {
         .map((t) => t.replace(/[^a-zA-Z\s\-]/g, "").trim())
         .filter((t) => t.length >= 2);
 
-    // Apply splitFixes to the whole blob first so multi-word phrases are
-    // already joined before we try to match pills greedily.
-    let rem = applySplitFixes(
-        pillTokens.join(" ").toLowerCase(),
-        compiledFixes,
-    );
+    const blobBefore = pillTokens.join(" ").toLowerCase();
+    let rem = applySplitFixes(blobBefore, compiledFixes);
+    const blobFixed = rem;
 
     const foundPills = [];
-    // Sort longest-first so "friends to lovers" matches before "friends" or "lovers"
+    const pillDebug = [];
+    // Sort longest-first; use word-boundary lookarounds so "cuddles" won't
+    // match inside "carcuddles" and leave a spurious "car" token behind.
     const knownPillsSorted = [...dict._pillPhrases].sort(
         (a, b) => b.length - a.length,
     );
     for (const p of knownPillsSorted) {
         const pLow = p.toLowerCase();
-        if (rem.includes(pLow)) {
-            foundPills.push(pLow); // store lowercase key; normalize() will restore display form
-            rem = rem.replace(pLow, "").replace(/\s+/g, " ").trim();
+        const pillRx = new RegExp(
+            "(?<![a-z])" +
+                pLow.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+                "(?![a-z])",
+            "i",
+        );
+        if (pillRx.test(rem)) {
+            foundPills.push(pLow);
+            if (debug)
+                pillDebug.push({ token: pLow, how: "phrase", display: p });
+            rem = rem.replace(pillRx, "").replace(/\s+/g, " ").trim();
         }
     }
-    // Remaining single tokens (unknown tags)
+    const unknownTokens = [];
     rem.split(/\s+/).forEach((t) => {
-        if (t.length >= 3 && t.length <= 30 && /^[a-z]/.test(t))
+        if (t.length >= 3 && t.length <= 30 && /^[a-z]/.test(t)) {
             foundPills.push(t);
+            unknownTokens.push(t);
+            if (debug) pillDebug.push({ token: t, how: "unknown" });
+        }
     });
 
-    // ── Normalize: restore proper display casing ──────────────────────────
+    // ── Normalize ─────────────────────────────────────────────────────────
     const normalize = (t) => {
         const k = t.toLowerCase().trim();
-        // 1. Explicit variant mapping (highest priority — exact display form)
         if (k in variants) return variants[k];
-        // 2. Synonym mapping (may return null → suppress)
         if (k in synonyms) return synonyms[k];
-        // 3. Known pill — return its stored display form
         if (k in pillDisplayMap) return pillDisplayMap[k];
-        // 4. ALL-CAPS special cases
         if (/^(sfw|nsfw)$/i.test(t)) return t.toUpperCase();
-        // 5. Fallback: title-case
         return toTitleCase(t);
+    };
+
+    const normalizeHow = (t) => {
+        const k = t.toLowerCase().trim();
+        if (k in variants) return "variant";
+        if (k in synonyms)
+            return synonyms[k] === null ? "suppressed" : "synonym";
+        if (k in pillDisplayMap) return "phrase";
+        if (/^(sfw|nsfw)$/i.test(t)) return "special";
+        return "titlecase";
     };
 
     const seen = new Set();
     const finalTags = [];
+    const tagDebug = [];
     for (const t of [...parenTags, ...foundPills]) {
         const n = normalize(t);
-        if (n === null) continue;
+        if (n === null) {
+            if (debug)
+                tagDebug.push({
+                    display: null,
+                    how: "suppressed",
+                    source: parenTags.includes(t) ? "paren" : "pill",
+                    original: t,
+                });
+            continue;
+        }
         const k = n.toLowerCase();
         if (!seen.has(k)) {
             seen.add(k);
             finalTags.push(n);
+            if (debug)
+                tagDebug.push({
+                    display: n,
+                    how: normalizeHow(t),
+                    source: parenTags.includes(t) ? "paren" : "pill",
+                    original: t,
+                });
         }
+    }
+
+    if (debug) {
+        return {
+            title: coreTitle,
+            tags: finalTags,
+            _parenTags: parenTags,
+            _pillTags: foundPills,
+            _debug: {
+                blobBefore,
+                blobFixed,
+                blobFixApplied: blobBefore !== blobFixed,
+                parenDebug,
+                pillDebug,
+                tagDebug,
+                unknownTokens,
+                remainderAfterMatch: rem,
+            },
+        };
     }
 
     return {
