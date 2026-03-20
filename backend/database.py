@@ -20,6 +20,7 @@ DEFAULT_PILLS = [
     "aftercare", "blowjob", "kissing", "cheerleader", "popular girl",
     "hair pulling", "gagging", "public", "sweet aftercare", "flirting",
     "car cuddles", "drive-in movie", "rough sex", "dirty talk",
+    "risky", "more", "teasing", "enemies to fuckbuddies",
 ]
 
 DEFAULT_SYNONYMS = [
@@ -54,6 +55,10 @@ DEFAULT_VARIANTS = [
     ("hairpulling", "Hair Pulling"),
     ("hairpuling", "Hair Pulling"),
     ("sweetaftercare", "Sweet Aftercare"),
+    ("best friends sister", "Best Friend's Sister"),
+    ("bestfriendssister", "Best Friend's Sister"),
+    ("enemies to fuckbuddies", "Enemies to Fuckbuddies"),
+    ("enemiestofuckbuddies", "Enemies to Fuckbuddies"),
 ]
 
 DEFAULT_SPLITFIXES = [
@@ -80,6 +85,8 @@ DEFAULT_SPLITFIXES = [
     (r"popular\s+girl", "popular girl"),
     (r"hair\s+pulling", "hair pulling"),
     (r"sweet\s+aftercare", "sweet aftercare"),
+    (r"best\s+friends\s+sister", "best friend's sister"),
+    (r"enemies\s+to\s+fuckbuddies", "enemies to fuckbuddies"),
 ]
 
 
