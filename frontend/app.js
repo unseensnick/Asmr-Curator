@@ -1381,10 +1381,10 @@ tagInput.addEventListener("keydown", (e) => {
 function sanitizeFilename(str) {
     return str
         .replace(/[\\/:*?"<>]/g, "") // remove hard-illegal chars (| kept — used as separator)
-        .replace(/\.{2,}/g, ".") // collapse multiple dots
         .replace(/\s{2,}/g, " ") // collapse multiple spaces
         .trim()
         .replace(/[. ]+$/, ""); // no trailing dots or spaces (Windows Explorer quirk)
+    // Note: multiple dots (e.g. "...") are intentionally kept — ellipsis is valid in filenames
 }
 
 // Sanitize each part individually so a bad title doesn't corrupt tag text
