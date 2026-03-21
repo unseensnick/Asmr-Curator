@@ -1091,6 +1091,7 @@ function parseOcrText(raw, debug = false) {
     const flat = raw
         .replace(/[\u2018\u2019]/g, "'")
         .replace(/[\u201c\u201d]/g, '"')
+        .replace(/\u2026/g, "...") // unicode ellipsis → three regular dots
         .replace(/ \| /g, " I ") // spaced pipe → capital I
         .replace(/([a-z])\|([a-z])/gi, "$1I$2") // unspaced pipe between letters
         .replace(/\n+/g, " ")
@@ -1132,14 +1133,37 @@ function parseOcrText(raw, debug = false) {
         .trim();
 
     // ── Pill blob ─────────────────────────────────────────────────────────
-    const soIdx = flat.search(
-        /happy listening|feedback as always|much appreciated/i,
-    );
+    // Primary: scan text after a known signoff phrase
+    const SIGNOFF_RX =
+        /happy listening|feedback as always|much appreciated|hope you enjoy|hope you love it|enjoy[^a-z]|love you all|thank you all|let me know/i;
+    const soIdx = flat.search(SIGNOFF_RX);
     const after = soIdx > -1 ? flat.slice(soIdx) : "";
     const tailM = after.match(
-        /(?:happy listening[^a-z]*|much appreciated[^a-z]*)(.*)/i,
+        /(?:happy listening|much appreciated|feedback as always|hope you enjoy|hope you love it|enjoy[^a-z]|love you all|thank you all|let me know)[^a-z]*(.*)/i,
     );
-    const pillRaw = tailM ? tailM[1].trim() : "";
+    let pillRaw = tailM ? tailM[1].trim() : "";
+
+    // Fallback: when no signoff is found, scan bottom-up from the raw lines.
+    // Patreon always puts tags at the very end as short lines before metadata.
+    if (!pillRaw) {
+        const rawLines = raw
+            .split(/\n/)
+            .map((l) => l.trim())
+            .filter(Boolean);
+        const tagLines = [];
+        for (let i = rawLines.length - 1; i >= 0; i--) {
+            const line = rawLines[i];
+            // Skip engagement/metadata lines: "W120 @6 (share", likes/comments counts
+            if (/[@©]\d+|W\d+|\d+\s*@|^\d+\s+\d+/.test(line)) continue;
+            // Stop at long body-text sentences (> 6 words = prose, not a tag line)
+            if (line.split(/\s+/).length > 6) break;
+            // Stop at paren-tag only lines (already captured above)
+            if (/^\([^)]+\)$/.test(line)) break;
+            tagLines.unshift(line);
+        }
+        pillRaw = tagLines.join(" ").trim();
+    }
+
     const pillTokens = pillRaw
         .split(/\s+/)
         .map((t) => t.replace(/[^a-zA-Z0-9\s\-']/g, "").trim())
@@ -1376,15 +1400,15 @@ tagInput.addEventListener("keydown", (e) => {
 // Generate
 // Characters illegal in filenames on Windows, macOS, and Linux.
 // Windows forbids: \ / : * ? " < > |
-// Also strip leading/trailing dots and spaces per-segment (Windows quirk),
-// collapse multiple spaces, and trim the whole string.
+// Strip characters illegal on Windows/macOS/Linux.
+// Windows quirk: filenames cannot END in a single dot or space — but "..." is fine.
 function sanitizeFilename(str) {
     return str
-        .replace(/[\\/:*?"<>]/g, "") // remove hard-illegal chars (| kept — used as separator)
+        .replace(/[\\/:*?"<>]/g, "") // remove hard-illegal chars (| kept as separator)
         .replace(/\s{2,}/g, " ") // collapse multiple spaces
         .trim()
-        .replace(/[. ]+$/, ""); // no trailing dots or spaces (Windows Explorer quirk)
-    // Note: multiple dots (e.g. "...") are intentionally kept — ellipsis is valid in filenames
+        .replace(/(?<!\.)\.$/, "") // strip a single trailing dot only (not ellipsis)
+        .replace(/ +$/, ""); // strip trailing spaces
 }
 
 // Sanitize each part individually so a bad title doesn't corrupt tag text
