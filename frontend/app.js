@@ -1133,35 +1133,124 @@ function parseOcrText(raw, debug = false) {
         .trim();
 
     // ── Pill blob ─────────────────────────────────────────────────────────
-    // Primary: scan text after a known signoff phrase
-    const SIGNOFF_RX =
-        /happy listening|feedback as always|much appreciated|hope you enjoy|hope you love it|enjoy[^a-z]|love you all|thank you all|let me know/i;
-    const soIdx = flat.search(SIGNOFF_RX);
-    const after = soIdx > -1 ? flat.slice(soIdx) : "";
-    const tailM = after.match(
-        /(?:happy listening|much appreciated|feedback as always|hope you enjoy|hope you love it|enjoy[^a-z]|love you all|thank you all|let me know)[^a-z]*(.*)/i,
-    );
-    let pillRaw = tailM ? tailM[1].trim() : "";
+    // Bottom-up line scanner: read from the bottom of the raw OCR, skip metadata
+    // lines, and stop when we hit prose (body text). Tag lines are short and
+    // don't contain common prose words or mid-sentence punctuation.
+    const rawLines = raw
+        .split(/\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
 
-    // Fallback: when no signoff is found, scan bottom-up from the raw lines.
-    // Patreon always puts tags at the very end as short lines before metadata.
+    // Prose detector: a line is body text if it has common function words,
+    // mid-sentence punctuation, or sentence-ending punctuation after 4+ words.
+    const PROSE_WORDS = new Set([
+        "and",
+        "the",
+        "is",
+        "are",
+        "was",
+        "were",
+        "have",
+        "has",
+        "had",
+        "in",
+        "on",
+        "at",
+        "for",
+        "but",
+        "so",
+        "if",
+        "it",
+        "its",
+        "that",
+        "this",
+        "with",
+        "from",
+        "your",
+        "you",
+        "my",
+        "me",
+        "we",
+        "they",
+        "their",
+        "there",
+        "been",
+        "will",
+        "can",
+        "case",
+        "one",
+        "click",
+        "right",
+        "first",
+        "part",
+        "missed",
+        "listen",
+        "promised",
+        "case",
+        "re",
+        "ve",
+        "ll",
+        "just",
+        "here",
+        "out",
+        "do",
+        "did",
+        "went",
+        "put",
+        "let",
+    ]);
+    function isProse(line) {
+        const words = line.split(/\s+/);
+        const wordSet = new Set(
+            words.map((w) => w.toLowerCase().replace(/[.,!?'"]/g, "")),
+        );
+        const proseCount = [...wordSet].filter((w) =>
+            PROSE_WORDS.has(w),
+        ).length;
+        const hasMidPunct = /\w[,!?]\s+\w/.test(line);
+        const hasSentenceEnd = /\w[.!?]\s*$/.test(line) && words.length > 4;
+        return proseCount >= 2 || hasMidPunct || hasSentenceEnd;
+    }
+
+    const tagLines = [];
+    for (let i = rawLines.length - 1; i >= 0; i--) {
+        const line = rawLines[i];
+        // Skip engagement/metadata: "W120 @6", "(share", "eee", like counts
+        if (/[@©]\d+|W\d+|\d+\s*@|^©|^eee$|^\d+$/.test(line)) continue;
+        // Stop at known signoff lines (they precede tags but aren't tags themselves)
+        if (
+            /^happy listening|^feedback as always|^much appreciated/i.test(line)
+        )
+            break;
+        // Stop at paren-tag-only lines (already captured above)
+        if (/^\([^)]+\)$/.test(line)) break;
+        // Stop at prose body-text lines
+        if (isProse(line)) break;
+        tagLines.unshift(line);
+    }
+    let pillRaw = tagLines.join(" ").trim();
+
+    // If bottom-up found nothing, try: look for lines immediately AFTER a signoff line
     if (!pillRaw) {
-        const rawLines = raw
-            .split(/\n/)
-            .map((l) => l.trim())
-            .filter(Boolean);
-        const tagLines = [];
+        const SIGNOFF_LINE_RX =
+            /^(happy listening|feedback as always|much appreciated|enjoy\s*[<♡♥©]|love you all|thank you all)/i;
+        let signoffLineIdx = -1;
         for (let i = rawLines.length - 1; i >= 0; i--) {
-            const line = rawLines[i];
-            // Skip engagement/metadata lines: "W120 @6 (share", likes/comments counts
-            if (/[@©]\d+|W\d+|\d+\s*@|^\d+\s+\d+/.test(line)) continue;
-            // Stop at long body-text sentences (> 6 words = prose, not a tag line)
-            if (line.split(/\s+/).length > 6) break;
-            // Stop at paren-tag only lines (already captured above)
-            if (/^\([^)]+\)$/.test(line)) break;
-            tagLines.unshift(line);
+            if (SIGNOFF_LINE_RX.test(rawLines[i])) {
+                signoffLineIdx = i;
+                break;
+            }
         }
-        pillRaw = tagLines.join(" ").trim();
+        if (signoffLineIdx > -1) {
+            const postLines = rawLines.slice(signoffLineIdx + 1);
+            const fallbackTags = [];
+            for (const line of postLines) {
+                if (/[@©]\d+|W\d+|\d+\s*@|^©|^eee$|^\d+$/.test(line)) continue;
+                if (isProse(line)) break;
+                fallbackTags.push(line);
+            }
+            pillRaw = fallbackTags.join(" ").trim();
+        }
     }
 
     const pillTokens = pillRaw
