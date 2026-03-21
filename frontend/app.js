@@ -1556,6 +1556,7 @@ let fbSelectedPath = null;
 let fbSelectedName = null;
 let renameSep = "dash";
 let fbSearchTimer = null;
+let fbSearchIn = "filename"; // "filename" | "folder" | "both"
 
 const fbList = document.getElementById("fbList");
 const fbSearch = document.getElementById("fbSearch");
@@ -1581,8 +1582,10 @@ async function fbLoadAll() {
     showFbError("");
     try {
         const q = fbSearch.value.trim();
-        const url =
-            "/api/files/search" + (q ? "?q=" + encodeURIComponent(q) : "");
+        const params = new URLSearchParams();
+        if (q) params.set("q", q);
+        params.set("search_in", fbSearchIn);
+        const url = "/api/files/search?" + params.toString();
         const data = await (await fetch(url)).json();
         if (data.detail) throw new Error(data.detail);
         fbAllFiles = data.files;
@@ -1658,6 +1661,18 @@ fbSearch.addEventListener("input", () => {
 });
 
 fbRefreshBtn.addEventListener("click", fbLoadAll);
+
+// Search-in toggle
+document.querySelectorAll(".fb-si-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+        fbSearchIn = btn.dataset.si;
+        document
+            .querySelectorAll(".fb-si-btn")
+            .forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        fbLoadAll();
+    });
+});
 
 function getExt(name) {
     const m = name.match(/(\.[^.]+)$/);

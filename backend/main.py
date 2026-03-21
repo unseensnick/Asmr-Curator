@@ -60,10 +60,10 @@ def list_files(subdir: str = ""):
 
 
 @app.get("/api/files/search")
-def search_files(q: str = ""):
+def search_files(q: str = "", search_in: str = "filename"):
     """
     Recursively walk AUDIO_ROOT and return all audio/video files.
-    If q is provided, filter by filename containing q (case-insensitive).
+    search_in: "filename" | "folder" | "both"
     """
     audio_root = AUDIO_ROOT.resolve()
     if not audio_root.exists():
@@ -83,19 +83,27 @@ def search_files(q: str = ""):
                 continue
             if entry.suffix.lower() not in AUDIO_EXTS:
                 continue
-            if q_lower and q_lower not in entry.name.lower():
-                continue
             rel = entry.relative_to(audio_root)
+            folder = str(rel.parent) if str(rel.parent) != "." else ""
+            if q_lower:
+                match_name   = q_lower in entry.name.lower()
+                match_folder = q_lower in folder.lower()
+                if search_in == "filename" and not match_name:
+                    continue
+                elif search_in == "folder" and not match_folder:
+                    continue
+                elif search_in == "both" and not (match_name or match_folder):
+                    continue
             results.append({
                 "name": entry.name,
                 "ext": entry.suffix.lower(),
                 "path": str(rel),
-                "folder": str(rel.parent) if str(rel.parent) != "." else "",
+                "folder": folder,
             })
         except (PermissionError, OSError):
             continue
 
-    return {"query": q, "total": len(results), "files": results}
+    return {"query": q, "search_in": search_in, "total": len(results), "files": results}
 
 
 @app.get("/api/files/debug")

@@ -238,8 +238,31 @@
                     <input
                         type="text"
                         id="fbSearch"
-                        placeholder="Search files… (leave empty to show all)"
+                        placeholder="Search… (leave empty to show all)"
                     />
+                    <div class="fb-search-in" id="fbSearchIn">
+                        <button
+                            class="fb-si-btn active"
+                            data-si="filename"
+                            title="Search filenames"
+                        >
+                            file
+                        </button>
+                        <button
+                            class="fb-si-btn"
+                            data-si="folder"
+                            title="Search folder names (post title / ID)"
+                        >
+                            folder
+                        </button>
+                        <button
+                            class="fb-si-btn"
+                            data-si="both"
+                            title="Search both filenames and folders"
+                        >
+                            both
+                        </button>
+                    </div>
                     <span class="fb-count" id="fbCount"></span>
                     <button
                         class="btn btn-ghost btn-sm"

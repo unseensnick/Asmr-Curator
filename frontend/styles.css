@@ -1079,6 +1079,38 @@ input[type="text"]:focus {
     flex: 1;
     font-size: 12px;
 }
+.fb-search-in {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+.fb-si-btn {
+    background: none;
+    border: none;
+    border-left: 1px solid var(--border);
+    padding: 4px 8px;
+    font-size: 9px;
+    letter-spacing: 0.07em;
+    color: var(--muted);
+    cursor: pointer;
+    transition:
+        background 0.15s,
+        color 0.15s;
+    white-space: nowrap;
+}
+.fb-si-btn:first-child {
+    border-left: none;
+}
+.fb-si-btn:hover {
+    color: var(--text);
+    background: var(--surface2);
+}
+.fb-si-btn.active {
+    background: rgba(129, 140, 248, 0.15);
+    color: var(--accent2);
+}
 .fb-count {
     font-size: 10px;
     color: var(--muted);
