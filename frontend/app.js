@@ -1556,7 +1556,7 @@ let fbSelectedPath = null;
 let fbSelectedName = null;
 let renameSep = "dash";
 let fbSearchTimer = null;
-let fbSearchIn = "filename"; // "filename" | "folder" | "both"
+let fbSearchMode = "filename"; // "filename" | "folder" | "both"
 
 const fbList = document.getElementById("fbList");
 const fbSearch = document.getElementById("fbSearch");
@@ -1584,7 +1584,7 @@ async function fbLoadAll() {
         const q = fbSearch.value.trim();
         const params = new URLSearchParams();
         if (q) params.set("q", q);
-        params.set("search_in", fbSearchIn);
+        params.set("search_in", fbSearchMode);
         const url = "/api/files/search?" + params.toString();
         const data = await (await fetch(url)).json();
         if (data.detail) throw new Error(data.detail);
@@ -1665,7 +1665,7 @@ fbRefreshBtn.addEventListener("click", fbLoadAll);
 // Search-in toggle
 document.querySelectorAll(".fb-si-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
-        fbSearchIn = btn.dataset.si;
+        fbSearchMode = btn.dataset.si;
         document
             .querySelectorAll(".fb-si-btn")
             .forEach((b) => b.classList.remove("active"));
