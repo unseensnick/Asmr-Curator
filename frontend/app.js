@@ -856,6 +856,11 @@ const HOW_META = {
         cls: "how-paren",
         tip: "Extracted from parentheses in the title",
     },
+    pipe: {
+        label: "| pipe",
+        cls: "how-pipe",
+        tip: "Extracted from pipe-separated title segment",
+    },
     phrase: {
         label: "phrase",
         cls: "how-phrase",
@@ -909,8 +914,8 @@ function renderTestOutput(result) {
         .map((tag) => {
             const td = d.tagDebug.find((x) => x.display === tag);
             const how = td
-                ? td.source === "paren"
-                    ? "paren"
+                ? td.source === "paren" || td.source === "pipe"
+                    ? td.source
                     : td.how
                 : "titlecase";
             const meta = HOW_META[how] || HOW_META.titlecase;
@@ -1023,7 +1028,9 @@ function renderTestOutput(result) {
 document.getElementById("testRunBtn").addEventListener("click", () => {
     const raw = document.getElementById("testOcrInput").value;
     if (!raw.trim()) return;
-    const result = parseOcrText(raw, true);
+    const result = parseOcrText(raw, true, {
+        stripBrackets: document.getElementById("stripBracketsChk").checked,
+    });
     renderTestOutput(result);
 });
 
@@ -1082,21 +1089,201 @@ function applySplitFixes(str, fixes) {
     return s.replace(/\s+/g, " ").trim();
 }
 
-function parseOcrText(raw, debug = false) {
-    // Normalise curly/smart quotes to straight quotes before any matching
-    // Patreon's font makes capital I look like | to OCR — fix all pipe variants:
-    //   " | "  → " I "   (spaced pipe — most common)
-    //   "|"    → "I"     (pipe inside a word like "never have|ever" — rarer)
-    // We do this before collapsing whitespace so word boundaries are intact.
-    const flat = raw
+function parseOcrText(raw, debug = false, opts = {}) {
+    // opts.stripBrackets — if true, strip leading [BRACKET] prefixes from title (default on)
+    const stripBrackets = opts.stripBrackets ?? true;
+
+    // ── Step 0: strip emojis & normalise smart punctuation ────────────────
+    // Remove all Unicode emoji / pictograph characters before any matching.
+    // This covers the main emoji blocks; the \uFE0F variation selector is also dropped.
+    function stripEmoji(str) {
+        return str
+            .replace(/[\u{1F000}-\u{1FFFF}]/gu, "") // supplemental symbols, emoticons, etc.
+            .replace(/[\u{2600}-\u{27BF}]/gu, "") // misc symbols, dingbats
+            .replace(/[\u{2B00}-\u{2BFF}]/gu, "") // misc symbols & arrows
+            .replace(/\uFE0F/g, "") // variation selector-16 (emoji presentation)
+            .replace(/\u200D/g, "") // zero-width joiner
+            .replace(/[\u{1F1E0}-\u{1F1FF}]/gu, "") // flag components
+            .replace(/\s{2,}/g, " ") // collapse double-spaces left by removals
+            .trim();
+    }
+
+    // Normalise smart quotes / ellipsis on the raw input first (before line splitting)
+    const rawClean = raw
         .replace(/[\u2018\u2019]/g, "'")
         .replace(/[\u201c\u201d]/g, '"')
-        .replace(/\u2026/g, "...") // unicode ellipsis → three regular dots
-        .replace(/ \| /g, " I ") // spaced pipe → capital I
-        .replace(/([a-z])\|([a-z])/gi, "$1I$2") // unspaced pipe between letters
-        .replace(/\n+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
+        .replace(/\u2026/g, "...");
+
+    const rawLines = rawClean
+        .split(/\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+
+    // ── Step 1: detect pipe-title format — handles MULTI-LINE wrapped titles ──
+    // Patreon often wraps the pipe-separated title across several lines like:
+    //   "[NO ADS] Elf Warrior Queen Rescues You | Human Listener"
+    //   "| Wounded | Bed Rest in a Royal Tent |"
+    //   "Elvish Chants | With Head Scratches | Sleep Aid | F4A"
+    // Strategy: starting from line 0, keep joining lines as long as the assembled
+    // string still looks like it's part of a pipe-title (has pipes, no prose).
+    // Stop as soon as we hit a line that is clearly prose (date string, body text).
+
+    let pipeTitleTags = []; // tags extracted from pipe-separated title
+    let pipeCoreTitle = ""; // title portion of the pipe-style title
+    let isPipeTitle = false;
+    let pipeTitleLineCount = 0; // how many raw lines were consumed by the title
+
+    // A line belongs to the pipe-title block if it:
+    //   - starts or ends with "|", OR
+    //   - contains " | " (another tag separator), OR
+    //   - is short (<= 80 chars) and contains no prose-stop words
+    // We stop collecting if a line looks like a date ("Yesterday", "2 days ago"),
+    // a prose sentence, or an engagement line.
+    const PIPE_STOP_RX =
+        /^(yesterday|today|\d+\s*(days?|hours?|minutes?)\s*ago|new\b)/i;
+    const PROSE_STOP_WORDS = new Set([
+        "after",
+        "the",
+        "you",
+        "your",
+        "who",
+        "and",
+        "but",
+        "was",
+        "were",
+        "have",
+        "had",
+        "into",
+        "from",
+        "with",
+        "back",
+        "that",
+        "this",
+        "what",
+        "when",
+        "they",
+        "their",
+        "there",
+        "been",
+        "will",
+        "can",
+        "one",
+        "for",
+        "are",
+        "not",
+        "all",
+    ]);
+
+    function lineBelongsToPipeBlock(line) {
+        if (PIPE_STOP_RX.test(line)) return false;
+        if (
+            line.includes(" | ") ||
+            line.startsWith("| ") ||
+            line.endsWith(" |")
+        )
+            return true;
+        // Short lines with no prose words might still be part of the title
+        if (line.length <= 80) {
+            const words = line
+                .toLowerCase()
+                .replace(/[^\w\s]/g, "")
+                .split(/\s+/);
+            const proseHits = words.filter((w) =>
+                PROSE_STOP_WORDS.has(w),
+            ).length;
+            return proseHits === 0;
+        }
+        return false;
+    }
+
+    if (rawLines.length > 0) {
+        // Assemble candidate title by joining lines that belong to the pipe block
+        let assembled = "";
+        let linesUsed = 0;
+        for (let i = 0; i < Math.min(rawLines.length, 10); i++) {
+            const line = rawLines[i];
+            if (i === 0) {
+                assembled = line;
+                linesUsed = 1;
+            } else {
+                if (!lineBelongsToPipeBlock(line)) break;
+                // Join with a space; if previous ends with | or next starts with |,
+                // the split(" | ") will still work correctly
+                assembled = assembled + " " + line;
+                linesUsed++;
+            }
+        }
+
+        // Normalise: collapse multiple spaces, clean up "| |" → "|" artefacts
+        assembled = assembled
+            .replace(/\s{2,}/g, " ")
+            .replace(/\|\s*\|/g, "|")
+            .trim();
+
+        // Strip emoji from the assembled line before splitting on pipes
+        const assembledClean = stripEmoji(assembled)
+            .replace(/\s{2,}/g, " ")
+            .trim();
+
+        // Now check if it actually looks like a pipe-title
+        const pipeSegs = assembledClean
+            .split(" | ")
+            .map((s) =>
+                s
+                    .replace(/^\|\s*/, "")
+                    .replace(/\s*\|$/, "")
+                    .trim(),
+            )
+            .filter(Boolean);
+
+        if (pipeSegs.length >= 3 && pipeSegs.every((s) => s.length <= 140)) {
+            isPipeTitle = true;
+            pipeTitleLineCount = linesUsed;
+
+            // First segment is the title
+            let titleSeg = pipeSegs[0].replace(/[-–\s]+$/, "").trim();
+            if (stripBrackets) {
+                // Strip any leading [BRACKET] prefix — permissive match handles
+                // OCR errors like [INO ADS] for [NO ADS], [IFREE] for [FREE] etc.
+                titleSeg = titleSeg
+                    .replace(/^\s*\[[^\]]{1,50}\]\s*/g, "")
+                    .trim();
+            }
+            // Strip leading OCR noise characters left behind after emoji/bracket removal:
+            // lone symbols (&, #, ¥, *, ~) and other non-word chars that appear
+            // when emojis are OCR'd as punctuation/symbols.
+            titleSeg = titleSeg
+                .replace(/^[\s&#+¥*~©®°|\\/<>@]+/, "") // leading symbol noise
+                .trim();
+            pipeCoreTitle = titleSeg;
+
+            // Remaining segments are tags (skip pure format suffixes that will be added via suffixInput)
+            pipeTitleTags = pipeSegs
+                .slice(1)
+                .map((s) => s.trim())
+                .filter(Boolean);
+        }
+    }
+
+    // ── Step 2: build the flat string for paren/blob scanning ─────────────
+    // If it's a pipe-title, the pipe→I fix would destroy the already-extracted
+    // segments — so apply it only to lines AFTER the title block.
+    let flatInput;
+    if (isPipeTitle) {
+        const restLines = rawLines.slice(pipeTitleLineCount).join(" ");
+        const restFixed = restLines
+            .replace(/ \| /g, " I ")
+            .replace(/([a-z])\|([a-z])/gi, "$1I$2");
+        flatInput = pipeCoreTitle + " " + restFixed;
+    } else {
+        // Original behaviour: pipe→I everywhere (for OCR that mistakes I for |)
+        flatInput = rawClean
+            .replace(/ \| /g, " I ")
+            .replace(/([a-z])\|([a-z])/gi, "$1I$2")
+            .replace(/\n+/g, " ");
+    }
+
+    const flat = flatInput.replace(/\n+/g, " ").replace(/\s+/g, " ").trim();
 
     const compiledFixes = compileSplitFixes();
     const synonyms = dict._synMap;
@@ -1114,6 +1301,8 @@ function parseOcrText(raw, debug = false) {
     let m;
     while ((m = rx.exec(flat)) !== null) {
         const rawInner = m[1].trim();
+        // Skip if it looks like an emoji remnant or pure punctuation
+        if (/^[\s\p{P}]+$/u.test(rawInner)) continue;
         const fixed = applySplitFixes(rawInner, compiledFixes);
         if (/^\d+\s*(days?|hours?|ago)/i.test(fixed) || /^[;:,.]/.test(fixed))
             continue;
@@ -1126,23 +1315,31 @@ function parseOcrText(raw, debug = false) {
             });
     }
 
-    const fp = flat.indexOf("(");
-    const coreTitle = (fp > 0 ? flat.slice(0, fp) : flat.slice(0, 120))
-        .trim()
-        .replace(/[-–\s]+$/, "")
-        .trim();
+    // ── Core title ────────────────────────────────────────────────────────
+    let coreTitle;
+    if (isPipeTitle) {
+        coreTitle = pipeCoreTitle;
+    } else {
+        const fp = flat.indexOf("(");
+        coreTitle = (fp > 0 ? flat.slice(0, fp) : flat.slice(0, 120))
+            .trim()
+            .replace(/[-–\s]+$/, "")
+            .trim();
+        if (stripBrackets) {
+            coreTitle = coreTitle.replace(/^\s*\[[^\]]{1,50}\]\s*/g, "").trim();
+        }
+        // Strip emoji from title regardless
+        coreTitle = stripEmoji(coreTitle).trim();
+    }
 
     // ── Pill blob ─────────────────────────────────────────────────────────
     // Bottom-up line scanner: read from the bottom of the raw OCR, skip metadata
     // lines, and stop when we hit prose (body text). Tag lines are short and
     // don't contain common prose words or mid-sentence punctuation.
-    const rawLines = raw
-        .split(/\n/)
-        .map((l) => l.trim())
-        .filter(Boolean);
-
-    // Prose detector: a line is body text if it has common function words,
-    // mid-sentence punctuation, or sentence-ending punctuation after 4+ words.
+    //
+    // SKIP entirely for pipe-title posts: all real tags are already in pipeTitleTags.
+    // The Patreon tag pill line at the bottom ("FAA NOADS WITHHEAD SCRATCHES") is
+    // just an OCR echo of the pipe-title tags and will only produce duplicates/noise.
     const PROSE_WORDS = new Set([
         "and",
         "the",
@@ -1186,7 +1383,6 @@ function parseOcrText(raw, debug = false) {
         "missed",
         "listen",
         "promised",
-        "case",
         "re",
         "ve",
         "ll",
@@ -1200,38 +1396,49 @@ function parseOcrText(raw, debug = false) {
         "let",
     ]);
     function isProse(line) {
-        const words = line.split(/\s+/);
+        // Strip emojis before prose detection so emoji-heavy lines aren't mis-classified
+        const stripped = stripEmoji(line);
+        const words = stripped.split(/\s+/);
         const wordSet = new Set(
             words.map((w) => w.toLowerCase().replace(/[.,!?'"]/g, "")),
         );
         const proseCount = [...wordSet].filter((w) =>
             PROSE_WORDS.has(w),
         ).length;
-        const hasMidPunct = /\w[,!?]\s+\w/.test(line);
-        const hasSentenceEnd = /\w[.!?]\s*$/.test(line) && words.length > 4;
+        const hasMidPunct = /\w[,!?]\s+\w/.test(stripped);
+        const hasSentenceEnd = /\w[.!?]\s*$/.test(stripped) && words.length > 4;
         return proseCount >= 2 || hasMidPunct || hasSentenceEnd;
     }
 
     const tagLines = [];
-    for (let i = rawLines.length - 1; i >= 0; i--) {
-        const line = rawLines[i];
-        // Skip engagement/metadata: "W120 @6", "(share", "eee", like counts
-        if (/[@©]\d+|W\d+|\d+\s*@|^©|^eee$|^\d+$/.test(line)) continue;
-        // Stop at known signoff lines (they precede tags but aren't tags themselves)
-        if (
-            /^happy listening|^feedback as always|^much appreciated/i.test(line)
-        )
-            break;
-        // Stop at paren-tag-only lines (already captured above)
-        if (/^\([^)]+\)$/.test(line)) break;
-        // Stop at prose body-text lines
-        if (isProse(line)) break;
-        tagLines.unshift(line);
+    if (!isPipeTitle) {
+        for (let i = rawLines.length - 1; i >= 0; i--) {
+            const line = rawLines[i];
+            // Skip engagement/metadata: "W120 @6", "(share", "eee", like counts
+            if (/[@©]\d+|W\d+|\d+\s*@|^©|^eee$|^\d+$/.test(line)) continue;
+            // Skip the Patreon all-caps tag pill line (e.g. "FAA NOADS WITHHEAD SCRATCHES")
+            // — these are corrupted OCR echoes of the real tags, not content tags
+            if (/^[A-Z0-9][A-Z0-9\s]{2,}$/.test(line) && !/[a-z]/.test(line))
+                continue;
+            // Stop at known signoff lines (they precede tags but aren't tags themselves)
+            if (
+                /^happy listening|^feedback as always|^much appreciated/i.test(
+                    line,
+                )
+            )
+                break;
+            // Stop at paren-tag-only lines (already captured above)
+            if (/^\([^)]+\)$/.test(line)) break;
+            // Stop at prose body-text lines
+            if (isProse(line)) break;
+            tagLines.unshift(line);
+        }
     }
     let pillRaw = tagLines.join(" ").trim();
 
     // If bottom-up found nothing, try: look for lines immediately AFTER a signoff line
-    if (!pillRaw) {
+    // Only for non-pipe-title posts; pipe posts have all tags from the title segments.
+    if (!isPipeTitle && !pillRaw) {
         const SIGNOFF_LINE_RX =
             /^(happy listening|feedback as always|much appreciated|enjoy\s*[<♡♥©]|love you all|thank you all)/i;
         let signoffLineIdx = -1;
@@ -1313,20 +1520,24 @@ function parseOcrText(raw, debug = false) {
         return "titlecase";
     };
 
+    // Build combined tag list: pipe-title tags first (if any), then paren tags, then pill blob
+    // pipe tags already have display casing from the title; run them through normalize too
     const seen = new Set();
     const finalTags = [];
     const tagDebug = [];
-    for (const t of [...parenTags, ...foundPills]) {
+
+    // Helper to push a tag with dedup
+    const pushTag = (t, source) => {
         const n = normalize(t);
         if (n === null) {
             if (debug)
                 tagDebug.push({
                     display: null,
                     how: "suppressed",
-                    source: parenTags.includes(t) ? "paren" : "pill",
+                    source,
                     original: t,
                 });
-            continue;
+            return;
         }
         const k = n.toLowerCase();
         if (!seen.has(k)) {
@@ -1336,11 +1547,15 @@ function parseOcrText(raw, debug = false) {
                 tagDebug.push({
                     display: n,
                     how: normalizeHow(t),
-                    source: parenTags.includes(t) ? "paren" : "pill",
+                    source,
                     original: t,
                 });
         }
-    }
+    };
+
+    for (const t of pipeTitleTags) pushTag(t, "pipe");
+    for (const t of parenTags) pushTag(t, "paren");
+    for (const t of foundPills) pushTag(t, "pill");
 
     if (debug) {
         return {
@@ -1348,7 +1563,9 @@ function parseOcrText(raw, debug = false) {
             tags: finalTags,
             _parenTags: parenTags,
             _pillTags: foundPills,
+            _pipeTags: pipeTitleTags,
             _debug: {
+                isPipeTitle,
                 blobBefore,
                 blobFixed,
                 blobFixApplied: blobBefore !== blobFixed,
@@ -1366,6 +1583,7 @@ function parseOcrText(raw, debug = false) {
         tags: finalTags,
         _parenTags: parenTags,
         _pillTags: foundPills,
+        _pipeTags: pipeTitleTags,
     };
 }
 
@@ -1386,8 +1604,15 @@ extractBtn.addEventListener("click", async () => {
             },
         );
         const raw = result.data.text;
-        const parsed = parseOcrText(raw);
+        const parsed = parseOcrText(raw, false, {
+            stripBrackets: document.getElementById("stripBracketsChk").checked,
+        });
         ocrRawText.innerHTML =
+            (parsed._pipeTags && parsed._pipeTags.length
+                ? '<b style="color:var(--accent)">Pipe tags:</b>  ' +
+                  parsed._pipeTags.join(", ") +
+                  "\n"
+                : "") +
             '<b style="color:var(--accent)">Paren tags:</b> ' +
             (parsed._parenTags.join(", ") || "(none)") +
             '\n<b style="color:var(--accent)">Pill tags:</b>  ' +
