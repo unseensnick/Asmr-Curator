@@ -1,45 +1,52 @@
 # ASMR Filename Generator
 
-Self-hosted tool for generating formatted ASMR filenames from screenshots via OCR, with a persistent SQLite tag dictionary and server-side file renaming.
+Self-hosted tool for generating formatted ASMR filenames from Patreon post screenshots. A local vision LLM (Ollama) extracts the title and tags, which are matched against a persistent tag vocabulary and used to build standardised filenames.
 
 ## Stack
 
-| Layer     | Tech                                              |
-| --------- | ------------------------------------------------- |
-| Frontend  | Vanilla HTML/JS, Tesseract.js OCR, Material Icons |
-| Backend   | Python 3.12+, FastAPI, Uvicorn                    |
-| Database  | SQLite — single file, zero config                 |
-| Container | Docker + Compose                                  |
+| Layer     | Tech                                           |
+| --------- | ---------------------------------------------- |
+| Frontend  | React 19, Vite, Tailwind CSS v4, shadcn/ui     |
+| Backend   | Python 3.12+, FastAPI, Uvicorn                 |
+| Database  | SQLite — single file, zero config              |
+| LLM       | Ollama (`qwen2.5vl:7b`) — runs outside the container |
+| Container | Docker + Compose                               |
 
 ## Project structure
 
 ```
 ├── .devcontainer/
 │   ├── devcontainer.json   # VS Code dev container config
-│   └── Dockerfile          # dev environment image (Ubuntu + uv + volta)
+│   └── Dockerfile          # dev environment image (Ubuntu + uv + Node)
 ├── backend/
-│   ├── main.py             # FastAPI routes
+│   ├── main.py             # FastAPI routes + Ollama integration
 │   ├── database.py         # SQLite queries + default seeding
-│   ├── pyproject.toml      # project metadata + dependencies
+│   ├── pyproject.toml
 │   ├── requirements.txt
-│   ├── uv.lock             # dependency lock file
-│   ├── .python-version     # Python version pinning
-│   └── .gitignore
+│   └── uv.lock
 ├── frontend/
-│   ├── index.html          # markup
-│   ├── app.js              # all frontend logic (OCR, parser, dictionary UI, file browser)
-│   └── styles.css          # styles
+│   ├── src/
+│   │   ├── components/     # OCRUploader, TagsEditor, FilenameOutput,
+│   │   │                   # FileBrowser, DictionaryModal, ParserTestPane
+│   │   ├── lib/            # api.ts, parser.ts, types.ts
+│   │   └── App.tsx
+│   ├── package.json
+│   └── vite.config.ts      # proxies /api → localhost:8000 in dev
 ├── data/
 │   └── dictionary.db       # auto-created on first run (git-ignored)
+├── dev.sh                  # start both servers — Linux / Mac
+├── dev.bat                 # start both servers — Windows
 ├── Dockerfile              # production app image
 └── docker-compose.yml
 ```
 
 ## Features
 
-- **OCR-based filename generation**: Paste or drag-and-drop a screenshot → Tesseract OCR extracts text → parser produces a title and ordered tag list automatically
-- **Tag dictionary**: Persistent SQLite database with four table types — phrases, synonyms, variants, and split-fix patterns — all editable inline
-- **Parser test pane**: Paste raw OCR text directly into the dictionary modal to preview exactly how each tag is matched, with quick-add buttons for unrecognised tokens
+- **LLM-based extraction**: Drag-drop or paste a screenshot → Ollama vision model extracts the title and tags → matched against your tag vocabulary automatically
+- **Patreon URL fetch**: Paste a Patreon post or creator URL → the bundled [`patreon-dl`](https://github.com/patrickkfkan/patreon-dl) downloads the audio file under `AUDIO_ROOT` and pre-fills the title, tags, and artist from the post's API metadata. Tick **Metadata only** to skip the audio download when the file is already on disk. Skips the screenshot/OCR round-trip for posts you can access with your session cookie
+- **Tag vocabulary**: Persistent SQLite database with canonical tags and optional aliases. The full vocabulary is injected into the Ollama prompt so the LLM uses your preferred tag forms instead of inventing its own
+- **Suppressed terms**: Explicit blocklist — matched terms are dropped from the output silently
+- **Parser test pane**: Paste raw post text to preview how the LLM would tag it against the current vocabulary, with quick-add buttons for unrecognised tags
 - **File browser & rename**: Recursive server-side file browser with live search (filter by filename, folder, or both), file selection, and one-click rename
 - **Dual output formats**: Generate filenames with dash separator (filesystem-safe) or pipe separator (for metadata/descriptions)
 - **Import/export**: Backup and restore the full dictionary as a portable JSON file
@@ -52,25 +59,56 @@ docker compose up --build
 
 Open **http://localhost:8000**. The dictionary database is created and seeded automatically on first boot and lives in `./data/` on your host — it survives rebuilds and restarts.
 
+Set `OLLAMA_BASE_URL` and `OLLAMA_MODEL` in `docker-compose.yml` to point at your Ollama server:
+
+```yaml
+environment:
+  - OLLAMA_BASE_URL=http://your-ollama-host:11434
+  - OLLAMA_MODEL=qwen2.5vl:7b
+```
+
 To enable file browsing and renaming, set `AUDIO_ROOT` in `docker-compose.yml` to point at your audio library directory.
 
 ## Running in the devcontainer
 
-1. Open the project in VS Code
-2. **Reopen in Container** (devcontainer builds automatically)
-3. In the integrated terminal:
+In dev mode the frontend (Vite, port **5173**) and backend (Uvicorn, port **8000**) run as separate processes. Vite proxies all `/api` requests to the backend automatically.
+
+### Option 1 — dev script (recommended)
+
+**Linux / Mac:**
 
 ```bash
-uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir backend
+bash dev.sh
 ```
 
-4. VS Code forwards port 8000 automatically — open **http://localhost:8000**
+**Windows:**
 
-Edit `backend/*.py` → uvicorn reloads in ~1s. Edit `frontend/` files → just refresh the browser.
+```bat
+dev.bat
+```
+
+Both scripts start the Vite dev server and the FastAPI backend in parallel. `Ctrl+C` stops both.
+
+### Option 2 — two terminals
+
+**Terminal 1 — frontend:**
+
+```bash
+cd frontend
+npm run dev
+```
+
+**Terminal 2 — backend:**
+
+```bash
+uvicorn backend.main:app --reload
+```
+
+Open **http://localhost:5173**. Changes to `frontend/src/` hot-reload instantly; changes to `backend/*.py` reload Uvicorn in ~1s.
 
 ### Configuring the file browser
 
-Edit `.devcontainer/devcontainer.json` and update the `mounts` section to point to your audio library:
+Edit `.devcontainer/devcontainer.json` and update the `mounts` section to point at your audio library:
 
 ```json
 "mounts": [
@@ -81,37 +119,69 @@ Edit `.devcontainer/devcontainer.json` and update the `mounts` section to point 
 }
 ```
 
-Note: Windows users should use `source=C:\\Users\\...\\path\\to\\audio`.
+Windows users should use `source=C:\\Users\\...\\path\\to\\audio`.
+
+## Building the frontend
+
+The production Docker image runs only Uvicorn — it serves the pre-built Vite output from `frontend/dist/`. To build:
+
+```bash
+cd frontend && npm run build
+```
+
+The `docker-compose.yml` build step handles this automatically.
 
 ## API Reference
 
 Interactive docs at **http://localhost:8000/docs** (Swagger UI, auto-generated).
 
-### Dictionary Endpoints
+### Extraction
 
-| Method | Path                    | Description                                                             |
-| ------ | ----------------------- | ----------------------------------------------------------------------- |
-| GET    | `/api/dictionary`       | Full dictionary with all tables (pills, synonyms, variants, splitFixes) |
-| PUT    | `/api/dictionary`       | Bulk import — replaces the entire dictionary                            |
-| POST   | `/api/dictionary/reset` | Reset to built-in defaults                                              |
-| GET    | `/api/pills`            | List all phrases                                                        |
-| POST   | `/api/pills`            | Add a phrase                                                            |
-| PATCH  | `/api/pills/{id}`       | Edit a phrase                                                           |
-| DELETE | `/api/pills/{id}`       | Remove a phrase                                                         |
-| GET    | `/api/synonyms`         | List all synonyms                                                       |
-| POST   | `/api/synonyms`         | Add a synonym (set `to_word` to `null` to suppress)                     |
-| PATCH  | `/api/synonyms/{id}`    | Edit a synonym                                                          |
-| DELETE | `/api/synonyms/{id}`    | Remove a synonym                                                        |
-| GET    | `/api/variants`         | List all variants                                                       |
-| POST   | `/api/variants`         | Add a variant                                                           |
-| PATCH  | `/api/variants/{id}`    | Edit a variant                                                          |
-| DELETE | `/api/variants/{id}`    | Remove a variant                                                        |
-| GET    | `/api/splitfixes`       | List all split-fix patterns                                             |
-| POST   | `/api/splitfixes`       | Add a split-fix pattern                                                 |
-| PATCH  | `/api/splitfixes/{id}`  | Edit a split-fix pattern                                                |
-| DELETE | `/api/splitfixes/{id}`  | Remove a split-fix pattern                                              |
+| Method | Path                | Description                                       |
+| ------ | ------------------- | ------------------------------------------------- |
+| POST   | `/api/extract`      | Send a base64 image → get title + tags from Ollama |
+| POST   | `/api/preview-tags` | Send raw text → preview how the LLM would tag it  |
 
-### File Browser & Rename Endpoints
+### Patreon download
+
+| Method | Path                            | Description                                                                                          |
+| ------ | ------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| GET    | `/api/settings/patreon-cookie`  | Cookie status — `{ set: bool, length: number }`                                                       |
+| PUT    | `/api/settings/patreon-cookie`  | Save the Patreon cookie. Accepts `application/json` (`{"cookie":"..."}`) or raw `text/plain` body     |
+| POST   | `/api/patreon/fetch`            | `{"url":"<patreon post or creator URL>", "metadata_only": false}` → downloads via `patreon-dl` into `AUDIO_ROOT/.patreon-dl/`, returns `{ output_dir, count, metadata_only, posts: [{post_id, title, tags, artist, post_dir, audio_path}] }`. Set `metadata_only: true` to skip the audio download (faster — useful when the file is already on disk and you only need title/tags). On `count: 0` the response includes a `hint` and `log_tail` to help diagnose |
+
+#### Setting the Patreon cookie
+
+The Patreon URL panel and the `/api/patreon/fetch` endpoint both require a session cookie since `patreon-dl` is a cookie-driven scraper (no Patreon API key exists for this use case). Two ways to set it:
+
+- **In the UI** — open the Tag Dictionary modal → **Patreon Cookie** tab → paste the cookie value → **Save cookie**. The tab includes a step-by-step DevTools walkthrough.
+- **Via curl** —
+
+  ```bash
+  # Either form works; text/plain avoids JSON-escaping the embedded `"` chars in g_state etc.
+  curl -X PUT http://localhost:8000/api/settings/patreon-cookie \
+    -H 'Content-Type: text/plain' \
+    --data-binary @cookie.txt
+  ```
+
+The cookie is stored locally in `data/dictionary.db` and never sent anywhere except to Patreon itself by `patreon-dl`. It expires periodically — refresh when fetches start failing.
+
+### Dictionary
+
+| Method | Path                      | Description                               |
+| ------ | ------------------------- | ----------------------------------------- |
+| GET    | `/api/dictionary`         | Full dictionary (vocabulary + suppressed) |
+| PUT    | `/api/dictionary`         | Bulk import — replaces the entire dictionary |
+| POST   | `/api/dictionary/reset`   | Reset to built-in defaults                |
+| GET    | `/api/vocabulary`         | List all vocabulary entries               |
+| POST   | `/api/vocabulary`         | Add a canonical tag (with optional aliases) |
+| PATCH  | `/api/vocabulary/{id}`    | Edit a vocabulary entry                   |
+| DELETE | `/api/vocabulary/{id}`    | Remove a vocabulary entry                 |
+| GET    | `/api/suppressed`         | List all suppressed terms                 |
+| POST   | `/api/suppressed`         | Add a suppressed term                     |
+| DELETE | `/api/suppressed/{id}`    | Remove a suppressed term                  |
+
+### File Browser & Rename
 
 | Method | Path                | Description                                                                         |
 | ------ | ------------------- | ----------------------------------------------------------------------------------- |
@@ -126,7 +196,7 @@ Interactive docs at **http://localhost:8000/docs** (Swagger UI, auto-generated).
 
 ### Supported Audio/Video Formats
 
-The file browser recognizes these extensions: `.mp3`, `.wav`, `.flac`, `.aac`, `.ogg`, `.m4a`, `.wma`, `.mp4`, `.mov`, `.avi`, `.mkv`, `.webm`
+`.mp3` `.wav` `.flac` `.aac` `.ogg` `.m4a` `.wma` `.mp4` `.mov` `.avi` `.mkv` `.webm`
 
 ## Backup & Restore
 

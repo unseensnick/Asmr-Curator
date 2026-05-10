@@ -1,21 +1,18 @@
 services:
-  asmr-tool:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./data:/data                  # SQLite db — persists on host
-      - ./backend:/app/backend        # live backend — uvicorn reloads on save
-      - ./frontend:/app/frontend      # live frontend — just refresh browser
-    environment:
-      - DB_PATH=/data/dictionary.db
-      - PYTHONPATH=/app
-    command: >
-      uvicorn backend.main:app
-      --host 0.0.0.0
-      --port 8000
-      --reload
-      --reload-dir /app/backend
-    restart: unless-stopped
+    asmr-tool:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        ports:
+            - "8000:8000"
+        volumes:
+            - ./data:/data # SQLite db — persists on host
+            - ${AUDIO_PATH}:/mnt/audio:ro # audio library — set AUDIO_PATH in .env
+        environment:
+            - DB_PATH=/data/dictionary.db
+            - PYTHONPATH=/app
+            - AUDIO_ROOT=/mnt/audio
+            - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
+            - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5vl:7b}
+        restart: unless-stopped
+
