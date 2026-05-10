@@ -1,25 +1,27 @@
 {
-  "name": "Full Stack Dev (Ubuntu)",
+  "name": "Full Stack Dev (Debian)",
   "build": {
     "dockerfile": "Dockerfile"
   },
   "remoteUser": "devuser",
   "containerEnv": {
-    "DISPLAY": "",
-    "WAYLAND_DISPLAY": "",
     "DB_PATH": "/workspaces/asmr-filename-gen/data/dictionary.db",
     "PYTHONPATH": "/workspaces/asmr-filename-gen",
     "UV_LINK_MODE": "copy",
     "VIRTUAL_ENV": "/home/devuser/.venv",
-    "AUDIO_ROOT": "/mnt/audio"
+    "AUDIO_ROOT": "/mnt/audio",
+    "OLLAMA_BASE_URL": "http://10.10.1.13:11434",
+    "OLLAMA_MODEL": "qwen2.5vl:7b"
   },
   "forwardPorts": [
-    8000
+    8000,
+    5173
   ],
   "mounts": [
     "source=C:\\Users\\unseensnick\\Desktop\\projects\\asmr,target=/mnt/audio,type=bind,consistency=cached"
   ],
-  "postStartCommand": "/home/devuser/.local/bin/uv pip install --python /home/devuser/.venv/bin/python -r /workspaces/asmr-filename-gen/backend/requirements.txt -q",
+  "postCreateCommand": "sudo chown -R devuser:devuser /workspaces/asmr-filename-gen && sudo chmod -R u+rw /workspaces/asmr-filename-gen",
+  "postStartCommand": "uv pip install --python /home/devuser/.venv/bin/python -r /workspaces/asmr-filename-gen/backend/requirements.txt -q && volta install node@25 && npm install -g patreon-dl@3.8.1",
   "customizations": {
     "vscode": {
       "extensions": [
