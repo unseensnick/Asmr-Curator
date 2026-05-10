@@ -1,0 +1,103 @@
+name: Release
+
+run-name: Build and release v${{ github.event.inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (without "v" prefix, e.g. 1.3.0)'
+        required: true
+        type: string
+      message:
+        description: "Optional message shown at the top of release notes"
+        default: ""
+        required: false
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.inputs.version }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  release:
+    name: Build, push image, draft release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Clone repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup CHANGELOG parser
+        uses: taiki-e/install-action@parse-changelog
+
+      - name: Get changelog
+        id: changelog
+        shell: bash
+        run: |
+          # Plain SemVer (major.minor.patch[-pre][+build]) or Unreleased
+          VERSION_FORMAT='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z\.-]+)?(\+[0-9A-Za-z\.-]+)?$|^Unreleased$'
+          {
+            echo "CHANGELOG<<END_OF_FILE"
+            parse-changelog CHANGELOG.md "${{ github.event.inputs.version }}" --version-format "$VERSION_FORMAT" \
+              || parse-changelog CHANGELOG.md Unreleased --version-format "$VERSION_FORMAT" \
+              || echo "No documented changes for this version yet."
+            echo ""
+            echo "END_OF_FILE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.event.inputs.version }}
+            ${{ env.IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ github.event.inputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.event.inputs.version }}
+          name: v${{ github.event.inputs.version }}
+          body: |
+            ${{ github.event.inputs.message }}
+
+            ${{ steps.changelog.outputs.CHANGELOG }}
+
+            ---
+
+            ### Docker image
+
+            ```bash
+            docker pull ${{ env.IMAGE }}:${{ github.event.inputs.version }}
+            ```
+
+            Image is also tagged `latest`. See the [Packages page](https://github.com/${{ github.repository }}/pkgs/container/${{ github.event.repository.name }}) for digests.
+          draft: true
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
