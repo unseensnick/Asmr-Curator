@@ -115,11 +115,7 @@ After completing any code change (feature, fix, or other), update `CHANGELOG.md`
 - Add a bullet under `## [Unreleased]`, using the categories `Additions`, `Changes`, `Fixes`, `Other`.
 - If `## [Unreleased]` does not exist, create it immediately above the most recent version entry.
 - **Do not add a new entry** for iterative changes or fixes to something already listed in `[Unreleased]` — that item was never released, so mid-development churn is noise. Update the existing bullet or leave it unchanged.
-
-**When the user asks to cut a release / rename Unreleased:**
-
-- Rename `## [Unreleased]` to the specified version (e.g., `## [1.3.0]`).
-- Add a new empty `## [Unreleased]` section above it for the next cycle.
+- **Do NOT rename `[Unreleased]` to a version number while a feature branch is in progress.** That rename is part of PR-prep and lives in **Preparing a PR** below. Until then everything stays under `[Unreleased]`, accumulating bullets as work lands.
 
 ### Documentation
 
@@ -140,7 +136,27 @@ After any change that alters user-visible behavior, env vars, file paths, or API
 
 ### Pushing
 
-Before pushing commits to GitHub that contain release-bound changes, bump both `frontend/package.json` and `backend/pyproject.toml` `version` fields to the next planned SemVer (the same value in both files). If a commit is purely docs / CI / tooling and not going into a release image, the bump can be skipped — flag it explicitly so the user can decide.
+`git push` (and any of its destructive variants — `--force`, `--force-with-lease`, deleting remote branches) requires **explicit user approval every time**. Never run it on your own. Apart from that, see **Preparing a PR** below for the version-bump rule.
+
+### Preparing a PR
+
+The `[Unreleased] → [x.y.z]` rename in `CHANGELOG.md` and the `frontend/package.json` + `backend/pyproject.toml` version bumps are a **single atomic PR-prep step**, performed in **one commit**, **only when the user explicitly signals they're ready to open the PR**. Trigger phrases: *"ready to PR"*, *"cut x.y.z"*, *"let's open the PR"*, *"prepare the release"*, or similar.
+
+Until that signal is given:
+
+- Every change still updates `[Unreleased]` per the Changelog rule above.
+- `frontend/package.json` and `backend/pyproject.toml` stay at whatever version is currently on `main`. They are **not** bumped speculatively.
+- "Almost ready" / "we should think about a PR" / similar **does not count** as the signal. Ask if it's ambiguous.
+
+When the signal is given, the PR-prep commit does exactly three things:
+
+1. Rename `## [Unreleased]` in `CHANGELOG.md` to `## [x.y.z]`.
+2. Insert a fresh empty `## [Unreleased]` above it for the next cycle.
+3. Set `frontend/package.json` `version` and `backend/pyproject.toml` `version` to the same new SemVer.
+
+Commit message: `chore: release x.y.z`. Then **wait for the user** before pushing, and confirm the actual PR open separately. If the user later wants to amend any pre-release bullet, do it in a follow-up commit *before* `git push` — once pushed it's history.
+
+**Docs- or tooling-only PRs** that don't ship in a release image can skip the version bump. In that case the PR-prep commit only does the changelog rename (or omits even that if the change isn't user-visible enough to warrant a section). Flag this explicitly so the user can confirm.
 
 ### Releasing via GitHub Actions
 
@@ -156,6 +172,15 @@ The workflow parses the matching section from `CHANGELOG.md`, builds the product
 **One-time repo setup** (host-side, in GitHub UI): Settings → Actions → General → Workflow permissions → enable "Read and write permissions" so `GITHUB_TOKEN` can push to GHCR and create releases.
 
 ## Code Style & Conventions
+
+### Line endings
+
+All text files in this repo use **CRLF (`\r\n`) line endings** — Windows-style. Enforced by:
+
+- `.gitattributes` — `* text=auto eol=crlf` normalises every commit.
+- `.vscode/settings.json` — `"files.eol": "\r\n"` is the editor default for this workspace.
+
+When creating new files (whether via VSCode, Claude tooling, or other editors), they **must** be saved with CRLF endings. Don't introduce LF-ending files; mixed line endings in the same repo create spurious diffs and confuse tooling on Windows. If a tool emits LF by default, convert before committing.
 
 ### Frontend changes
 

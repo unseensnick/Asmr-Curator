@@ -6,7 +6,9 @@ from typing import Optional
 from pathlib import Path
 import json
 import os
+import re
 import subprocess
+import tomllib
 import httpx
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, TPE2, ID3NoHeaderError
 from mutagen.flac import FLAC
@@ -20,7 +22,7 @@ _FORMATS_CONFIG_PATH = Path(__file__).parent.parent / "frontend" / "src" / "lib"
 with _FORMATS_CONFIG_PATH.open() as _f:
     _FORMATS_CONFIG = json.load(_f)
 
-app = FastAPI(title="ASMR Filename Generator API")
+app = FastAPI(title="ASMR Workbench API")
 
 # Resolve frontend dist path — built output from `cd frontend && npm run build`
 FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
@@ -39,6 +41,17 @@ def root():
 # ── Config ────────────────────────────────────────────────────────────────────
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL    = os.environ.get("OLLAMA_MODEL", "qwen2.5vl:7b")
+
+# Read the version from pyproject.toml so the frontend status bar can show it.
+def _read_version() -> str:
+    try:
+        path = Path(__file__).parent / "pyproject.toml"
+        with path.open("rb") as f:
+            return tomllib.load(f)["project"]["version"]
+    except Exception:
+        return "unknown"
+
+APP_VERSION = _read_version()
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -70,6 +83,11 @@ def reject_if_exists(path: Path) -> None:
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+# ── System info (model name + app version for the UI status bar) ─────────────
+@app.get("/api/system/info")
+def system_info():
+    return {"model": OLLAMA_MODEL, "version": APP_VERSION}
 
 # ── Vision extraction via Ollama ──────────────────────────────────────────────
 
@@ -520,9 +538,31 @@ async def set_patreon_cookie(request: Request):
 PATREON_OUTPUT_SUBDIR = ".patreon-dl"
 
 
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _validate_iso_date(value: Optional[str], field: str) -> Optional[str]:
+    if value is None or value == "":
+        return None
+    if not _ISO_DATE_RE.match(value):
+        raise HTTPException(400, f"{field} must be in YYYY-MM-DD format")
+    return value
+
+
 class PatreonFetchIn(BaseModel):
     url: str
     metadata_only: bool = False
+    # Which patreon-dl media types to include. Allowed: "audio", "video", "image",
+    # "attachment". None / empty → wrapper default (["audio"]). Ignored when
+    # metadata_only=True (no media is downloaded at all).
+    content_types: Optional[list[str]] = None
+    # ISO YYYY-MM-DD date bounds. Only meaningful for creator URLs.
+    published_after: Optional[str] = None
+    published_before: Optional[str] = None
+    # Walk the pipeline without writing anything (preview only). Returns no
+    # parsed posts — the log tail is the preview surface. Status DB is left
+    # untouched so previouslyDownloaded dedup stays correct on the real run.
+    dry_run: bool = False
 
 
 @app.post("/api/patreon/fetch")
@@ -532,9 +572,19 @@ def patreon_fetch_endpoint(body: PatreonFetchIn):
     if not cookie:
         raise HTTPException(412, "Patreon cookie is not set — configure it in settings first")
 
+    published_after = _validate_iso_date(body.published_after, "published_after")
+    published_before = _validate_iso_date(body.published_before, "published_before")
+
     output_dir = AUDIO_ROOT / PATREON_OUTPUT_SUBDIR
     try:
-        result = patreon_fetch(url, cookie, output_dir, metadata_only=body.metadata_only)
+        result = patreon_fetch(
+            url, cookie, output_dir,
+            metadata_only=body.metadata_only,
+            content_types=body.content_types,
+            published_after=published_after,
+            published_before=published_before,
+            dry_run=body.dry_run,
+        )
     except PatreonFetchError as e:
         raise HTTPException(502, str(e))
 
@@ -563,13 +613,28 @@ def patreon_fetch_endpoint(body: PatreonFetchIn):
         "output_dir": _rel(result.output_dir),
         "count": len(posts),
         "metadata_only": body.metadata_only,
+        "dry_run": body.dry_run,
         "posts": posts,
     }
-    if not posts:
+    if body.dry_run:
+        # Dry-run never produces post-api.json files, so the parsed list is
+        # empty by design. Surface the log tail so the user can see what
+        # patreon-dl walked through.
+        response["log_tail"] = result.log_tail
+        if not posts:
+            response["hint"] = (
+                "Dry run complete — patreon-dl walked the pipeline without writing files. "
+                "Check the log tail for the posts it would have downloaded. "
+                "Untoggle 'Dry run' and re-fetch to commit."
+            )
+    elif not posts:
         response["hint"] = (
-            "patreon-dl ran successfully but no posts were downloaded. "
-            "Common causes: the URL points to a post that doesn't exist or that you can't access, "
-            "the cookie has expired, or the post is gated behind a tier you're not subscribed to."
+            "No new posts were fetched. Most common cause: every matching post is "
+            "already in patreon-dl's status cache from a previous run (re-fetches "
+            "intentionally skip those — only new posts come back). Other causes: "
+            "the URL points to a post you can't access, the cookie has expired, "
+            "or the post is gated behind a tier you're not subscribed to. Check "
+            "the log tail to confirm which."
         )
         response["log_tail"] = result.log_tail
     return response

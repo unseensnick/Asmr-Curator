@@ -1,9 +1,11 @@
 import { useRef, useState } from "react";
-import { GripVertical, X, Sparkles, BookOpen, Plus, Check, Pencil } from "lucide-react";
+import { Sparkles, BookOpen, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import SectionLabel from "@/components/SectionLabel";
+import TagChip from "@/components/TagChip";
 import type { AppDict } from "@/lib/types";
 import { normalizeTag } from "@/lib/utils";
 
@@ -107,10 +109,7 @@ export default function TagsEditor({
   return (
     <Card className="rounded-xl border border-border shadow-none ring-0 p-5 gap-0">
       {/* Card title */}
-      <div className="flex items-center gap-2 text-[10px] font-bold tracking-[0.14em] uppercase text-muted-foreground mb-4">
-        <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
-        Title &amp; Tags
-      </div>
+      <SectionLabel className="mb-4">Title &amp; Tags</SectionLabel>
 
       {/* Audio title */}
       <div className="mb-4">
@@ -142,58 +141,22 @@ export default function TagsEditor({
           className="flex flex-wrap gap-1.5 min-h-11.5 p-2 bg-secondary border border-input rounded-md transition-colors"
           onDragOver={(e) => e.preventDefault()}
         >
-          {tags.map((tag, i) =>
-            editingIdx === i ? (
-              <div
-                key={i}
-                className="inline-flex items-center gap-1 bg-card border border-primary/50 rounded px-2 py-1"
-              >
-                <GripVertical size={10} className="text-muted-foreground opacity-45 pointer-events-none shrink-0" />
-                <input
-                  autoFocus
-                  value={editingVal}
-                  onChange={(e) => setEditingVal(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") saveEdit(i);
-                    if (e.key === "Escape") cancelEdit();
-                  }}
-                  className="text-xs bg-transparent outline-none text-foreground min-w-[3ch]"
-                  style={{ width: `${Math.max(editingVal.length, 4)}ch` }}
-                />
-                <button onClick={() => saveEdit(i)} className="text-green-400 hover:text-green-300 transition-colors leading-none shrink-0" title="Save">
-                  <Check size={11} />
-                </button>
-                <button onClick={cancelEdit} className="text-muted-foreground hover:text-foreground transition-colors leading-none shrink-0" title="Cancel">
-                  <X size={11} />
-                </button>
-              </div>
-            ) : (
-              <div
-                key={i}
-                draggable
-                onDragStart={() => onDragStart(i)}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => onDrop(e, i)}
-                className="inline-flex items-center gap-1 bg-card border border-border rounded px-2 py-1 text-xs text-foreground cursor-grab select-none active:cursor-grabbing hover:border-primary/50 transition-colors group"
-              >
-                <GripVertical size={10} className="text-muted-foreground opacity-45 pointer-events-none shrink-0" />
-                <button
-                  onClick={() => startEdit(i)}
-                  className="text-foreground hover:text-primary transition-colors leading-none"
-                  title="Click to edit"
-                >
-                  {tag}
-                </button>
-                <Pencil size={9} className="text-muted-foreground/25 group-hover:text-muted-foreground/60 transition-colors shrink-0" />
-                <button
-                  onClick={() => removeTag(i)}
-                  className="text-muted-foreground hover:text-destructive transition-colors leading-none ml-0.5 shrink-0"
-                >
-                  <X size={13} />
-                </button>
-              </div>
-            )
-          )}
+          {tags.map((tag, i) => (
+            <TagChip
+              key={i}
+              label={tag}
+              editing={editingIdx === i}
+              editingValue={editingVal}
+              onEditingValueChange={setEditingVal}
+              onStartEdit={() => startEdit(i)}
+              onSaveEdit={() => saveEdit(i)}
+              onCancelEdit={cancelEdit}
+              onRemove={() => removeTag(i)}
+              onDragStart={() => onDragStart(i)}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => onDrop(e, i)}
+            />
+          ))}
         </div>
 
         <p className="text-[10px] text-muted-foreground mt-1.5 tracking-[0.03em]">

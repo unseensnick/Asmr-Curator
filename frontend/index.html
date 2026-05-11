@@ -4,7 +4,21 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <title>ASMR Workbench</title>
+    <script>
+      // Pre-React theme application — prevents FOUC on dark mode reload.
+      // Mirrors the logic in src/lib/theme.ts so the bundle doesn't need to load
+      // before the right .dark class is on <html>.
+      (function () {
+        try {
+          var stored = localStorage.getItem('theme');
+          var mode = (stored === 'light' || stored === 'dark')
+            ? stored
+            : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+          if (mode === 'dark') document.documentElement.classList.add('dark');
+        } catch (e) { /* no-op */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

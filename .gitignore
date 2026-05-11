@@ -25,7 +25,9 @@ Thumbs.db
 *.lnk
 
 # IDE
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 .idea/
 
 # Environment variables

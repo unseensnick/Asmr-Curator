@@ -3,8 +3,9 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import CopyButton from "@/components/CopyButton";
+import SectionLabel from "@/components/SectionLabel";
 
-interface FilenameOutputProps {
+interface OutputPanelProps {
   outputDash: string;
   outputPipe: string;
   onRegenerate: () => void;
@@ -13,24 +14,20 @@ interface FilenameOutputProps {
 }
 
 
-export default function FilenameOutput({
+export default function OutputPanel({
   outputDash,
   outputPipe,
   onRegenerate,
   stripBrackets,
   onStripBracketsChange,
-}: FilenameOutputProps) {
+}: OutputPanelProps) {
   return (
     <div className="flex flex-col gap-4 flex-1">
       {/* ── Dash card ── */}
       <Card className="flex-1 rounded-xl border border-border shadow-none ring-0 p-5 gap-0">
-        <div className="flex items-center gap-2 text-[10px] font-bold tracking-[0.14em] uppercase text-muted-foreground mb-4">
-          <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
+        <SectionLabel tone="primary" hint="— dash separator" className="mb-4">
           Filename
-          <span className="opacity-45 text-[9px] tracking-[0.08em]">
-            — dash separator
-          </span>
-        </div>
+        </SectionLabel>
 
         {!outputDash ? (
           <div className="min-h-20 flex flex-col items-center justify-center gap-2 bg-secondary border border-dashed border-border rounded-lg text-muted-foreground text-xs text-center p-5">
@@ -64,13 +61,9 @@ export default function FilenameOutput({
 
       {/* ── Pipe card ── */}
       <Card className="flex-1 rounded-xl border border-border shadow-none ring-0 p-5 gap-0">
-        <div className="flex items-center gap-2 text-[10px] font-bold tracking-[0.14em] uppercase text-muted-foreground mb-4">
-          <span className="w-1.5 h-1.5 rounded-full bg-[#818cf8] shrink-0" />
+        <SectionLabel tone="info" hint="— pipe separator" className="mb-4">
           Metadata
-          <span className="opacity-45 text-[9px] tracking-[0.08em]">
-            — pipe separator
-          </span>
-        </div>
+        </SectionLabel>
 
         {!outputPipe ? (
           <div className="min-h-20 flex flex-col items-center justify-center gap-2 bg-secondary border border-dashed border-border rounded-lg text-muted-foreground text-xs text-center p-5">
@@ -83,13 +76,13 @@ export default function FilenameOutput({
           </div>
         ) : (
           <>
-            <div className="bg-secondary border border-[#818cf8]/35 rounded-lg p-3.5 text-sm text-foreground leading-7 break-all min-h-13">
+            <div className="bg-secondary border border-info/35 rounded-lg p-3.5 text-sm text-foreground leading-7 break-all min-h-13">
               {outputPipe}
             </div>
             <div className="flex gap-2 mt-2.5 flex-wrap items-center">
               <CopyButton
                 text={outputPipe}
-                className="bg-[#818cf8]/15 border border-[#818cf8]/30 text-[#818cf8] hover:bg-[#818cf8]/25 hover:text-[#818cf8]"
+                className="bg-info/15 border border-info/30 text-info hover:bg-info/25 hover:text-info"
               />
               <Button
                 size="sm"

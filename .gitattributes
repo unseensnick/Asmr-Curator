@@ -1,0 +1,24 @@
+# Force CRLF line endings on all text files, repo-wide.
+# This project is Windows-first (dev.bat, Windows paths, host dev on Windows).
+* text=auto eol=crlf
+
+# Per-file LF overrides — only files actually executed by Linux need this.
+# The Linux kernel reads `#!/bin/bash\r` literally and exec fails. Other files
+# (Dockerfile, .py, .json) are fine with CRLF; their interpreters accept both.
+dev.sh text eol=lf
+
+# Binary files — never normalise line endings.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.tar binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
