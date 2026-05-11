@@ -1,4 +1,4 @@
-# ASMR Filename Generator
+# ASMR Workbench
 
 Self-hosted tool for generating formatted ASMR filenames from Patreon post screenshots. A local vision LLM (Ollama) extracts the title and tags, which are matched against a persistent tag vocabulary and used to build standardised filenames.
 
@@ -43,12 +43,18 @@ Self-hosted tool for generating formatted ASMR filenames from Patreon post scree
 ## Features
 
 - **LLM-based extraction**: Drag-drop or paste a screenshot → Ollama vision model extracts the title and tags → matched against your tag vocabulary automatically
-- **Patreon URL fetch**: Paste a Patreon post or creator URL → the bundled [`patreon-dl`](https://github.com/patrickkfkan/patreon-dl) downloads the audio file under `AUDIO_ROOT` and pre-fills the title, tags, and artist from the post's API metadata. Tick **Metadata only** to skip the audio download when the file is already on disk. Skips the screenshot/OCR round-trip for posts you can access with your session cookie
+- **Patreon URL fetch**: Paste a Patreon post or creator URL → the bundled [`patreon-dl`](https://github.com/patrickkfkan/patreon-dl) downloads the audio file to `AUDIO_ROOT/<post_id>/<original_filename>` and pre-fills title, tags, and artist from the post's API metadata. Creator URLs return every accessible post as a scrollable list (per-row Apply). Configurable filters:
+  - **Include** chips — Audio (default) / Video / Images / Attachments
+  - **Published between** date range — only meaningful for creator URLs
+  - **Metadata only** — skip the audio download (faster when the file is already on disk)
+  - **Dry run** — walk the pipeline without writing anything; preview via the log tail
+  - Re-fetching a creator URL only pulls new posts since the last run (patreon-dl `stop.on = previouslyDownloaded`)
 - **Tag vocabulary**: Persistent SQLite database with canonical tags and optional aliases. The full vocabulary is injected into the Ollama prompt so the LLM uses your preferred tag forms instead of inventing its own
 - **Suppressed terms**: Explicit blocklist — matched terms are dropped from the output silently
-- **Parser test pane**: Paste raw post text to preview how the LLM would tag it against the current vocabulary, with quick-add buttons for unrecognised tags
+- **Dictionary tester**: Paste raw post text to preview how the LLM would tag it against the current vocabulary, with quick-add buttons for unrecognised tags
 - **File browser & rename**: Recursive server-side file browser with live search (filter by filename, folder, or both), file selection, and one-click rename
 - **Dual output formats**: Generate filenames with dash separator (filesystem-safe) or pipe separator (for metadata/descriptions)
+- **Light / dark theme toggle**: Sun/Moon button in the header. Follows your OS preference on first visit; remembers your choice afterwards
 - **Import/export**: Backup and restore the full dictionary as a portable JSON file
 
 ## Running in production
@@ -148,7 +154,7 @@ Interactive docs at **http://localhost:8000/docs** (Swagger UI, auto-generated).
 | ------ | ------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | GET    | `/api/settings/patreon-cookie`  | Cookie status — `{ set: bool, length: number }`                                                       |
 | PUT    | `/api/settings/patreon-cookie`  | Save the Patreon cookie. Accepts `application/json` (`{"cookie":"..."}`) or raw `text/plain` body     |
-| POST   | `/api/patreon/fetch`            | `{"url":"<patreon post or creator URL>", "metadata_only": false}` → downloads via `patreon-dl` into `AUDIO_ROOT/.patreon-dl/`, returns `{ output_dir, count, metadata_only, posts: [{post_id, title, tags, artist, post_dir, audio_path}] }`. Set `metadata_only: true` to skip the audio download (faster — useful when the file is already on disk and you only need title/tags). On `count: 0` the response includes a `hint` and `log_tail` to help diagnose |
+| POST   | `/api/patreon/fetch`            | Fetch a Patreon post or creator URL via `patreon-dl`. Request: `{ "url": "...", "metadata_only"?: false, "content_types"?: ["audio"], "published_after"?: "YYYY-MM-DD", "published_before"?: "YYYY-MM-DD", "dry_run"?: false }`. Response: `{ output_dir, count, metadata_only, dry_run, posts: [{post_id, title, tags, artist, post_dir, audio_path}] }`. Audio files land at `AUDIO_ROOT/<post_id>/<original_filename>` (flattened out of patreon-dl's nesting); patreon-dl's own tree + status DB stay isolated under `AUDIO_ROOT/.patreon-dl/`. `content_types` defaults to `["audio"]`; allowed values: `audio` / `video` / `image` / `attachment`. `dry_run=true` returns no parsed posts — the `log_tail` is the preview surface |
 
 #### Setting the Patreon cookie
 

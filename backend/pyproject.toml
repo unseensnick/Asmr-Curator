@@ -1,7 +1,7 @@
 [project]
 name = "asmr-filename-generator"
-version = "1.0.0"
-description = "Self-hosted ASMR filename generator with OCR and tag dictionary"
+version = "1.1.0"
+description = "Self-hosted ASMR Workbench — vision LLM extraction, tag dictionary, file rename + ID3, audio conversion"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
