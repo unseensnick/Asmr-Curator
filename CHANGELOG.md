@@ -11,6 +11,14 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
+## [1.1.1]
+
+Hotfix for the 1.1.0 production Docker image.
+
+### Fixes
+
+- **Dockerfile: install `patreon-dl` in the final stage**, not in a separate Node 25 builder stage. The previous split compiled `better-sqlite3`'s native `.node` binary against Node 25 then ran it under Node 20 (whatever `apt-get install nodejs` ships on the python:3.14-slim base), crashing every Patreon fetch with `NODE_MODULE_VERSION 141 vs 115`. Now patreon-dl installs after `apt-get install nodejs npm` in the runtime stage so the compile + runtime Node versions match.
+
 ## [1.1.0]
 
 Two parallel threads landing in the same release: a complete visual redesign of the web UI, and a substantial expansion of the Patreon URL workflow (multi-post UI, download filters, output flattening).
