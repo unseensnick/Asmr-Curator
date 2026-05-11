@@ -15,7 +15,7 @@ import { apiPost, API } from "@/lib/api";
 import type { AppDict } from "@/lib/types";
 import { normalizeTag, getErrorMessage } from "@/lib/utils";
 
-interface OCRUploaderProps {
+interface ScreenshotPanelProps {
   dict: AppDict;
   onExtracted: (title: string, tags: string[], artist: string) => void;
 }
@@ -24,7 +24,7 @@ interface ExtractResponse {
   raw_text: string;
 }
 
-export default function OCRUploader({ dict, onExtracted }: OCRUploaderProps) {
+export default function ScreenshotPanel({ dict, onExtracted }: ScreenshotPanelProps) {
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
@@ -218,7 +218,7 @@ export default function OCRUploader({ dict, onExtracted }: OCRUploaderProps) {
           <div
             className={`flex items-center gap-2 text-[11px] mt-2 min-h-4 shrink-0 ${
               status.type === "success"
-                ? "text-green-400"
+                ? "text-success"
                 : status.type === "error"
                   ? "text-destructive"
                   : "text-muted-foreground"
@@ -251,7 +251,7 @@ export default function OCRUploader({ dict, onExtracted }: OCRUploaderProps) {
               <button
                 className={`flex items-center border rounded px-1.5 py-0.5 transition-all ${
                   debugCopied
-                    ? "text-green-400 border-green-400/30 bg-green-400/10"
+                    ? "text-success border-success/30 bg-success/10"
                     : "text-muted-foreground border-transparent hover:border-border hover:text-foreground hover:bg-secondary"
                 }`}
                 onClick={() => copyDebug(rawLlmText)}

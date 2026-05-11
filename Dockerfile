@@ -10,10 +10,13 @@ COPY frontend/ ./
 RUN npm run build
 
 # ── Stage 2: Install patreon-dl ────────────────────────────────────────────────
-# Pinned version — bump intentionally when verifying upstream changes.
+# Installed from a locally-patched tarball at vendor/patreon-dl/ because
+# upstream 3.8.1 ships a parser regex that doesn't match Patreon's current
+# HTML (upstream issues #134/#135). See vendor/patreon-dl/README.md for the
+# patch + rebuild instructions.
 FROM node:25-slim AS patreon-dl
-ARG PATREON_DL_VERSION=3.8.1
-RUN npm install -g --omit=dev patreon-dl@${PATREON_DL_VERSION}
+COPY vendor/patreon-dl/patreon-dl-3.8.1-localfix.tgz /tmp/patreon-dl.tgz
+RUN npm install -g --omit=dev /tmp/patreon-dl.tgz && rm /tmp/patreon-dl.tgz
 
 # ── Stage 3: Production image ──────────────────────────────────────────────────
 FROM python:3.14-slim

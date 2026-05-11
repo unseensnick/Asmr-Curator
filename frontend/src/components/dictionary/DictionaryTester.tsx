@@ -22,14 +22,14 @@ interface PreviewResult {
   tags: AnnotatedTag[];
 }
 
-export interface ParserTestPaneProps {
+export interface DictionaryTesterProps {
   dict: AppDict;
   onQuickFix: (action: "vocab" | "suppress", token: string) => void;
 }
 
-// ── ParserTestPane ────────────────────────────────────────────────────────────
+// ── DictionaryTester ────────────────────────────────────────────────────────────
 
-export default function ParserTestPane({ dict, onQuickFix }: ParserTestPaneProps) {
+export default function DictionaryTester({ dict, onQuickFix }: DictionaryTesterProps) {
   const [raw, setRaw] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -150,7 +150,7 @@ export default function ParserTestPane({ dict, onQuickFix }: ParserTestPaneProps
                       ) : t.canonical ? (
                         <>
                           <span className="text-foreground text-xs min-w-35">{t.canonical}</span>
-                          <Badge className="text-[9px] bg-green-500/20 text-green-400 border-green-500/30">matched</Badge>
+                          <Badge className="text-[9px] bg-success/20 text-success border-success/30">matched</Badge>
                           {t.canonical.toLowerCase() !== t.raw.toLowerCase() && (
                             <span className="text-[10px] text-muted-foreground/60">← {t.raw}</span>
                           )}
@@ -158,12 +158,12 @@ export default function ParserTestPane({ dict, onQuickFix }: ParserTestPaneProps
                       ) : (
                         <>
                           <span className="text-foreground text-xs min-w-35">{t.raw}</span>
-                          <Badge className="text-[9px] bg-sky-500/20 text-sky-300 border-sky-500/30">novel</Badge>
+                          <Badge className="text-[9px] bg-info/20 text-info border-info/30">novel</Badge>
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() => onQuickFix("vocab", t.raw)}
-                            className="text-[10px] h-auto py-0.5 px-2 border-sky-500/40 text-sky-400 hover:bg-sky-500/10 hover:text-sky-300"
+                            className="text-[10px] h-auto py-0.5 px-2 border-info/40 text-info hover:bg-info/10 hover:text-info/80"
                           >
                             + Add to vocabulary
                           </Button>

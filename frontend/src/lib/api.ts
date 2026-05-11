@@ -12,6 +12,7 @@ export const API = {
   suppressedEntry: (id: number) => `/api/suppressed/${id}`,
   patreonFetch:    "/api/patreon/fetch",
   patreonCookie:   "/api/settings/patreon-cookie",
+  systemInfo:      "/api/system/info",
 } as const;
 
 // Thin fetch wrappers — all requests go to the same origin (FastAPI)
@@ -83,8 +84,21 @@ export function fetchPatreonPost(
   url: string,
   options: PatreonFetchOptions = {},
 ): Promise<PatreonFetchResponse> {
-  return apiPost<PatreonFetchResponse>(API.patreonFetch, {
+  const body: Record<string, unknown> = {
     url,
     metadata_only: options.metadataOnly ?? false,
-  });
+  };
+  if (options.contentTypes && options.contentTypes.length > 0) {
+    body.content_types = options.contentTypes;
+  }
+  if (options.publishedAfter) {
+    body.published_after = options.publishedAfter;
+  }
+  if (options.publishedBefore) {
+    body.published_before = options.publishedBefore;
+  }
+  if (options.dryRun) {
+    body.dry_run = true;
+  }
+  return apiPost<PatreonFetchResponse>(API.patreonFetch, body);
 }

@@ -97,13 +97,23 @@ export interface PatreonFetchResponse {
   output_dir: string | null;
   count: number;
   metadata_only: boolean;
+  dry_run: boolean;
   posts: PatreonPost[];
   hint?: string;
   log_tail?: string;
 }
 
+export type PatreonContentType = "audio" | "video" | "image" | "attachment";
+
 export interface PatreonFetchOptions {
   metadataOnly?: boolean;
+  /** Media types patreon-dl should download. Omit / empty → backend default ["audio"]. */
+  contentTypes?: PatreonContentType[];
+  /** ISO YYYY-MM-DD. Only meaningful for creator URLs. */
+  publishedAfter?: string;
+  publishedBefore?: string;
+  /** Walk the pipeline without writing files. Returns no parsed posts; log tail is the preview. */
+  dryRun?: boolean;
 }
 
 export interface PatreonCookieStatus {
