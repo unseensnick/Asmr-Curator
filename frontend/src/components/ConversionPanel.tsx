@@ -49,7 +49,7 @@ export default function ConversionPanel({
       <div className="flex items-center gap-2 mb-3">
         <span className="text-[10px] text-muted-foreground w-20 shrink-0">Quality</span>
         {format === "flac" ? (
-          <span className="text-[10px] text-green-400 border border-green-400/30 rounded px-2 py-1">
+          <span className="text-[10px] text-success border border-success/30 rounded px-2 py-1">
             Lossless (CD quality)
           </span>
         ) : (

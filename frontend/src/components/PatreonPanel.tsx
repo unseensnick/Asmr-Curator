@@ -1,13 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link2, Sparkles, ExternalLink, ArrowDown, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import DatePicker from "@/components/DatePicker";
+import PatreonResultsList from "@/components/PatreonResultsList";
 import { fetchPatreonPost } from "@/lib/api";
 import { parseTitleLine } from "@/lib/parser";
-import type { AppDict, PatreonPost } from "@/lib/types";
+import type { AppDict, PatreonContentType, PatreonPost } from "@/lib/types";
 import { normalizeTag, getErrorMessage } from "@/lib/utils";
 
 interface PatreonPanelProps {
@@ -15,19 +17,71 @@ interface PatreonPanelProps {
   onExtracted: (title: string, tags: string[], artist: string) => void;
 }
 
+const CONTENT_TYPE_KEY = "patreon.contentTypes";
+const ALL_CONTENT_TYPES: { value: PatreonContentType; label: string }[] = [
+  { value: "audio", label: "Audio" },
+  { value: "video", label: "Video" },
+  { value: "image", label: "Images" },
+  { value: "attachment", label: "Attachments" },
+];
+
+function loadStoredContentTypes(): PatreonContentType[] {
+  try {
+    const raw = localStorage.getItem(CONTENT_TYPE_KEY);
+    if (!raw) return ["audio"];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return ["audio"];
+    const allowed = new Set<PatreonContentType>(["audio", "video", "image", "attachment"]);
+    const cleaned = parsed.filter((v): v is PatreonContentType =>
+      typeof v === "string" && allowed.has(v as PatreonContentType)
+    );
+    return cleaned.length > 0 ? cleaned : ["audio"];
+  } catch {
+    return ["audio"];
+  }
+}
+
 export default function PatreonPanel({ dict, onExtracted }: PatreonPanelProps) {
   const [url, setUrl] = useState("");
   const [metadataOnly, setMetadataOnly] = useState(false);
+  const [dryRun, setDryRun] = useState(false);
+  const [contentTypes, setContentTypes] = useState<PatreonContentType[]>(
+    () => loadStoredContentTypes(),
+  );
+  const [publishedAfter, setPublishedAfter] = useState("");
+  const [publishedBefore, setPublishedBefore] = useState("");
   const [fetching, setFetching] = useState(false);
   const [status, setStatus] = useState<{
     type: "success" | "error" | "info";
     msg: string;
   } | null>(null);
   const [post, setPost] = useState<PatreonPost | null>(null);
+  const [posts, setPosts] = useState<PatreonPost[]>([]);
   const [logTail, setLogTail] = useState<string>("");
+
+  // Persist whenever the include selection changes.
+  useEffect(() => {
+    try {
+      localStorage.setItem(CONTENT_TYPE_KEY, JSON.stringify(contentTypes));
+    } catch {
+      // localStorage unavailable — non-fatal
+    }
+  }, [contentTypes]);
+
+  function toggleContentType(t: PatreonContentType) {
+    setContentTypes((prev) => {
+      if (prev.includes(t)) {
+        // Don't allow clearing all — keep at least one selected (audio fallback)
+        const next = prev.filter((x) => x !== t);
+        return next.length > 0 ? next : ["audio"];
+      }
+      return [...prev, t];
+    });
+  }
 
   function clearResult() {
     setPost(null);
+    setPosts([]);
     setLogTail("");
     setStatus(null);
   }
@@ -38,12 +92,33 @@ export default function PatreonPanel({ dict, onExtracted }: PatreonPanelProps) {
     setFetching(true);
     setStatus({
       type: "info",
-      msg: metadataOnly ? "Fetching metadata only…" : "Asking patreon-dl to download…",
+      msg: dryRun
+        ? "Dry run — walking the pipeline without writing files…"
+        : metadataOnly
+          ? "Fetching metadata only…"
+          : "Asking patreon-dl to download…",
     });
     setPost(null);
+    setPosts([]);
     setLogTail("");
     try {
-      const res = await fetchPatreonPost(trimmed, { metadataOnly });
+      const res = await fetchPatreonPost(trimmed, {
+        metadataOnly,
+        contentTypes,
+        publishedAfter: publishedAfter || undefined,
+        publishedBefore: publishedBefore || undefined,
+        dryRun,
+      });
+      // Dry run intentionally returns no parsed posts — the log tail is the
+      // preview surface. Show the success/hint and the expandable log.
+      if (res.dry_run) {
+        setStatus({
+          type: "info",
+          msg: res.hint ?? "Dry run complete — see log below for posts patreon-dl would have downloaded.",
+        });
+        if (res.log_tail) setLogTail(res.log_tail);
+        return;
+      }
       if (res.count === 0 || res.posts.length === 0) {
         setStatus({
           type: "error",
@@ -52,16 +127,22 @@ export default function PatreonPanel({ dict, onExtracted }: PatreonPanelProps) {
         if (res.log_tail) setLogTail(res.log_tail);
         return;
       }
-      const first = res.posts[0];
-      setPost(first);
       const noun = res.metadata_only ? "metadata" : "post";
-      setStatus({
-        type: "success",
-        msg:
-          res.count === 1
-            ? `Done — ${noun} ready, review and apply below`
-            : `Fetched ${res.count} ${noun}s — first shown below`,
-      });
+      if (res.posts.length > 1) {
+        // Multi-post case (creator URL): render the full list, no auto-apply.
+        setPosts(res.posts);
+        setStatus({
+          type: "success",
+          msg: `Fetched ${res.count} ${noun}s — click any row to apply`,
+        });
+      } else {
+        // Single-post case: keep the existing single-card UI.
+        setPost(res.posts[0]);
+        setStatus({
+          type: "success",
+          msg: `Done — ${noun} ready, review and apply below`,
+        });
+      }
     } catch (err) {
       setStatus({ type: "error", msg: getErrorMessage(err) });
     } finally {
@@ -69,23 +150,31 @@ export default function PatreonPanel({ dict, onExtracted }: PatreonPanelProps) {
     }
   }
 
-  function handleApply() {
-    if (!post) return;
-    // Mirror the screenshot pipeline: split the raw title into a clean title
-    // plus embedded tags (pipe / parenthetical), then merge with the API's
-    // user-defined tags, normalise through the dictionary, dedupe.
-    const { title, embeddedTags } = parseTitleLine(post.title || "");
+  /**
+   * Pipe a post's metadata into App-level state. Mirrors the screenshot
+   * extraction pipeline: split the raw title into a clean title + embedded
+   * tags (pipe / parenthetical), merge with the API's user-defined tags,
+   * normalise through the dictionary, dedupe.
+   *
+   * Used by both the single-post card (when count===1) and per-row Apply
+   * buttons (when count>1). Same outcome either way.
+   */
+  function applyPost(p: PatreonPost) {
+    const { title, embeddedTags } = parseTitleLine(p.title || "");
     const seen = new Set<string>();
     const normalised: string[] = [];
-    for (const raw of [...embeddedTags, ...post.tags]) {
+    for (const raw of [...embeddedTags, ...p.tags]) {
       const n = normalizeTag(raw, dict, { titleCase: true });
       if (n && !seen.has(n.toLowerCase())) {
         seen.add(n.toLowerCase());
         normalised.push(n);
       }
     }
-    onExtracted(title || post.title || "", normalised, post.artist || "");
-    setStatus({ type: "success", msg: "Applied to title and tags below" });
+    onExtracted(title || p.title || "", normalised, p.artist || "");
+    setStatus({
+      type: "success",
+      msg: `Applied #${p.post_id} — title and tags below`,
+    });
   }
 
   return (
@@ -116,24 +205,109 @@ export default function PatreonPanel({ dict, onExtracted }: PatreonPanelProps) {
         </p>
       </div>
 
-      {/* Metadata-only toggle */}
-      <label className="flex items-start gap-2 mt-3 shrink-0 cursor-pointer select-none group">
-        <Checkbox
-          checked={metadataOnly}
-          onCheckedChange={(v) => setMetadataOnly(v === true)}
-          disabled={fetching}
-          className="mt-0.5 shrink-0"
-        />
-        <span className="flex flex-col gap-0.5 min-w-0">
-          <span className="text-[11px] font-medium text-foreground group-hover:text-primary transition-colors">
-            Metadata only
+      {/* Metadata-only + Dry-run toggles */}
+      <div className="mt-3 shrink-0 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label className="flex items-start gap-2 cursor-pointer select-none group">
+          <Checkbox
+            checked={metadataOnly}
+            onCheckedChange={(v) => setMetadataOnly(v === true)}
+            disabled={fetching || dryRun}
+            className="mt-0.5 shrink-0"
+          />
+          <span className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-[11px] font-medium text-foreground group-hover:text-primary transition-colors">
+              Metadata only
+            </span>
+            <span className="text-[10px] text-muted-foreground/80 leading-relaxed">
+              Skip audio download. Use when the file is already on disk; metadata
+              still gets saved.
+            </span>
           </span>
-          <span className="text-[10px] text-muted-foreground/80 leading-relaxed">
-            Skip the audio download. Use when the file is already on disk and you only
-            need the title + tags. Faster.
+        </label>
+
+        <label className="flex items-start gap-2 cursor-pointer select-none group">
+          <Checkbox
+            checked={dryRun}
+            onCheckedChange={(v) => setDryRun(v === true)}
+            disabled={fetching || metadataOnly}
+            className="mt-0.5 shrink-0"
+          />
+          <span className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-[11px] font-medium text-foreground group-hover:text-primary transition-colors">
+              Dry run
+            </span>
+            <span className="text-[10px] text-muted-foreground/80 leading-relaxed">
+              Preview only — writes nothing to disk. Shows the log of what would
+              be downloaded.
+            </span>
           </span>
-        </span>
-      </label>
+        </label>
+      </div>
+
+      {/* Include media-type toggles. Disabled when nothing's going to be downloaded
+          anyway (metadata-only or dry-run). */}
+      <div
+        className={`mt-3 shrink-0 transition-opacity ${
+          metadataOnly ? "opacity-40 pointer-events-none" : ""
+        }`}
+      >
+        <div className="text-[10px] font-bold tracking-[0.14em] uppercase text-muted-foreground mb-1.5">
+          Include
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {ALL_CONTENT_TYPES.map(({ value, label }) => {
+            const active = contentTypes.includes(value);
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={() => toggleContentType(value)}
+                disabled={fetching || metadataOnly}
+                className={`text-[10px] tracking-[0.06em] px-2.5 py-1 rounded-md border transition-colors ${
+                  active
+                    ? "bg-primary/15 border-primary/40 text-primary"
+                    : "bg-secondary border-input text-muted-foreground hover:text-foreground hover:border-border"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[10px] text-muted-foreground/70 mt-1 leading-relaxed">
+          Audio-only by default. Untoggling everything reverts to audio.
+        </p>
+      </div>
+
+      {/* Date range filter — only meaningful for creator URLs; no-op on single posts */}
+      <div className="mt-3 shrink-0">
+        <div className="text-[10px] font-bold tracking-[0.14em] uppercase text-muted-foreground mb-1.5">
+          Published between
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] text-muted-foreground/80">After</span>
+            <DatePicker
+              value={publishedAfter}
+              onChange={setPublishedAfter}
+              placeholder="any date"
+              disabled={fetching}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] text-muted-foreground/80">Before</span>
+            <DatePicker
+              value={publishedBefore}
+              onChange={setPublishedBefore}
+              placeholder="any date"
+              disabled={fetching}
+            />
+          </div>
+        </div>
+        <p className="text-[10px] text-muted-foreground/70 mt-1 leading-relaxed">
+          Optional. Only applies to creator URLs. Re-fetches skip posts already downloaded.
+        </p>
+      </div>
 
       {/* Fetch button */}
       <div className="mt-3 shrink-0">
@@ -148,12 +322,16 @@ export default function PatreonPanel({ dict, onExtracted }: PatreonPanelProps) {
             <Sparkles size={16} />
           )}
           {fetching
-            ? metadataOnly
-              ? "Fetching…"
-              : "Downloading…"
-            : metadataOnly
-              ? "Fetch metadata"
-              : "Fetch from Patreon"}
+            ? dryRun
+              ? "Previewing…"
+              : metadataOnly
+                ? "Fetching…"
+                : "Downloading…"
+            : dryRun
+              ? "Dry run"
+              : metadataOnly
+                ? "Fetch metadata"
+                : "Fetch from Patreon"}
         </Button>
       </div>
 
@@ -162,7 +340,7 @@ export default function PatreonPanel({ dict, onExtracted }: PatreonPanelProps) {
         <div
           className={`flex items-center gap-2 text-[11px] mt-2 min-h-4 shrink-0 ${
             status.type === "success"
-              ? "text-green-400"
+              ? "text-success"
               : status.type === "error"
                 ? "text-destructive"
                 : "text-muted-foreground"
@@ -221,12 +399,17 @@ export default function PatreonPanel({ dict, onExtracted }: PatreonPanelProps) {
           )}
 
           <div className="mt-auto pt-1 shrink-0">
-            <Button size="sm" variant="outline" onClick={handleApply} className="gap-1.5">
+            <Button size="sm" variant="outline" onClick={() => applyPost(post)} className="gap-1.5">
               <ArrowDown size={13} />
               Use for filename
             </Button>
           </div>
         </div>
+      )}
+
+      {/* Result list (count > 1) — one card per post, each with its own apply button */}
+      {posts.length > 0 && (
+        <PatreonResultsList posts={posts} onApply={applyPost} />
       )}
 
       {/* Log tail (only on count==0 / failure) */}
