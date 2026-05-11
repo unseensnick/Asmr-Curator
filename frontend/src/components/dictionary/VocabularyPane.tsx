@@ -32,12 +32,12 @@ export default function VocabularyPane({
 
     // Mount-only: focus the pre-filled input and tell the parent the value was consumed.
     // No setState here. This effect intentionally has no deps — it runs once on mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => {
         if (quickFill !== undefined) {
             addRef.current?.focus();
             onQuickFillConsumed();
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only by design
     }, []);
 
     async function handleAdd() {

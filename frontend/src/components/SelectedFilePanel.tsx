@@ -112,13 +112,19 @@ export default function SelectedFilePanel({
         extractedArtistRef.current = extractedArtist;
     }, [extractedArtist]);
 
-    // Title syncs from the pipe-format output continuously.
+    // Title syncs from the pipe-format output continuously. metaTitle is
+    // editable by the user after the sync, so we can't just derive it on
+    // every render — we need state that *starts* as outputPipe and accepts
+    // edits.
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing editable state from prop
         setMetaTitle(outputPipe);
     }, [outputPipe]);
 
     // Pre-populate artist when a new file is selected (so switching files
     // refills the artist box from the latest extract).
+    // Note: ESLint's react-hooks/set-state-in-effect doesn't fire here because
+    // the call is guarded by a conditional — kept as-is.
     useEffect(() => {
         if (extractedArtistRef.current)
             setMetaArtist(extractedArtistRef.current);
