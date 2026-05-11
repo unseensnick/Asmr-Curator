@@ -122,7 +122,12 @@ export default function FileBrowser({
         }
     }
 
+    // Mount-only initial load. eslint-plugin-react-hooks v6+ flags any
+    // sync setState in an effect; the recommended alternatives (TanStack
+    // Query, React 19 `use()`) are bigger refactors than this project
+    // warrants.
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         loadFiles("", "filename");
     }, []);
 
