@@ -71,9 +71,11 @@ export function parseTitleLine(raw: string): { title: string; embeddedTags: stri
     return { title, embeddedTags: segments.slice(1) };
   }
 
-  // Plain format — title before first paren, paren contents become tags
+  // Plain format — title before first paren, paren contents become tags.
+  // When no paren exists we keep the whole cleaned string — silently
+  // truncating long titles surprised callers (see review note).
   const parenIdx = clean.indexOf("(");
-  const title = (parenIdx > 0 ? clean.slice(0, parenIdx) : clean.slice(0, 120))
+  const title = (parenIdx > 0 ? clean.slice(0, parenIdx) : clean)
     .trim()
     .replace(/[-–\s]+$/, "")
     .trim();

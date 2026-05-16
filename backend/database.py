@@ -1,9 +1,29 @@
 import sqlite3
 import os
 import json
+from pathlib import Path
 from typing import Optional
 
-DB_PATH = os.environ.get("DB_PATH", "/data/dictionary.db")
+
+def _default_db_path() -> str:
+    """Default DB_PATH that won't leak project state outside the workdir on Windows.
+
+    The canonical default `/data/dictionary.db` is correct inside Docker
+    (it's a Linux absolute path bind-mounted in the compose file) and is
+    overridden explicitly by the devcontainer config. The only environment
+    that hits this fallback is a host-side `uvicorn backend.main:app` run
+    on Windows, where Python resolves `/data/dictionary.db` against the
+    current drive root (e.g. `E:\\data\\dictionary.db`) — silently creating
+    a stray seeded DB outside the repo. Resolve to `<repo>/data/...` on
+    Windows so the orphan can't recur.
+    """
+    if os.name == "nt":
+        repo_root = Path(__file__).resolve().parent.parent
+        return str(repo_root / "data" / "dictionary.db")
+    return "/data/dictionary.db"
+
+
+DB_PATH = os.environ.get("DB_PATH", _default_db_path())
 
 # ── Default vocabulary ────────────────────────────────────────────────────────
 # Each entry: (canonical_display_form, [lowercase_aliases...])

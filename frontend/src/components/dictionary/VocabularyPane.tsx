@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiDelete, apiPatch, apiPost, API } from "@/lib/api";
 import type { VocabEntry } from "@/lib/types";
+import { getErrorMessage } from "@/lib/utils";
 
 interface VocabularyPaneProps {
     vocabulary: VocabEntry[];
@@ -28,6 +29,7 @@ export default function VocabularyPane({
     // as the initial value of useState is safe — the pane always mounts fresh.
     const [addCanonical, setAddCanonical] = useState(quickFill ?? "");
     const [editingId, setEditingId] = useState<number | null>(null);
+    const [error, setError] = useState("");
     const addRef = useRef<HTMLInputElement>(null);
 
     // Mount-only: focus the pre-filled input and tell the parent the value was consumed.
@@ -43,26 +45,41 @@ export default function VocabularyPane({
     async function handleAdd() {
         const val = addCanonical.trim();
         if (!val) return;
-        const row = await apiPost<VocabEntry>(API.vocabulary, {
-            canonical: val,
-            aliases: [],
-        });
-        onChange([...vocabulary, row]);
-        setAddCanonical("");
+        setError("");
+        try {
+            const row = await apiPost<VocabEntry>(API.vocabulary, {
+                canonical: val,
+                aliases: [],
+            });
+            onChange([...vocabulary, row]);
+            setAddCanonical("");
+        } catch (e) {
+            setError(getErrorMessage(e));
+        }
     }
 
     async function handleDelete(entry: VocabEntry) {
-        await apiDelete(API.vocabEntry(entry.id));
-        onChange(vocabulary.filter((x) => x.id !== entry.id));
+        setError("");
+        try {
+            await apiDelete(API.vocabEntry(entry.id));
+            onChange(vocabulary.filter((x) => x.id !== entry.id));
+        } catch (e) {
+            setError(getErrorMessage(e));
+        }
     }
 
     async function handleSave(updated: VocabEntry) {
-        const row = await apiPatch<VocabEntry>(API.vocabEntry(updated.id), {
-            canonical: updated.canonical,
-            aliases: updated.aliases,
-        });
-        onChange(vocabulary.map((x) => (x.id === row.id ? row : x)));
-        setEditingId(null);
+        setError("");
+        try {
+            const row = await apiPatch<VocabEntry>(API.vocabEntry(updated.id), {
+                canonical: updated.canonical,
+                aliases: updated.aliases,
+            });
+            onChange(vocabulary.map((x) => (x.id === row.id ? row : x)));
+            setEditingId(null);
+        } catch (e) {
+            setError(getErrorMessage(e));
+        }
     }
 
     const filtered = search
@@ -156,8 +173,13 @@ export default function VocabularyPane({
                 </div>
             </div>
 
-            {/* Fixed bottom: add row */}
+            {/* Fixed bottom: add row + error surface */}
             <div className="shrink-0 px-5 pt-3 pb-5 border-t border-border">
+                {error && (
+                    <div className="mb-2 text-[11px] text-destructive break-words">
+                        {error}
+                    </div>
+                )}
                 <div className="flex gap-2">
                     <Input
                         ref={addRef}

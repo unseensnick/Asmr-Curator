@@ -1,13 +1,17 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 from pathlib import Path
+from datetime import date
+import asyncio
 import json
+import logging
 import os
 import re
 import subprocess
+import time
 import tomllib
 import httpx
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, TPE2, ID3NoHeaderError
@@ -15,6 +19,8 @@ from mutagen.flac import FLAC
 from mutagen.oggvorbis import OggVorbis
 from mutagen.mp4 import MP4
 from backend import database
+from backend import audio_utils
+from backend import drive_fetch
 from backend.patreon_fetch import PatreonFetchError, fetch as patreon_fetch
 
 # ── Shared audio format config (single source of truth with frontend) ─────────
@@ -22,7 +28,24 @@ _FORMATS_CONFIG_PATH = Path(__file__).parent.parent / "frontend" / "src" / "lib"
 with _FORMATS_CONFIG_PATH.open() as _f:
     _FORMATS_CONFIG = json.load(_f)
 
+log = logging.getLogger("asmr_workbench")
+
+# Max accepted size for a base64-encoded screenshot in /api/extract.
+# Base64 inflates by ~4/3, so 32 MB of base64 ≈ 24 MB of binary image. That's
+# generous for any real ASMR-post screenshot and small enough to make a flood
+# of large posts visible in logs before they OOM the server.
+MAX_IMAGE_B64_BYTES = 32 * 1024 * 1024
+
 app = FastAPI(title="ASMR Workbench API")
+
+
+@app.on_event("shutdown")
+async def _shutdown_drive_browser() -> None:
+    """Close the shared Chromium kept alive across Drive scrapes so we don't
+    leak a child process on server stop. Safe to call when nothing's been
+    launched yet (drive_fetch tracks the state internally)."""
+    await drive_fetch.close_shared_browser()
+
 
 # Resolve frontend dist path — built output from `cd frontend && npm run build`
 FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
@@ -64,7 +87,11 @@ def require_non_empty(value: str, field: str) -> str:
 
 def validate_audio_path(rel_path: str) -> Path:
     resolved = (AUDIO_ROOT / rel_path.strip()).resolve()
-    if not str(resolved).startswith(str(AUDIO_ROOT.resolve())):
+    audio_root = AUDIO_ROOT.resolve()
+    # Use is_relative_to (or Path.relative_to with try/except on older Pythons) so
+    # a sibling directory like /mnt/audio_evil doesn't satisfy a naive prefix
+    # check against /mnt/audio. Python 3.9+ ships is_relative_to natively.
+    if not resolved.is_relative_to(audio_root):
         raise HTTPException(403, "Access denied")
     return resolved
 
@@ -156,6 +183,12 @@ class ExtractIn(BaseModel):
 
 @app.post("/api/extract")
 async def extract(body: ExtractIn):
+    if len(body.image_b64) > MAX_IMAGE_B64_BYTES:
+        raise HTTPException(
+            413,
+            f"Image too large ({len(body.image_b64)} bytes of base64). "
+            f"Limit is {MAX_IMAGE_B64_BYTES} bytes.",
+        )
     model = body.model or OLLAMA_MODEL
     prompt = _build_extract_prompt()
     payload = {
@@ -289,53 +322,87 @@ def list_files(subdir: str = ""):
     }
 
 
+# Directories pruned during the audio search walk. These are noisy and never
+# contain user audio: patreon-dl's own working dir, dotfiles, common
+# build/cache dirs that may end up under AUDIO_ROOT if the user re-purposes
+# the mount.
+_SEARCH_PRUNE_DIRS = {".patreon-dl", ".git", "node_modules", "__pycache__", ".DS_Store"}
+
+# Hard cap on returned results. With the FileBrowser fetching the index
+# upfront, an unbounded match list would balloon the response payload and
+# the React tree. Truncate and tell the caller.
+_SEARCH_RESULT_LIMIT = 500
+
+
 @app.get("/api/files/search")
 def search_files(q: str = "", search_in: str = "filename"):
     """
     Recursively walk AUDIO_ROOT and return all audio/video files.
     search_in: "filename" | "folder" | "both"
+
+    Filters apply during the walk (extension + query), hidden / cache /
+    patreon-dl-working directories are pruned in place, and the result list
+    is capped at _SEARCH_RESULT_LIMIT entries. Sort is applied to the kept
+    results only.
     """
     audio_root = AUDIO_ROOT.resolve()
     if not audio_root.exists():
         raise HTTPException(404, f"Audio root not found at {audio_root} — check AUDIO_ROOT mount")
 
-    results = []
     q_lower = q.strip().lower()
+    if search_in not in ("filename", "folder", "both"):
+        raise HTTPException(400, "search_in must be 'filename', 'folder', or 'both'")
+
+    results: list[dict] = []
+    truncated = False
 
     try:
-        all_files = sorted(audio_root.rglob("*"), key=lambda e: str(e).lower())
+        for dirpath, dirnames, filenames in os.walk(audio_root):
+            # Prune in place so os.walk doesn't descend into noisy subtrees.
+            dirnames[:] = [
+                d for d in dirnames
+                if d not in _SEARCH_PRUNE_DIRS and not d.startswith(".")
+            ]
+            rel_dir = Path(dirpath).relative_to(audio_root)
+            folder = "" if str(rel_dir) == "." else str(rel_dir)
+            folder_lc = folder.lower()
+            for name in filenames:
+                ext = Path(name).suffix.lower()
+                if ext not in AUDIO_EXTS:
+                    continue
+                if q_lower:
+                    name_lc = name.lower()
+                    match_name = q_lower in name_lc
+                    match_folder = q_lower in folder_lc
+                    if search_in == "filename" and not match_name:
+                        continue
+                    if search_in == "folder" and not match_folder:
+                        continue
+                    if search_in == "both" and not (match_name or match_folder):
+                        continue
+                rel_path = str(rel_dir / name) if folder else name
+                results.append({
+                    "name": name,
+                    "ext": ext,
+                    "path": rel_path,
+                    "folder": folder,
+                    "needs_conversion": ext in NEEDS_CONVERSION_EXTS,
+                })
+                if len(results) >= _SEARCH_RESULT_LIMIT:
+                    truncated = True
+                    break
+            if truncated:
+                break
     except PermissionError as e:
         raise HTTPException(500, f"Permission error scanning files: {e}")
 
-    for entry in all_files:
-        try:
-            if not entry.is_file():
-                continue
-            if entry.suffix.lower() not in AUDIO_EXTS:
-                continue
-            rel = entry.relative_to(audio_root)
-            folder = str(rel.parent) if str(rel.parent) != "." else ""
-            if q_lower:
-                match_name   = q_lower in entry.name.lower()
-                match_folder = q_lower in folder.lower()
-                if search_in == "filename" and not match_name:
-                    continue
-                elif search_in == "folder" and not match_folder:
-                    continue
-                elif search_in == "both" and not (match_name or match_folder):
-                    continue
-            ext = entry.suffix.lower()
-            results.append({
-                "name": entry.name,
-                "ext": ext,
-                "path": str(rel),
-                "folder": folder,
-                "needs_conversion": ext in NEEDS_CONVERSION_EXTS,
-            })
-        except (PermissionError, OSError):
-            continue
+    results.sort(key=lambda r: (r["folder"].lower(), r["name"].lower()))
 
-    return {"query": q, "search_in": search_in, "total": len(results), "files": results}
+    response: dict = {"query": q, "search_in": search_in, "total": len(results), "files": results}
+    if truncated:
+        response["truncated"] = True
+        response["limit"] = _SEARCH_RESULT_LIMIT
+    return response
 
 
 @app.get("/api/files/debug")
@@ -481,7 +548,10 @@ def convert_file(body: ConvertIn):
         raise HTTPException(504, "Conversion timed out")
 
     if result.returncode != 0:
-        raise HTTPException(500, f"Conversion failed: {result.stderr[-500:]}")
+        # Log the full stderr server-side; return a generic message to the
+        # client so internal filesystem paths and command lines don't leak.
+        log.error("ffmpeg conversion failed for %s: %s", src.name, result.stderr)
+        raise HTTPException(500, "Conversion failed. Check the server log for ffmpeg output.")
 
     if body.delete_original:
         try:
@@ -500,6 +570,65 @@ def convert_file(body: ConvertIn):
 # ── Settings (key/value) ──────────────────────────────────────────────────────
 
 PATREON_COOKIE_KEY = "patreon_cookie"
+GOOGLE_COOKIE_KEY = "google_cookie"
+
+# Drive scrapes must run one at a time per Google account: every playback
+# session triggers `accounts.google.com/RotateCookies` mid-stream, and when
+# multiple sessions race that rotation only the last wins server-side. The
+# losers then get probe-shape (~1 KB) bodies on their follow-up fetch
+# because Drive's CDN does an extra session check on videoplayback. Default
+# capacity 1; raise via `DRIVE_SCRAPE_CONCURRENCY` if you're scraping
+# different accounts (where the rotation race doesn't apply) or willing to
+# accept the failure mode.
+_DRIVE_SCRAPE_CAPACITY = max(1, int(os.environ.get("DRIVE_SCRAPE_CONCURRENCY", "1")))
+_drive_scrape_lock = asyncio.Semaphore(_DRIVE_SCRAPE_CAPACITY)
+# Plain int — single-event-loop concurrency means `+=`/`-=` need no lock.
+_drive_scrape_pending = 0
+
+# Playwright accepts only these three sameSite values. Browser cookie APIs use
+# different vocabularies — Chrome ("no_restriction"|"lax"|"strict"|"unspecified")
+# and Firefox ("no_restriction"|"lax"|"strict"). Normalise here so the
+# extension can dump cookies in whatever shape its host browser produces.
+_SAMESITE_NORMALISE = {
+    "no_restriction": "None",
+    "none":           "None",
+    "lax":            "Lax",
+    "strict":         "Strict",
+    "unspecified":    "Lax",
+}
+
+
+def _normalise_cookie_for_playwright(raw: dict) -> Optional[dict]:
+    """Reshape one cookie object from chrome.cookies.getAll() into the shape
+    `playwright.async_api.BrowserContext.add_cookies` expects. Returns None
+    for entries that lack the minimum required fields.
+
+    Required (per Playwright): name, value, and either (domain+path) or url.
+    Optional: expires, httpOnly, secure, sameSite.
+    """
+    if not isinstance(raw, dict):
+        return None
+    name = raw.get("name")
+    value = raw.get("value")
+    domain = raw.get("domain")
+    if not (isinstance(name, str) and isinstance(value, str) and isinstance(domain, str)):
+        return None
+    out: dict = {"name": name, "value": value, "domain": domain, "path": raw.get("path") or "/"}
+    if raw.get("httpOnly") is True:
+        out["httpOnly"] = True
+    if raw.get("secure") is True:
+        out["secure"] = True
+    same_site = raw.get("sameSite")
+    if isinstance(same_site, str):
+        normalised = _SAMESITE_NORMALISE.get(same_site.lower())
+        if normalised:
+            out["sameSite"] = normalised
+    # `expirationDate` is Chrome's name; Firefox uses `expires`. Both come
+    # through as a float epoch in seconds. Session cookies omit it entirely.
+    expires = raw.get("expirationDate", raw.get("expires"))
+    if isinstance(expires, (int, float)) and expires > 0:
+        out["expires"] = float(expires)
+    return out
 
 
 @app.get("/api/settings/patreon-cookie")
@@ -533,20 +662,75 @@ async def set_patreon_cookie(request: Request):
     return {"set": True, "length": len(cookie)}
 
 
+@app.get("/api/settings/google-cookie")
+def get_google_cookie():
+    """Status of the stored Google session cookie.
+
+    Returns count of cookies and total stored byte size — never the values
+    themselves (they include long-lived auth tokens equivalent to a password)."""
+    value = database.get_setting(GOOGLE_COOKIE_KEY) or ""
+    if not value:
+        return {"set": False, "count": 0, "length": 0}
+    try:
+        parsed = json.loads(value)
+        count = len(parsed) if isinstance(parsed, list) else 0
+    except (ValueError, json.JSONDecodeError):
+        count = 0
+    return {"set": True, "count": count, "length": len(value)}
+
+
+@app.put("/api/settings/google-cookie")
+async def set_google_cookie(request: Request):
+    """Store a Google session cookie. Body: `{"cookies": [...]}` where each
+    entry is a chrome.cookies.getAll-style object. The backend reshapes them
+    into Playwright's expected format; entries missing required fields are
+    silently dropped. An empty array clears the setting."""
+    try:
+        data = await request.json()
+    except ValueError:
+        raise HTTPException(400, "Invalid JSON body")
+    if not isinstance(data, dict):
+        raise HTTPException(400, "JSON body must be an object")
+    cookies = data.get("cookies")
+    if not isinstance(cookies, list):
+        raise HTTPException(400, "`cookies` must be an array")
+
+    cleaned: list[dict] = []
+    for entry in cookies:
+        normalised = _normalise_cookie_for_playwright(entry)
+        if normalised is not None:
+            cleaned.append(normalised)
+
+    if not cleaned:
+        database.delete_setting(GOOGLE_COOKIE_KEY)
+        # Drop the shared Playwright context so the next scrape doesn't
+        # keep using cookies the user just cleared.
+        drive_fetch.invalidate_shared_context()
+        return {"set": False, "count": 0, "length": 0}
+
+    serialised = json.dumps(cleaned, separators=(",", ":"))
+    database.set_setting(GOOGLE_COOKIE_KEY, serialised)
+    # Drop the shared Playwright context so the next scrape picks up the
+    # freshly-synced cookies (rather than the rotated set it accumulated
+    # from previous scrapes).
+    drive_fetch.invalidate_shared_context()
+    return {"set": True, "count": len(cleaned), "length": len(serialised)}
+
+
 # ── Patreon download (patreon-dl wrapper) ─────────────────────────────────────
 
 PATREON_OUTPUT_SUBDIR = ".patreon-dl"
 
 
-_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
-
 def _validate_iso_date(value: Optional[str], field: str) -> Optional[str]:
     if value is None or value == "":
         return None
-    if not _ISO_DATE_RE.match(value):
-        raise HTTPException(400, f"{field} must be in YYYY-MM-DD format")
-    return value
+    try:
+        # Catches both bad shape (regex would miss `9999-99-99`) and impossible
+        # calendar dates. patreon-dl wants the canonical YYYY-MM-DD form back.
+        return date.fromisoformat(value).isoformat()
+    except ValueError as e:
+        raise HTTPException(400, f"{field}: {e}")
 
 
 class PatreonFetchIn(BaseModel):
@@ -606,6 +790,9 @@ def patreon_fetch_endpoint(body: PatreonFetchIn):
             "artist": p.artist,
             "post_dir": _rel(p.post_dir),
             "audio_path": _rel(p.audio_path),
+            "external_links": [
+                {"url": link.url, "text": link.text} for link in p.external_links
+            ],
         }
         for p in result.posts
     ]
@@ -638,6 +825,280 @@ def patreon_fetch_endpoint(body: PatreonFetchIn):
         )
         response["log_tail"] = result.log_tail
     return response
+
+
+# ── External audio ingest (browser-extension handoff) ─────────────────────────
+#
+# Patreon posts often link to audio hosted on third-party services (Google
+# Drive, etc.) that patreon-dl doesn't follow. Two ingest paths exist:
+#
+#   1. `/api/patreon/ingest-external-audio` — called by the browser extension
+#      once it has already captured + cleaned a Google playback URL from the
+#      page's network traffic. We just download.
+#   2. `/api/patreon/ingest-drive-link` — called by the workbench UI for a
+#      Drive viewer URL surfaced via `external_links`. We use Playwright +
+#      the synced Google cookie to load Drive headlessly, intercept the
+#      playback URL, clean, then download. No extension capture needed.
+#
+# The audio helpers (URL cleaning, filename derivation, etc.) live in
+# `backend/audio_utils.py` so both paths and the Playwright module share them
+# without a circular import back into FastAPI.
+
+
+class IngestExternalAudioIn(BaseModel):
+    post_id: str
+    source_url: str
+    # Optional override; otherwise derived from Content-Disposition or
+    # `<post_id>_<timestamp>.<ext>`.
+    filename: Optional[str] = None
+    # Optional metadata to embed after the download lands. Only honoured for
+    # metadata-compatible formats; silently ignored otherwise.
+    title: Optional[str] = None
+    artist: Optional[str] = None
+    album: Optional[str] = None
+    album_artist: Optional[str] = None
+
+
+@app.post("/api/patreon/ingest-external-audio")
+async def ingest_external_audio(body: IngestExternalAudioIn):
+    post_id = require_non_empty(body.post_id, "post_id")
+    if "/" in post_id or "\\" in post_id or post_id.startswith("."):
+        raise HTTPException(400, "Invalid post_id")
+    source_url = require_non_empty(body.source_url, "source_url")
+    if not (source_url.startswith("http://") or source_url.startswith("https://")):
+        raise HTTPException(400, "source_url must be http(s)")
+
+    cleaned_url = audio_utils.strip_query_params(source_url)
+
+    # validate_audio_path enforces the AUDIO_ROOT boundary even if post_id
+    # somehow contains traversal segments that slipped past the prefix check.
+    dest_dir = validate_audio_path(post_id)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    timeout = httpx.Timeout(connect=15.0, read=300.0, write=60.0, pool=15.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            async with client.stream("GET", cleaned_url) as response:
+                if response.status_code >= 400:
+                    raise HTTPException(
+                        502,
+                        f"External host returned {response.status_code} — URL may have expired",
+                    )
+
+                content_disposition = response.headers.get("content-disposition")
+                content_type = response.headers.get("content-type")
+                content_length = response.headers.get("content-length")
+
+                filename = audio_utils.derive_filename(
+                    explicit=body.filename,
+                    content_disposition=content_disposition,
+                    content_type=content_type,
+                    fallback_stem=post_id,
+                )
+                target = audio_utils.unique_destination(dest_dir / filename)
+                part = target.with_suffix(target.suffix + ".part")
+                try:
+                    bytes_written = 0
+                    with part.open("wb") as f:
+                        async for chunk in response.aiter_bytes(chunk_size=64 * 1024):
+                            if chunk:
+                                f.write(chunk)
+                                bytes_written += len(chunk)
+                    part.rename(target)
+                except Exception:
+                    part.unlink(missing_ok=True)
+                    raise
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"Failed to fetch source_url: {e}")
+
+    # Best-effort metadata embed when the format supports it. Any failure here
+    # is non-fatal — the file is on disk either way.
+    metadata_error: Optional[str] = None
+    if target.suffix.lower() in METADATA_COMPATIBLE_EXTS and any([
+        body.title, body.artist, body.album, body.album_artist,
+    ]):
+        try:
+            _write_metadata(
+                target,
+                body.title or "",
+                body.artist or "",
+                body.album or "",
+                body.album_artist or "",
+            )
+        except Exception as e:
+            metadata_error = f"Metadata embed failed: {e}"
+
+    # target was built from validate_audio_path(dest_dir), so it's always inside
+    # AUDIO_ROOT — relative_to is guaranteed to succeed. We don't fall back to
+    # the absolute path because that would leak the server's internal layout.
+    audio_path = str(target.relative_to(AUDIO_ROOT.resolve()))
+    result = {
+        "audio_path": audio_path,
+        "size": bytes_written,
+        "source_url": cleaned_url,
+    }
+    if content_length and content_length.isdigit() and int(content_length) != bytes_written:
+        result["warning"] = (
+            f"Downloaded {bytes_written} bytes but Content-Length was {content_length}"
+        )
+    if metadata_error:
+        result["metadata_error"] = metadata_error
+    return result
+
+
+# ── Drive-link ingest (server-side scrape via Playwright) ────────────────────
+
+
+class IngestDriveLinkIn(BaseModel):
+    post_id: str
+    drive_url: str
+    filename: Optional[str] = None
+
+
+@app.post("/api/patreon/ingest-drive-link")
+async def ingest_drive_link(body: IngestDriveLinkIn):
+    """Resolve a Drive viewer URL to its playback URL via headless Chromium,
+    clean it, and download into AUDIO_ROOT/<post_id>/.
+
+    Returns a `text/event-stream` of progress events. The frontend consumes
+    these with fetch + reader.read() rather than the standard JSON wrapper.
+    Event shapes (see `drive_fetch.fetch_drive_audio` docstring):
+
+      data: {"state": "launching_browser", "elapsed_s": …}
+      data: {"state": "loading_page", "drive_url": "…", "elapsed_s": …}
+      data: {"state": "waiting_for_player", "elapsed_s": …}
+      data: {"state": "captured", "elapsed_s": …}
+      data: {"state": "downloading", "bytes": …, "total": …, "elapsed_s": …}
+      …
+      data: {"state": "done", "audio_path": "…", "size": …, "source_url": "…", "file_id": "…"}
+
+    On failure:
+      data: {"state": "error", "code": "timeout|invalid_url|missing_player|fetch_failed",
+             "message": "…", "debug_dir": "…"}
+
+    Requires the Google session cookie to be set via /api/settings/google-cookie
+    (typically by the browser extension)."""
+    # ── Up-front validation ───────────────────────────────────────────────
+    # These errors happen synchronously before any SSE stream opens, so we
+    # raise HTTPException so the client gets a normal JSON error response
+    # (consistent with the rest of the API).
+    post_id = require_non_empty(body.post_id, "post_id")
+    if "/" in post_id or "\\" in post_id or post_id.startswith("."):
+        raise HTTPException(400, "Invalid post_id")
+    drive_url = require_non_empty(body.drive_url, "drive_url")
+
+    raw_cookie = database.get_setting(GOOGLE_COOKIE_KEY) or ""
+    if not raw_cookie:
+        raise HTTPException(
+            412,
+            "Google cookie is not set — sync it via the browser extension first",
+        )
+    try:
+        cookies = json.loads(raw_cookie)
+        if not isinstance(cookies, list):
+            raise ValueError("expected JSON array")
+    except (ValueError, json.JSONDecodeError) as e:
+        raise HTTPException(500, f"Google cookie in settings is malformed: {e}")
+
+    dest_dir = validate_audio_path(post_id)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── SSE generator ─────────────────────────────────────────────────────
+    # Pattern: spawn fetch_drive_audio as a background task feeding an
+    # asyncio.Queue via its on_progress callback. The generator drains the
+    # queue and yields formatted SSE events. The terminal event (`done` or
+    # `error`) closes the loop.
+    queue: asyncio.Queue = asyncio.Queue()
+    DONE_SENTINEL = object()
+
+    async def push(event: dict) -> None:
+        await queue.put(event)
+
+    async def runner() -> None:
+        global _drive_scrape_pending
+        # Snapshot the lock state and our position BEFORE incrementing so the
+        # "ahead" count we surface to the UI is the number of requests that
+        # were already in flight or queued when ours arrived.
+        contested = _drive_scrape_lock.locked()
+        ahead_on_arrival = _drive_scrape_pending
+        _drive_scrape_pending += 1
+        try:
+            if contested:
+                await queue.put({
+                    "state": "queued",
+                    "ahead": ahead_on_arrival,
+                    "elapsed_s": 0.0,
+                })
+            async with _drive_scrape_lock:
+                result = await drive_fetch.fetch_drive_audio(
+                    drive_url=drive_url,
+                    cookies=cookies,
+                    dest_dir=dest_dir,
+                    fallback_stem=post_id,
+                    explicit_filename=body.filename,
+                    on_progress=push,
+                )
+                audio_root = AUDIO_ROOT.resolve()
+                audio_path = str(result.audio_path.relative_to(audio_root))
+                await queue.put({
+                    "state": "done",
+                    "audio_path": audio_path,
+                    "size": result.size,
+                    "source_url": result.source_url,
+                    "file_id": result.file_id,
+                })
+        except drive_fetch.DriveFetchError as e:
+            await queue.put({
+                "state": "error",
+                "code": e.code,
+                "message": str(e),
+                "debug_dir": str(e.debug_dir) if e.debug_dir else None,
+            })
+        except Exception as e:
+            log.exception("ingest-drive-link: unexpected failure")
+            await queue.put({
+                "state": "error",
+                "code": "internal",
+                "message": f"Unexpected backend error: {e}",
+                "debug_dir": None,
+            })
+        finally:
+            _drive_scrape_pending -= 1
+            await queue.put(DONE_SENTINEL)
+
+    async def event_stream():
+        task = asyncio.create_task(runner())
+        try:
+            while True:
+                event = await queue.get()
+                if event is DONE_SENTINEL:
+                    return
+                # SSE wire format: `data: <json>\n\n`. Single-line JSON keeps
+                # us safely under the spec's "data fields are line-delimited"
+                # constraint without per-field splitting.
+                yield f"data: {json.dumps(event, separators=(',', ':'))}\n\n"
+        finally:
+            # Client disconnect or generator close — cancel the underlying
+            # work so we don't keep a Playwright session running for a tab
+            # the user closed. Best-effort: if the runner is already past
+            # cancellation checkpoints (e.g. inside browser.close), we let
+            # it finish.
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            # Prevent any proxy in front of FastAPI from buffering the stream
+            # (matters in dev when Vite's proxy is in the path).
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ── Dictionary: full load / import / reset ────────────────────────────────────

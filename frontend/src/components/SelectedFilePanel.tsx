@@ -58,6 +58,9 @@ interface SelectedFilePanelProps {
 interface RenameResponse {
     path: string;
     new_name: string;
+    // Set when the rename succeeded but the optional ID3/FLAC/MP4 metadata
+    // embed step failed. The file is still on disk under the new name.
+    metadata_error?: string;
 }
 
 interface ConvertResponse {
@@ -111,6 +114,18 @@ export default function SelectedFilePanel({
     useEffect(() => {
         extractedArtistRef.current = extractedArtist;
     }, [extractedArtist]);
+
+    // Pending state-reset timers (rename + convert "done" badges). Tracked in
+    // refs so we can cancel them on unmount and avoid React's
+    // "setState on unmounted component" warning.
+    const renamedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const convertedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => {
+        return () => {
+            if (renamedTimerRef.current) clearTimeout(renamedTimerRef.current);
+            if (convertedTimerRef.current) clearTimeout(convertedTimerRef.current);
+        };
+    }, []);
 
     // Title syncs from the pipe-format output continuously. metaTitle is
     // editable by the user after the sync, so we can't just derive it on
@@ -184,7 +199,14 @@ export default function SelectedFilePanel({
                 name: data.new_name,
             });
             setRenamed(true);
-            setTimeout(() => setRenamed(false), 2500);
+            if (renamedTimerRef.current) clearTimeout(renamedTimerRef.current);
+            renamedTimerRef.current = setTimeout(() => setRenamed(false), 2500);
+            // Surface the partial-success path: rename committed, metadata
+            // embed didn't. The file is on disk under the new name, but the
+            // user expected tags written too.
+            if (data.metadata_error) {
+                onError(`Renamed, but metadata embed failed: ${data.metadata_error}`);
+            }
             onListReload();
         } catch (e) {
             onError("Rename failed: " + getErrorMessage(e));
@@ -214,7 +236,8 @@ export default function SelectedFilePanel({
             });
             setConverted(true);
             setShowOptionalConvert(false);
-            setTimeout(() => setConverted(false), 2500);
+            if (convertedTimerRef.current) clearTimeout(convertedTimerRef.current);
+            convertedTimerRef.current = setTimeout(() => setConverted(false), 2500);
             onListReload();
         } catch (e) {
             onError("Conversion failed: " + getErrorMessage(e));

@@ -26,6 +26,13 @@ RUN uv python install 3.14
 RUN uv venv --python 3.14 /home/devuser/.venv
 ENV PATH="/home/devuser/.venv/bin:$PATH"
 
+# Playwright + Chromium for the Drive scrape path (POST /api/patreon/ingest-drive-link).
+# Pre-baked into the image so the postStartCommand doesn't have to download
+# ~180 MB on every container restart. The matching `playwright==1.49.0` pin is
+# in backend/requirements.txt, kept in lockstep.
+RUN /home/devuser/.venv/bin/pip install --no-cache-dir playwright==1.59.0 \
+    && /home/devuser/.venv/bin/playwright install --with-deps chromium
+
 RUN curl https://get.volta.sh | bash
 ENV VOLTA_HOME="/home/devuser/.volta"
 ENV PATH="$VOLTA_HOME/bin:$PATH"

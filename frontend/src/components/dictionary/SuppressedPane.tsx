@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiDelete, apiPost, API } from "@/lib/api";
 import type { SuppressedTerm } from "@/lib/types";
+import { getErrorMessage } from "@/lib/utils";
 
 interface SuppressedPaneProps {
     suppressed: SuppressedTerm[];
@@ -27,6 +28,7 @@ export default function SuppressedPane({
     // as the initial value of useState is safe — the pane always mounts fresh.
     const [addVal, setAddVal] = useState(quickFill ?? "");
     const [search, setSearch] = useState("");
+    const [error, setError] = useState("");
     const addRef = useRef<HTMLInputElement>(null);
 
     // Mount-only: focus the pre-filled input and tell the parent the value was consumed.
@@ -40,14 +42,24 @@ export default function SuppressedPane({
     async function handleAdd() {
         const val = addVal.trim().toLowerCase();
         if (!val) return;
-        const row = await apiPost<SuppressedTerm>(API.suppressed, { term: val });
-        onChange([...suppressed, row]);
-        setAddVal("");
+        setError("");
+        try {
+            const row = await apiPost<SuppressedTerm>(API.suppressed, { term: val });
+            onChange([...suppressed, row]);
+            setAddVal("");
+        } catch (e) {
+            setError(getErrorMessage(e));
+        }
     }
 
     async function handleDelete(s: SuppressedTerm) {
-        await apiDelete(API.suppressedEntry(s.id));
-        onChange(suppressed.filter((x) => x.id !== s.id));
+        setError("");
+        try {
+            await apiDelete(API.suppressedEntry(s.id));
+            onChange(suppressed.filter((x) => x.id !== s.id));
+        } catch (e) {
+            setError(getErrorMessage(e));
+        }
     }
 
     const filtered = search
@@ -101,8 +113,13 @@ export default function SuppressedPane({
                 </div>
             </div>
 
-            {/* Fixed bottom: add row */}
+            {/* Fixed bottom: add row + error surface */}
             <div className="shrink-0 px-5 pt-3 pb-5 border-t border-border">
+                {error && (
+                    <div className="mb-2 text-[11px] text-destructive break-words">
+                        {error}
+                    </div>
+                )}
                 <div className="flex gap-2">
                     <Input
                         ref={addRef}

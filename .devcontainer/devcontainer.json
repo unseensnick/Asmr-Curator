@@ -18,10 +18,10 @@
     5173
   ],
   "mounts": [
-    "source=C:\\Users\\unseensnick\\Desktop\\projects\\asmr,target=/mnt/audio,type=bind,consistency=cached"
+    "source=${localEnv:AUDIO_PATH},target=/mnt/audio,type=bind,consistency=cached"
   ],
   "postCreateCommand": "sudo chown -R devuser:devuser /workspaces/asmr-filename-gen && sudo chmod -R u+rw /workspaces/asmr-filename-gen",
-  "postStartCommand": "uv pip install --python /home/devuser/.venv/bin/python -r /workspaces/asmr-filename-gen/backend/requirements.txt -q && volta install node@25 && npm install -g /workspaces/asmr-filename-gen/vendor/patreon-dl/patreon-dl-3.8.1-localfix.tgz",
+  "postStartCommand": "uv pip install --python /home/devuser/.venv/bin/python -r /workspaces/asmr-filename-gen/backend/requirements.txt -q && volta install node@25 && npm install -g patreon-dl@3.9.0",
   "customizations": {
     "vscode": {
       "extensions": [
@@ -59,4 +59,4 @@
       }
     }
   }
-}
+}
