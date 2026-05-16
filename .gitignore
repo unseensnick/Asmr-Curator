@@ -43,3 +43,4 @@ node_modules/
 *.db
 *.sqlite3
 .gitkeep
+CLAUDE.local.md
