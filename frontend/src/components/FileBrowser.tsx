@@ -122,14 +122,17 @@ export default function FileBrowser({
         }
     }
 
-    // Mount-only initial load. eslint-plugin-react-hooks v6+ flags any
-    // sync setState in an effect; the recommended alternatives (TanStack
-    // Query, React 19 `use()`) are bigger refactors than this project
-    // warrants.
+    // Defer the initial load until the panel is opened the first time —
+    // otherwise we walk the entire AUDIO_ROOT (a sync FastAPI route that
+    // ties up a worker thread) on every page load even when the user never
+    // expands the file browser. `loadedOnceRef` keeps it strictly mount-once
+    // per session so toggling open/closed doesn't re-fetch.
+    const loadedOnceRef = useRef(false);
     useEffect(() => {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
+        if (!open || loadedOnceRef.current) return;
+        loadedOnceRef.current = true;
         loadFiles("", "filename");
-    }, []);
+    }, [open]);
 
     function handleQueryChange(val: string) {
         setQuery(val);

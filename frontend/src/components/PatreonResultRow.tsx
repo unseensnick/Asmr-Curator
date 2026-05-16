@@ -1,6 +1,7 @@
 import { ArrowDown, User } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import ExternalLinksHint from "@/components/ExternalLinksHint";
 import type { PatreonPost } from "@/lib/types";
 
 interface PatreonResultRowProps {
@@ -68,10 +69,14 @@ export default function PatreonResultRow({
                         {post.audio_path}
                     </code>
                 </div>
-            ) : (
+            ) : !post.external_links?.length ? (
                 <div className="text-[10px] text-muted-foreground/70 italic">
-                    no audio file — metadata-only or dry-run
+                    No Patreon-hosted audio and no recognised external links — open the post manually to check.
                 </div>
+            ) : null}
+
+            {post.external_links && post.external_links.length > 0 && (
+                <ExternalLinksHint postId={post.post_id} links={post.external_links} />
             )}
 
             <div className="pt-1">

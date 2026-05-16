@@ -12,9 +12,9 @@ RUN npm run build
 # ── Stage 2: Production image ──────────────────────────────────────────────────
 # patreon-dl installs IN this stage (not a separate node:25-slim builder stage)
 # so its better-sqlite3 native binary is compiled against the exact Node version
-# that'll run it at runtime. Previously we copied a Node-25-compiled .node into
-# a Node-20 (Debian apt) runtime and crashed on every fetch with
-# `NODE_MODULE_VERSION 141 vs 115`.
+# that'll run it at runtime. Previously the split builder copied a Node-25-compiled
+# .node into a Node-20 (Debian apt) runtime and crashed on every fetch with
+# `NODE_MODULE_VERSION 141 vs 115` (hotfixed in 1.1.1).
 FROM python:3.14-slim
 
 WORKDIR /app
@@ -27,14 +27,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     npm \
     && rm -rf /var/lib/apt/lists/*
 
-# Install patreon-dl from the locally-patched tarball (upstream 3.8.1 ships a
-# parser regex that doesn't match Patreon's current HTML — issues #134/#135).
-# See vendor/patreon-dl/README.md for the patch + rebuild instructions.
-COPY vendor/patreon-dl/patreon-dl-3.8.1-localfix.tgz /tmp/patreon-dl.tgz
-RUN npm install -g --omit=dev /tmp/patreon-dl.tgz && rm /tmp/patreon-dl.tgz
+# patreon-dl from upstream npm. 3.9.0 ships the parser fix that closed issues
+# #134 / #135; pre-3.9.0 we shipped a locally-patched tarball from
+# vendor/patreon-dl/ (see git history if a future regression makes that
+# pattern necessary again).
+ARG PATREON_DL_VERSION=3.9.0
+RUN npm install -g --omit=dev patreon-dl@${PATREON_DL_VERSION}
 
 COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
+
+# Playwright Chromium + its native deps (~180 MB) — used by
+# /api/patreon/ingest-drive-link to scrape Drive playback URLs headlessly.
+# Must run after `pip install playwright` (already in requirements.txt).
+RUN playwright install --with-deps chromium
 
 COPY backend/ ./backend/
 

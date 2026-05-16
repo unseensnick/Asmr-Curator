@@ -6,11 +6,12 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import DatePicker from "@/components/DatePicker";
+import ExternalLinksHint from "@/components/ExternalLinksHint";
 import PatreonResultsList from "@/components/PatreonResultsList";
 import { fetchPatreonPost } from "@/lib/api";
 import { parseTitleLine } from "@/lib/parser";
 import type { AppDict, PatreonContentType, PatreonPost } from "@/lib/types";
-import { normalizeTag, getErrorMessage } from "@/lib/utils";
+import { normalizeTag, getErrorMessage, splitLogTail } from "@/lib/utils";
 
 interface PatreonPanelProps {
   dict: AppDict;
@@ -23,6 +24,10 @@ const ALL_CONTENT_TYPES: { value: PatreonContentType; label: string }[] = [
   { value: "video", label: "Video" },
   { value: "image", label: "Images" },
   { value: "attachment", label: "Attachments" },
+  // "External" widens the walk to every post so body-text Drive links
+  // surface — the per-link Download button in ExternalLinksHint is the
+  // action that pulls the actual audio via the Playwright scrape.
+  { value: "external", label: "External" },
 ];
 
 function loadStoredContentTypes(): PatreonContentType[] {
@@ -31,7 +36,9 @@ function loadStoredContentTypes(): PatreonContentType[] {
     if (!raw) return ["audio"];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return ["audio"];
-    const allowed = new Set<PatreonContentType>(["audio", "video", "image", "attachment"]);
+    const allowed = new Set<PatreonContentType>([
+      "audio", "video", "image", "attachment", "external",
+    ]);
     const cleaned = parsed.filter((v): v is PatreonContentType =>
       typeof v === "string" && allowed.has(v as PatreonContentType)
     );
@@ -144,7 +151,12 @@ export default function PatreonPanel({ dict, onExtracted }: PatreonPanelProps) {
         });
       }
     } catch (err) {
-      setStatus({ type: "error", msg: getErrorMessage(err) });
+      // Backend errors from patreon-dl often suffix a noisy log tail with
+      // absolute container paths. Split it off so the status banner stays
+      // readable; route the tail into the existing expandable log surface.
+      const { head, logTail: tail } = splitLogTail(getErrorMessage(err));
+      setStatus({ type: "error", msg: head || "Patreon fetch failed" });
+      if (tail) setLogTail(tail);
     } finally {
       setFetching(false);
     }
@@ -275,7 +287,7 @@ export default function PatreonPanel({ dict, onExtracted }: PatreonPanelProps) {
           })}
         </div>
         <p className="text-[10px] text-muted-foreground/70 mt-1 leading-relaxed">
-          Audio-only by default. Untoggling everything reverts to audio.
+          Audio-only by default. Pick <strong>External</strong> too if posts only have a Drive link in their body. Untoggling everything reverts to audio.
         </p>
       </div>
 
@@ -392,10 +404,18 @@ export default function PatreonPanel({ dict, onExtracted }: PatreonPanelProps) {
               <span className="text-primary/80">audio →</span>
               <code className="font-mono break-all">{post.audio_path}</code>
             </div>
-          ) : (
+          ) : !post.external_links?.length ? (
+            // No Patreon-hosted audio AND no recognised external links —
+            // the extractor came up empty, surface that explicitly instead
+            // of inheriting the older "metadata-only fetch" copy that
+            // misled the user when External was on.
             <div className="text-[10px] text-muted-foreground/70 italic shrink-0">
-              metadata-only fetch — no audio downloaded
+              No Patreon-hosted audio and no recognised external links — open the post manually to check.
             </div>
+          ) : null}
+
+          {post.external_links && post.external_links.length > 0 && (
+            <ExternalLinksHint postId={post.post_id} links={post.external_links} />
           )}
 
           <div className="mt-auto pt-1 shrink-0">

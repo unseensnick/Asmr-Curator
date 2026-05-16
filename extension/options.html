@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ASMR Workbench Companion — Settings</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f0f12;
+        --panel: #18181d;
+        --border: #2a2a31;
+        --text: #f4f4f5;
+        --muted: #9a9aa3;
+        --accent: #a78bfa;
+        --accent-strong: #7c3aed;
+      }
+      body {
+        margin: 0;
+        min-width: 420px;
+        padding: 20px;
+        font: 400 13px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      h1 { font-size: 14px; margin: 0 0 16px; letter-spacing: 0.04em; }
+      label {
+        display: block;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+      input[type="text"] {
+        width: 100%;
+        box-sizing: border-box;
+        font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text);
+      }
+      input[type="text"]:focus { outline: none; border-color: var(--accent); }
+      .hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
+      .row { display: flex; gap: 8px; margin-top: 16px; }
+      button {
+        appearance: none;
+        font: 500 13px/1 inherit;
+        padding: 8px 14px;
+        border-radius: 8px;
+        cursor: pointer;
+        background: var(--accent-strong);
+        color: #fff;
+        border: 1px solid var(--accent-strong);
+      }
+      button:hover { background: #6d28d9; }
+      button.secondary {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      button.secondary:hover { border-color: var(--accent); color: var(--accent); }
+      .status { font-size: 12px; margin-top: 12px; min-height: 16px; color: var(--muted); }
+      .status.ok { color: #22c55e; }
+      .status.err { color: #ef4444; }
+      .toggle {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        margin: 20px 0 0;
+        cursor: pointer;
+        user-select: none;
+      }
+      .toggle input[type="checkbox"] {
+        margin: 3px 0 0;
+        flex-shrink: 0;
+        accent-color: var(--accent-strong);
+      }
+      .toggle-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+      .toggle-title { font-size: 13px; font-weight: 500; }
+      .toggle-desc { font-size: 11px; color: var(--muted); line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <h1>ASMR Workbench Companion settings</h1>
+
+    <label for="backend-url">Backend URL</label>
+    <input id="backend-url" type="text" spellcheck="false" placeholder="http://localhost:8000" />
+    <p class="hint">
+      The base URL where the ASMR Workbench backend is running. The extension
+      posts captured cookies and audio URLs here.
+    </p>
+
+    <div class="row">
+      <button id="save">Save</button>
+      <button id="test" class="secondary">Test connection</button>
+    </div>
+    <p id="status" class="status"></p>
+
+    <label class="toggle" for="auto-ingest">
+      <input id="auto-ingest" type="checkbox" />
+      <span class="toggle-text">
+        <span class="toggle-title">Auto-download captures when post is detected</span>
+        <span class="toggle-desc">
+          When a captured audio URL can be matched back to a Patreon post (via the
+          parent tab or a recent in-post link click), download it to the backend
+          immediately without opening this popup. Captures that can't be auto-resolved
+          still wait in the popup for a manual <em>Download</em> click.
+        </span>
+      </span>
+    </label>
+
+    <script src="lib/storage.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

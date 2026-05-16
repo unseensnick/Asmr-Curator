@@ -6,6 +6,7 @@ disk, and this module reads back what it produced.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -13,20 +14,98 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 PATREON_DL_BIN = os.environ.get("PATREON_DL_BIN", "patreon-dl")
 # Hard cap so a runaway creator-wide download can't hang the API forever.
 DEFAULT_TIMEOUT_SECONDS = 60 * 30
 
-AUDIO_EXTS = {".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".wma"}
+# Shared audio-format config — same single source of truth that backend/main.py
+# and the frontend read. Keeps `_find_first_audio` from quietly diverging from
+# what the file browser considers an audio file.
+_FORMATS_CONFIG_PATH = Path(__file__).parent.parent / "frontend" / "src" / "lib" / "audio-formats.json"
+with _FORMATS_CONFIG_PATH.open() as _f:
+    _FORMATS_CONFIG = json.load(_f)
+AUDIO_EXTS = set(_FORMATS_CONFIG["metadataCompatibleExts"]) | set(_FORMATS_CONFIG["needsConversionExts"])
 
 # patreon-dl's media-type vocabulary, as accepted by `content.media` and
-# `posts.with.media.type`. We restrict to the subset that's meaningful here.
-ALLOWED_CONTENT_TYPES = ("audio", "video", "image", "attachment")
+# `posts.with.media.type` — plus our synthetic `external` flag.
+#
+# `external` is NOT a patreon-dl media type. Including it in `content_types`
+# is the wrapper's signal to widen patreon-dl's walk to every accessible post
+# (drop the `posts.with.media.type` filter) so posts whose only "audio" is a
+# Drive URL in the body actually surface in the result. `_write_config`
+# translates the flag into config-file shape — patreon-dl never sees the
+# literal string `external`.
+ALLOWED_CONTENT_TYPES = ("audio", "video", "image", "attachment", "external")
 
 
 class PatreonFetchError(RuntimeError):
     """Raised when patreon-dl fails or returns no usable content."""
+
+
+# Hosts whose links inside a post body the user is likely to want to capture
+# audio from via the browser extension. Surfaced in FetchedPost.external_links
+# so the frontend can flag the post for "open this in the browser to grab the
+# audio". Audio-URL interception in the extension itself is gated to a smaller
+# subset (Google hosts) because the UMP/range cleaning trick is host-specific.
+EXTERNAL_HOST_ALLOWLIST = (
+    "drive.google.com",
+    "mega.nz",
+    "mediafire.com",
+    "dropbox.com",
+)
+
+# Single-post Patreon URL → numeric post ID. Used by the metadata-only
+# re-fetch fallback in `fetch()` to find a specific post's cached sidecar
+# when patreon-dl's status cache made it skip the re-write. Creator URLs
+# (`patreon.com/<creator-name>`) don't match — they have no `/posts/`
+# segment — and the fallback only fires for single-post URLs.
+_POST_URL_ID_RE = re.compile(
+    r"patreon\.com/posts/[^/?#]*?(\d+)(?:[/?#]|$)",
+    re.IGNORECASE,
+)
+
+# Patterns for pulling URLs out of a post's `attributes.content` HTML.
+# patreon-dl preserves Patreon's markup verbatim there. Creators store links
+# in several shapes; we scan all of them and let EXTERNAL_HOST_ALLOWLIST
+# filter the candidates.
+# Full anchor match: captures both the URL and the inner HTML so we can
+# extract the visible link text (used as a per-download filename hint —
+# see `_extract_external_links`). Falls back gracefully when an `<a>` has
+# no inner content.
+_ANCHOR_RE = re.compile(
+    r"""<a\s+[^>]*?href\s*=\s*['"]([^'"]+)['"][^>]*>(.*?)</a>""",
+    re.IGNORECASE | re.DOTALL,
+)
+_SRC_RE = re.compile(r"""src\s*=\s*['"]([^'"]+)['"]""", re.IGNORECASE)
+# Strip inline HTML tags from anchor inner-html so the remaining text is the
+# user-visible label (e.g. `<strong>foo</strong>` → `foo`).
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+# Plain-text URLs that aren't wrapped in <a> or <iframe>. Stops at whitespace,
+# HTML metacharacters, or a closing paren — those are almost never part of a
+# real URL and would otherwise capture surrounding markup. Trailing sentence
+# punctuation is trimmed below in `_extract_external_links`.
+_PLAIN_URL_RE = re.compile(r"""https?://[^\s<>'"\)\]]+""", re.IGNORECASE)
+# Punctuation that's almost always a sentence-end rather than part of the URL.
+_URL_TRAILING_PUNCT = ".,;:!?"
+
+
+def _anchor_text(inner_html: str) -> str:
+    """Strip inline HTML and collapse whitespace inside an `<a>` element."""
+    return _WS_RE.sub(" ", _HTML_TAG_RE.sub("", inner_html)).strip()
+
+
+@dataclass
+class ExternalLink:
+    """A third-party file-host URL surfaced from a post's body, plus the
+    visible anchor text when the source was an `<a>` element. The text is
+    used as the per-download filename hint so multiple links on the same
+    post end up with distinct, human-readable filenames. Empty string for
+    non-anchor sources (iframes, plain-text URLs, embed.url)."""
+    url: str
+    text: str = ""
 
 
 @dataclass
@@ -37,6 +116,12 @@ class FetchedPost:
     artist: str             # creator's full_name from the post's user relationship
     post_dir: str           # absolute path to the post directory
     audio_path: Optional[str]   # absolute path to the first audio file, if any
+    # URLs found inside the post body whose host is in
+    # EXTERNAL_HOST_ALLOWLIST, each paired with the visible anchor text
+    # (when the source was an `<a>` tag). The user typically needs to open
+    # these via the workbench's per-link Download button (Drive scrape) or
+    # in the browser (Mega/MediaFire/Dropbox).
+    external_links: list[ExternalLink] = field(default_factory=list)
 
 
 @dataclass
@@ -55,6 +140,11 @@ class PatreonFetchOptions:
     shape stable as new filters get added — each one is one more line
     in `_write_config`, never a new branch around the subprocess call.
     """
+    # The Patreon session cookie. Written into the temp config file's
+    # [downloader] section rather than the CLI argv so it can't be read
+    # via /proc/<pid>/cmdline on shared hosts. The temp file is created
+    # with mode 0600 (mkstemp default) and unlinked in the finally block.
+    cookie: str = ""
     metadata_only: bool = False
     # Which media types to download. Empty = patreon-dl default (everything);
     # we set ["audio"] as the wrapper default since this is an ASMR tool.
@@ -102,7 +192,27 @@ def fetch(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Metadata-only fast path for a previously-fetched single-post URL.
+    # Skip the patreon-dl subprocess entirely — with `use.status.cache`
+    # (default 1) it would just hit its cache and exit without writing
+    # anything new, so the result would be identical to what's already on
+    # disk. Avoiding the subprocess removes ~all the latency (network
+    # round-trip + Node startup + db.sqlite touch) for what is otherwise a
+    # pure filesystem read. Creator URLs and first-time fetches fall
+    # through to the normal flow.
+    if metadata_only:
+        cached_post_id = _post_id_from_url(url)
+        if cached_post_id:
+            cached = _find_cached_post(output_dir, cached_post_id)
+            if cached is not None:
+                return FetchResult(
+                    output_dir=str(output_dir),
+                    posts=[cached],
+                    log_tail="",
+                )
+
     opts = PatreonFetchOptions(
+        cookie=cookie,
         metadata_only=metadata_only,
         content_types=_clean_content_types(content_types),
         published_after=published_after,
@@ -120,10 +230,13 @@ def fetch(
     # resolution differences between Linux and the bind-mounted host.
     fetch_started_at = time.time() - 2
 
+    # Cookie is passed via the config file (see _write_config) rather than
+    # `--cookie <value>` on the argv, so it doesn't leak through
+    # /proc/<pid>/cmdline on shared hosts. The config file is mode 0600 and
+    # unlinked in the finally block below.
     cmd = [
         PATREON_DL_BIN,
         "--target-url", url,
-        "--cookie", cookie,
         "--out-dir", str(output_dir),
         "--no-prompt",
         "--log-level", "info",
@@ -142,7 +255,11 @@ def fetch(
     finally:
         Path(config_path).unlink(missing_ok=True)
 
-    log_tail = (result.stdout or "")[-2000:]
+    # Defence-in-depth: scrub the cookie value out of the log tail before we
+    # surface it anywhere. patreon-dl doesn't currently echo the cookie, but
+    # if it ever did, this stops it leaking into error messages or the API
+    # response body.
+    log_tail = _scrub_cookie((result.stdout or "")[-2000:], cookie)
     if result.returncode != 0:
         raise PatreonFetchError(
             f"patreon-dl exited with code {result.returncode}. log tail: {log_tail}"
@@ -165,6 +282,15 @@ def fetch(
         posts = _flatten_audio(posts, output_dir)
 
     return FetchResult(output_dir=str(output_dir), posts=posts, log_tail=log_tail)
+
+
+def _scrub_cookie(text: str, cookie: str) -> str:
+    """Replace any literal occurrence of the cookie value in `text` with
+    `[REDACTED]`. Skips work when the cookie is empty or too short to be a
+    realistic accidental echo (avoids stripping common short prefixes)."""
+    if not text or not cookie or len(cookie) < 16:
+        return text
+    return text.replace(cookie, "[REDACTED]")
 
 
 def _clean_content_types(types: Optional[list[str]]) -> list[str]:
@@ -205,6 +331,14 @@ def _write_config(opts: PatreonFetchOptions) -> str:
     #   - otherwise → previouslyDownloaded (stop at the first cached post so
     #     re-fetches of the same creator URL terminate quickly)
     lines.append("[downloader]")
+    if opts.cookie:
+        # patreon-dl reads downloader:cookie as a single value to end-of-line,
+        # so the inner `=` and `;` in a Patreon session cookie are fine.
+        # Reject embedded newlines defensively — they would terminate the
+        # INI value early and inject keys.
+        if "\n" in opts.cookie or "\r" in opts.cookie:
+            raise PatreonFetchError("cookie contains a newline — refusing to write config")
+        lines.append(f"cookie = {opts.cookie}")
     if opts.published_after or opts.published_before:
         lines.append("stop.on = publishDateOutOfRange")
     else:
@@ -215,25 +349,50 @@ def _write_config(opts: PatreonFetchOptions) -> str:
         lines.append("dry.run = 1")
 
     # ── [include] section ───────────────────────────────────────────────────
+    #
+    # Two independent knobs map onto patreon-dl's two filters:
+    #
+    #   `posts.with.media.type` — which posts patreon-dl visits at all. When
+    #       this is unset, patreon-dl walks every accessible post. We emit it
+    #       only for the narrow case "user wants to download Patreon-hosted
+    #       media types AND hasn't asked to see body-link-only posts". Two
+    #       wrapper flags widen the walk by omitting the key:
+    #         • metadata_only=True   → walks all posts, downloads nothing.
+    #         • "external" in content_types → walks all posts, still
+    #           downloads any other Patreon-hosted types the user picked.
+    #
+    #   `content.media` — what gets downloaded from the posts that ARE visited.
+    #       metadata_only forces it to 0 (and 0 for preview.media). Otherwise
+    #       it's the CSV of real patreon-dl media types (audio/video/image/
+    #       attachment) — "external" is filtered out because it isn't one.
+    media_types = [t for t in opts.content_types if t != "external"]
+    walk_all_posts = opts.metadata_only or ("external" in opts.content_types)
+
     lines.append("[include]")
     if opts.metadata_only:
-        # metadata_only wins over content_types — skip every media class.
+        # metadata_only wins — skip every media class. Sidecars (post-api.json)
+        # still come through via the never-disabled content.info path, which
+        # is what makes the external_links surfacing work.
         lines.append("content.media = 0")
         lines.append("preview.media = 0")
-    elif opts.content_types:
-        # Comma-separated for both keys: posts.with.media.type filters which
-        # posts patreon-dl visits at all (skip image-only posts when audio-only);
-        # content.media controls what media is actually downloaded from kept posts.
-        csv = ", ".join(opts.content_types)
-        lines.append(f"posts.with.media.type = {csv}")
-        lines.append(f"content.media = {csv}")
+    else:
+        if not walk_all_posts and media_types:
+            # Narrow walk: only posts that have one of the selected media types.
+            lines.append(f"posts.with.media.type = {', '.join(media_types)}")
+        if media_types:
+            lines.append(f"content.media = {', '.join(media_types)}")
+        else:
+            # External-only selection — walk every post, download nothing.
+            # Sidecars still arrive so the body-text Drive URLs surface in
+            # external_links.
+            lines.append("content.media = 0")
         # media.thumbnails = 1 (default) generates a thumbnails/ subfolder used
         # by patreon-dl's own browse function — we don't use that here, so
         # turn it off unless the user explicitly opted into image content.
         # (Note: this is separate from the cover-image / post-thumbnail files
         # that land in post_info/. Those are gated by content.info which we
         # can't disable — they get pruned post-fetch by _cleanup_info_media.)
-        if "image" not in opts.content_types:
+        if "image" not in media_types:
             lines.append("media.thumbnails = 0")
     if opts.published_after:
         lines.append(f"posts.published.after = {opts.published_after}")
@@ -249,6 +408,75 @@ def _write_config(opts: PatreonFetchOptions) -> str:
         Path(path).unlink(missing_ok=True)
         raise
     return path
+
+
+def _post_id_from_url(url: str) -> Optional[str]:
+    """Return the numeric post ID if `url` is a single-post Patreon URL.
+
+    Single-post URLs look like `patreon.com/posts/<slug>-<id>` (with
+    optional `?` / `#` / trailing slash). Creator URLs and anything
+    unparseable return None — the metadata-only re-fetch fallback only
+    fires for single-post URLs to keep its blast radius small.
+    """
+    if not isinstance(url, str) or not url:
+        return None
+    m = _POST_URL_ID_RE.search(url)
+    return m.group(1) if m else None
+
+
+def _find_cached_post(output_dir: Path, post_id: str) -> Optional[FetchedPost]:
+    """Find a previously-downloaded post's metadata without the mtime filter
+    `_collect_posts` uses.
+
+    When the user re-fetches a single-post URL in metadata-only mode,
+    patreon-dl's `stop.on = previouslyDownloaded` + status cache make it
+    exit without re-writing `post-api.json`. The mtime-filtered
+    `_collect_posts` then returns empty and the user would see a
+    misleading "no new posts" error even though the metadata sits on
+    disk from the original fetch. This helper surfaces that cached
+    sidecar so the user doesn't have to nuke `.patreon-dl/` to recover
+    it.
+
+    Walks the output tree for a `post-api.json` whose embedded ID
+    matches `post_id`. For audio path, falls back to the flattened
+    location at `<AUDIO_ROOT>/<post_id>/` when no audio remains under
+    the patreon-dl post folder (`_flatten_audio` from prior runs moved
+    it there). Returns None if nothing matches.
+    """
+    for api_file in output_dir.rglob("post-api.json"):
+        try:
+            data = json.loads(api_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        parsed = _parse_post_api(data)
+        if parsed is None:
+            continue
+        candidate_id, title, tags, artist, external_links = parsed
+        if candidate_id != post_id:
+            continue
+        post_dir = api_file.parent.parent
+        # _find_first_audio looks under post_dir; for a post whose audio
+        # was already flattened in a prior fetch it returns None, so also
+        # peek at AUDIO_ROOT/<post_id>/ (output_dir is the patreon-dl root
+        # under AUDIO_ROOT — see _flatten_audio's `patreon_root.parent`).
+        audio_path = _find_first_audio(post_dir)
+        if audio_path is None:
+            flattened_dir = output_dir.parent / candidate_id
+            if flattened_dir.is_dir():
+                for entry in sorted(flattened_dir.iterdir()):
+                    if entry.is_file() and entry.suffix.lower() in AUDIO_EXTS:
+                        audio_path = entry
+                        break
+        return FetchedPost(
+            post_id=candidate_id,
+            title=title,
+            tags=tags,
+            artist=artist,
+            post_dir=str(post_dir),
+            audio_path=str(audio_path) if audio_path else None,
+            external_links=external_links,
+        )
+    return None
 
 
 def _collect_posts(
@@ -278,7 +506,7 @@ def _collect_posts(
         parsed = _parse_post_api(data)
         if parsed is None:
             continue
-        post_id, title, tags, artist = parsed
+        post_id, title, tags, artist, external_links = parsed
         audio_path = _find_first_audio(post_dir)
         posts.append(FetchedPost(
             post_id=post_id,
@@ -287,13 +515,17 @@ def _collect_posts(
             artist=artist,
             post_dir=str(post_dir),
             audio_path=str(audio_path) if audio_path else None,
+            external_links=external_links,
         ))
     posts.sort(key=lambda p: p.post_id)
     return posts
 
 
-def _parse_post_api(payload: dict) -> Optional[tuple[str, str, list[str], str]]:
-    """Extract (post_id, title, tags[], artist) from a Patreon JSON:API payload."""
+def _parse_post_api(
+    payload: dict,
+) -> Optional[tuple[str, str, list[str], str, list[ExternalLink]]]:
+    """Extract (post_id, title, tags[], artist, external_links[]) from a Patreon
+    JSON:API payload."""
     data = payload.get("data") if isinstance(payload, dict) else None
     if not isinstance(data, dict):
         return None
@@ -304,7 +536,155 @@ def _parse_post_api(payload: dict) -> Optional[tuple[str, str, list[str], str]]:
     title = str(attrs.get("title") or "").strip()
     tags = _extract_tags(payload)
     artist = _extract_artist(payload)
-    return post_id, title, tags, artist
+    external_links = _extract_external_links(attrs)
+    return post_id, title, tags, artist, external_links
+
+
+def _is_allowlisted_host(url: str) -> bool:
+    """True when `url` parses to a host that exactly matches, or is a
+    subdomain of, any entry in EXTERNAL_HOST_ALLOWLIST."""
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except ValueError:
+        return False
+    if not host:
+        return False
+    return any(host == h or host.endswith("." + h) for h in EXTERNAL_HOST_ALLOWLIST)
+
+
+def _walk_prosemirror_nodes(node: object, sink: list[ExternalLink]) -> None:
+    """Recursively collect href/url/src strings from a ProseMirror JSON tree.
+
+    Patreon stores post bodies as a ProseMirror document in
+    `attributes.content_json_string` for posts authored in the newer editor
+    (no equivalent rendered HTML appears in `attributes.content` for those
+    posts — that field is `null`). Links appear two ways inside the tree:
+
+      • node `marks` array, each with `{type: "link", attrs: {href: …}}`.
+        These marks attach to text nodes; the node's own `text` field is the
+        visible link label, so we capture it as the `ExternalLink.text`.
+      • node `attrs` carrying `href` / `url` / `src` directly — image,
+        embed, iframe nodes, etc. These have no associated visible text.
+
+    Children sit under `node.content`. We append every plausible URL we
+    find to `sink`; the caller's allowlist filter weeds out noise.
+    """
+    if not isinstance(node, dict):
+        return
+    attrs = node.get("attrs")
+    if isinstance(attrs, dict):
+        for key in ("href", "url", "src"):
+            v = attrs.get(key)
+            if isinstance(v, str) and v.strip():
+                sink.append(ExternalLink(url=v.strip(), text=""))
+    marks = node.get("marks")
+    if isinstance(marks, list):
+        # Link marks decorate a text node; the visible label is the node's
+        # `text`. Capture it once and pair it with every URL the mark stack
+        # declares (typically just one).
+        node_text = node.get("text")
+        link_text = node_text.strip() if isinstance(node_text, str) else ""
+        for mark in marks:
+            if not isinstance(mark, dict):
+                continue
+            mattrs = mark.get("attrs")
+            if isinstance(mattrs, dict):
+                for key in ("href", "url"):
+                    v = mattrs.get(key)
+                    if isinstance(v, str) and v.strip():
+                        sink.append(ExternalLink(url=v.strip(), text=link_text))
+    children = node.get("content")
+    if isinstance(children, list):
+        for child in children:
+            _walk_prosemirror_nodes(child, sink)
+
+
+def _extract_external_links(attrs: object) -> list[ExternalLink]:
+    """Pull third-party file-host URLs out of a post's JSON:API attributes.
+
+    Creators stash these links in several shapes; we scan all of them:
+
+      1. `attrs["content"]` HTML body —
+         - `<a href="…">visible text</a>` (the common case; both URL and
+           the inner anchor text are captured)
+         - `<iframe src="…">` (embeds; text is empty)
+         - bare `https://…` URLs not wrapped in any tag (text is empty)
+      2. `attrs["embed"]["url"]` — populated when the creator used Patreon's
+         "Add link / embed" UI instead of typing the URL into the body text.
+         (We deliberately skip `embed["provider_url"]`: it's the host's
+         homepage, never a file URL, and would only surface a useless
+         "drive.google.com/" row in the UI.)
+      3. `attrs["content_json_string"]` ProseMirror JSON document — the
+         shape Patreon's newer post editor produces. The HTML `content`
+         field is `null` for those posts; the body lives only here.
+         Walked recursively via `_walk_prosemirror_nodes` which also pulls
+         link-mark text where available.
+
+    Every candidate passes through `_is_allowlisted_host`, which gates
+    against `EXTERNAL_HOST_ALLOWLIST`. Returned list is deduped by URL,
+    stable order (first occurrence wins across all sources). When the same
+    URL appears in multiple sources, the first non-empty text we saw is
+    preserved.
+    """
+    if not isinstance(attrs, dict):
+        return []
+
+    candidates: list[ExternalLink] = []
+
+    content = attrs.get("content")
+    if isinstance(content, str) and content:
+        # Anchors first — preferred source because they carry visible text.
+        # Track which URLs we already grabbed via anchors so we don't also
+        # match the same URL as a plain-text URL below.
+        anchored: set[str] = set()
+        for match in _ANCHOR_RE.finditer(content):
+            url = match.group(1).strip()
+            text = _anchor_text(match.group(2) or "")
+            if url:
+                candidates.append(ExternalLink(url=url, text=text))
+                anchored.add(url)
+        for match in _SRC_RE.finditer(content):
+            url = match.group(1).strip()
+            if url and url not in anchored:
+                candidates.append(ExternalLink(url=url, text=""))
+        for match in _PLAIN_URL_RE.finditer(content):
+            url = match.group(0).strip()
+            # Trim trailing sentence punctuation: "see https://drive.google.com/…."
+            # commonly comes through with a clinging period that breaks the URL.
+            while url and url[-1] in _URL_TRAILING_PUNCT:
+                url = url[:-1]
+            if url and url not in anchored:
+                candidates.append(ExternalLink(url=url, text=""))
+
+    embed = attrs.get("embed")
+    if isinstance(embed, dict):
+        value = embed.get("url")
+        if isinstance(value, str) and value.strip():
+            candidates.append(ExternalLink(url=value.strip(), text=""))
+
+    content_json = attrs.get("content_json_string")
+    if isinstance(content_json, str) and content_json:
+        try:
+            doc = json.loads(content_json)
+        except ValueError:
+            doc = None
+        if doc is not None:
+            _walk_prosemirror_nodes(doc, candidates)
+
+    found: list[ExternalLink] = []
+    seen: dict[str, int] = {}  # url → index in `found`
+    for link in candidates:
+        if not link.url or not _is_allowlisted_host(link.url):
+            continue
+        if link.url in seen:
+            # Preserve the first non-empty text we saw for this URL.
+            existing = found[seen[link.url]]
+            if not existing.text and link.text:
+                found[seen[link.url]] = ExternalLink(url=existing.url, text=link.text)
+            continue
+        seen[link.url] = len(found)
+        found.append(link)
+    return found
 
 
 def _extract_tags(payload: dict) -> list[str]:
