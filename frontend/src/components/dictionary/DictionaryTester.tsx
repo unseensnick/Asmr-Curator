@@ -91,6 +91,10 @@ export default function DictionaryTester({ dict, onQuickFix }: DictionaryTesterP
         <p className="text-[11px] text-muted-foreground bg-secondary border border-border rounded-md px-3 py-2 leading-relaxed">
           Paste raw post text to see how the LLM extracts title and tags against the current
           vocabulary. Novel tags (not in vocabulary) can be added or suppressed directly.
+          {" "}
+          <span className="text-muted-foreground/70">
+            Uses the same Ollama backend as the Screenshot workflow — skip if you only use Patreon URL fetches.
+          </span>
         </p>
 
         <Textarea

@@ -7,12 +7,15 @@ services:
             - "8000:8000"
         volumes:
             - ./data:/data # SQLite db — persists on host
-            - ${AUDIO_PATH}:/mnt/audio:ro # audio library — set AUDIO_PATH in .env
+            - ${LIBRARY_PATH}:/mnt/audio:ro # audio library — set LIBRARY_PATH in .env
         environment:
             - DB_PATH=/data/dictionary.db
             - PYTHONPATH=/app
-            - AUDIO_ROOT=/mnt/audio
+            - LIBRARY_PATH=/mnt/audio
             - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
             - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5vl:7b}
+            - DRIVE_SCRAPE_CONCURRENCY=${DRIVE_SCRAPE_CONCURRENCY:-1}
+            - DRIVE_BROWSER_IDLE_TIMEOUT_S=${DRIVE_BROWSER_IDLE_TIMEOUT_S:-300}
+            - DRIVE_DOWNLOAD_TIMEOUT_S=${DRIVE_DOWNLOAD_TIMEOUT_S:-14400}
         restart: unless-stopped
 

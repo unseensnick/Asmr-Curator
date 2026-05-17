@@ -17,6 +17,10 @@ uvicorn backend.main:app --reload # FastAPI on :8000 (docs at /docs)
 cd frontend && npm run build      # tsc -b + Vite production build
 cd frontend && npm run lint       # ESLint
 
+# Tests (CI runs both on every push)
+cd frontend && npm test           # Vitest — parser.ts (add more as you go)
+pytest -c backend/pyproject.toml  # Pytest — backend pure-Python helpers
+
 # Production (host-side, not in devcontainer)
 docker compose up --build         # Serves everything on :8000
 ```

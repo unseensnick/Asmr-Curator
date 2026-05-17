@@ -27,6 +27,17 @@ After completing any code change, add a bullet under `## [Unreleased]` in `CHANG
 - **Do NOT rename `[Unreleased]` to a version number while a feature branch is in progress.** That rename is part of PR-prep below.
 - **Do not rewrite already-released CHANGELOG entries** — those are a historical record.
 
+### Write for release notes, not for yourself
+
+`[Unreleased]` becomes the GitHub release draft — it's read by users skimming "what changed in this version", not by the person who wrote it. Write accordingly:
+
+- **Lead with the user-visible effect** ("Click Download on a Drive link in a Patreon post…") or the surface area touched (`POST /api/patreon/ingest-drive-link …`). The first half-line should answer *what changed* — not *why* or *how*.
+- **Keep each bullet to 1-3 sentences.** A single coherent change, not the implementation journey.
+- **Avoid:** CDP / HTTP-protocol detail, internal phase numbering, class names (`_FooBar` / `_ANCHOR_RE`), regex patterns, "we tried X then switched to Y" narratives, debugging history, CDN-fingerprint trivia, env-var defaults the user never sets, Playwright internals, what failed-before vs works-now. Implementation context belongs in commit messages — they have the room.
+- **When in-flight iteration grows a bullet past ~3 sentences,** trim it back to its current user-facing essence on the next iteration. Don't keep appending — the changelog isn't a dev journal.
+
+If you're not sure whether a detail belongs: imagine a Patreon-creator user reading the release notes on the GitHub Releases page. Would this sentence help them understand what's different in the app, or is it for the person who debugged it?
+
 ## Documentation
 
 After any change that alters user-visible behavior, env vars, file paths, or API surface, scan `README.md` and other docs for stale references and update them in the same change. Describe current behavior, not the journey to it — no "we tried X then switched to Y" notes.

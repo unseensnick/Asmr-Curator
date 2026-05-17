@@ -278,7 +278,7 @@ def fetch(
         if "image" not in opts.content_types:
             _cleanup_info_media(posts)
         # Pull each audio file out of patreon-dl's
-        # <campaign>/posts/<id>/audio/ nesting into <AUDIO_ROOT>/<post_id>/.
+        # <campaign>/posts/<id>/audio/ nesting into <LIBRARY_PATH>/<post_id>/.
         posts = _flatten_audio(posts, output_dir)
 
     return FetchResult(output_dir=str(output_dir), posts=posts, log_tail=log_tail)
@@ -439,7 +439,7 @@ def _find_cached_post(output_dir: Path, post_id: str) -> Optional[FetchedPost]:
 
     Walks the output tree for a `post-api.json` whose embedded ID
     matches `post_id`. For audio path, falls back to the flattened
-    location at `<AUDIO_ROOT>/<post_id>/` when no audio remains under
+    location at `<LIBRARY_PATH>/<post_id>/` when no audio remains under
     the patreon-dl post folder (`_flatten_audio` from prior runs moved
     it there). Returns None if nothing matches.
     """
@@ -457,8 +457,8 @@ def _find_cached_post(output_dir: Path, post_id: str) -> Optional[FetchedPost]:
         post_dir = api_file.parent.parent
         # _find_first_audio looks under post_dir; for a post whose audio
         # was already flattened in a prior fetch it returns None, so also
-        # peek at AUDIO_ROOT/<post_id>/ (output_dir is the patreon-dl root
-        # under AUDIO_ROOT — see _flatten_audio's `patreon_root.parent`).
+        # peek at LIBRARY_PATH/<post_id>/ (output_dir is the patreon-dl root
+        # under LIBRARY_PATH — see _flatten_audio's `patreon_root.parent`).
         audio_path = _find_first_audio(post_dir)
         if audio_path is None:
             flattened_dir = output_dir.parent / candidate_id
@@ -784,7 +784,7 @@ def _find_first_audio(post_dir: Path) -> Optional[Path]:
 # patreon-dl always writes into `<patreon_root>/<campaign>/posts/<post_id>/
 # <media_type>/<filename>` — the campaign/posts/post_id hierarchy is not
 # escapable. After parsing the metadata we move each audio file OUT of
-# patreon-dl's tree entirely and into `AUDIO_ROOT/<post_id>/<filename>` —
+# patreon-dl's tree entirely and into `LIBRARY_PATH/<post_id>/<filename>` —
 # a single per-post folder directly under the user's main browse root.
 #
 # patreon-dl's tree (post folder, info/post-api.json sidecar, per-campaign
@@ -796,10 +796,10 @@ def _flatten_audio(
     posts: list[FetchedPost], patreon_root: Path,
 ) -> list[FetchedPost]:
     """Move each post's audio out of patreon-dl's tree into a per-post folder
-    directly under AUDIO_ROOT.
+    directly under LIBRARY_PATH.
 
     Layout after flatten:
-      AUDIO_ROOT/
+      LIBRARY_PATH/
         .patreon-dl/                                 ← patreon_root; untouched
           .patreon-dl/db.sqlite                      ← status DB; untouched
           Patreon/<creator>/posts/<post_id>/
@@ -808,18 +808,18 @@ def _flatten_audio(
         <post_id>/<original_filename>.ext            ← moved audio (new)
 
     `patreon_root` is the directory we passed to `patreon-dl --out-dir`
-    (`AUDIO_ROOT/.patreon-dl/`). The flat destination lives one level above
+    (`LIBRARY_PATH/.patreon-dl/`). The flat destination lives one level above
     it. `_rmdir_chain` removes the (now-empty) `audio/` subdirectory but
     stops at the first non-empty parent — `info/` keeps the post folder.
     """
-    audio_root = patreon_root.parent
+    library_path = patreon_root.parent
     for post in posts:
         if not post.audio_path:
             continue
         src = Path(post.audio_path)
         if not src.is_file():
             continue
-        dest_dir = audio_root / post.post_id
+        dest_dir = library_path / post.post_id
         try:
             dest_dir.mkdir(parents=True, exist_ok=True)
         except OSError:

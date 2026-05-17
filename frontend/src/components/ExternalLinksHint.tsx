@@ -23,7 +23,7 @@ type RowState =
  * Small badge surfacing third-party file-host links (Google Drive, Mega, …)
  * found inside a Patreon post body. Drive links get a per-row Download button
  * that triggers a server-side Playwright scrape (`POST /api/patreon/ingest-drive-link`)
- * → cleaned playback URL → file lands at AUDIO_ROOT/<post_id>/. Other hosts
+ * → cleaned playback URL → file lands at LIBRARY_PATH/<post_id>/. Other hosts
  * surface as plain links the user can open manually; we have no auto-capture
  * for those yet.
  *

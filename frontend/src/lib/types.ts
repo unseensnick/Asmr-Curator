@@ -146,7 +146,7 @@ export interface PatreonCookieStatus {
 
 /** Response from `POST /api/patreon/ingest-drive-link`. Backend scrapes Drive
  * headlessly, downloads the audio, returns the destination path relative to
- * `AUDIO_ROOT`. */
+ * `LIBRARY_PATH`. */
 export interface IngestDriveLinkResponse {
   audio_path: string;
   size: number;

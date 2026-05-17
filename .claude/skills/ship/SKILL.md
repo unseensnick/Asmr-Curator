@@ -39,7 +39,8 @@ Ship the current changes through commit, push, and PR creation. Confirm with the
   - Build output: `dist/`, `build/`, `.next/`, `__pycache__/`
   - Dependencies: `node_modules/`, `vendor/`, `.venv/`
   - OS/editor: `.DS_Store`, `Thumbs.db`, `*.swp`, `.idea/`, `.vscode/settings.json`
-- Draft a commit message based on the changes, matching the repo's existing commit style
+- Draft a commit message in **conventional-commit format** (`feat:` / `feat(scope):` / `fix:` / `docs:` / `chore:` / `refactor:` / `build:`), matching the repo's existing commit style. Keep the subject under 72 chars.
+- **No watermark in commits**: no `Co-Authored-By: Claude …` line, no `🤖 Generated with [Claude Code]` footer, no similar AI attribution. Only the conventional subject + an optional plain body. (`.claude/rules/project-workflow.md` enforces this — restated here so it doesn't drift.)
 - **ASK the user to confirm or edit**: show the exact files to stage and the proposed commit message
 - Only after confirmation: stage the files and create the commit
 - If the commit fails (e.g., pre-commit hook), fix the issue and try again with a NEW commit
@@ -55,11 +56,13 @@ Ship the current changes through commit, push, and PR creation. Confirm with the
 
 - Check if a PR already exists for this branch (`gh pr view`. If it exists, show the URL and stop)
 - Analyze ALL commits on this branch vs the base branch (not just the latest commit)
-- Draft a PR title (under 72 chars) and body with:
-  - Summary: 2-4 bullet points
-  - Test plan: how to verify
+- Draft a PR title (under 72 chars) and body with **only** a Summary section:
+  - **Summary**: 2-4 bullets describing what changed for users — ideally mirror the relevant CHANGELOG bullets that landed in this PR. Lead with user-visible effect.
+  - **No `## Test plan` section.** The CHANGELOG already states user-visible effect; the commits already describe implementation. A test plan in the PR body bloats the surface and rarely gets read on a solo-maintained repo.
+  - **No `🤖 Generated with [Claude Code]` footer**, no Co-Authored-By, no AI-generated attribution.
+- Create the PR with `gh pr create --base main` (the `--base main` is defensive — `gh` can default to a stale base if the previous PR on this branch targeted something else). The repo is a single-remote project so no `--repo` flag is needed.
 - **ASK the user to confirm or edit** the title and body
-- Only after confirmation: create the PR with `gh pr create`
+- Only after confirmation: run the `gh pr create` command
 - Show the PR URL when done
 
 ## Rules
