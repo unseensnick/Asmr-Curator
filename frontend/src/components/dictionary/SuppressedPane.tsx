@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { ShieldOff, X } from "lucide-react";
+import { Info, ShieldOff, X } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { apiDelete, apiPost, API } from "@/lib/api";
+import { API, apiDelete, apiPost } from "@/lib/api";
 import type { SuppressedTerm } from "@/lib/types";
 import { getErrorMessage } from "@/lib/utils";
 
@@ -14,9 +15,10 @@ interface SuppressedPaneProps {
 }
 
 /**
- * Suppressed-terms tab body. Terms here are silently dropped from any
- * tag output — used for noisy OCR artefacts or format identifiers
- * (`f4a`, `tolovers`, etc.) that should never appear as tags.
+ * Suppressed-terms tab body. Terms here are silently dropped from any tag
+ * output, used for noisy OCR artefacts or format identifiers (`f4a`,
+ * `tolovers`, etc.) that should never appear as tags. Compact chip wrap;
+ * each chip has an always-visible remove button.
  */
 export default function SuppressedPane({
     suppressed,
@@ -24,14 +26,13 @@ export default function SuppressedPane({
     onQuickFillConsumed,
     onChange,
 }: SuppressedPaneProps) {
-    // quickFill is only set right before this pane mounts (tab switch), so using it
-    // as the initial value of useState is safe — the pane always mounts fresh.
+    // quickFill is only set right before this pane mounts (tab switch), so
+    // using it as the initial value of useState is safe.
     const [addVal, setAddVal] = useState(quickFill ?? "");
     const [search, setSearch] = useState("");
     const [error, setError] = useState("");
     const addRef = useRef<HTMLInputElement>(null);
 
-    // Mount-only: focus the pre-filled input and tell the parent the value was consumed.
     useEffect(() => {
         if (quickFill !== undefined) {
             addRef.current?.focus();
@@ -44,7 +45,9 @@ export default function SuppressedPane({
         if (!val) return;
         setError("");
         try {
-            const row = await apiPost<SuppressedTerm>(API.suppressed, { term: val });
+            const row = await apiPost<SuppressedTerm>(API.suppressed, {
+                term: val,
+            });
             onChange([...suppressed, row]);
             setAddVal("");
         } catch (e) {
@@ -70,55 +73,67 @@ export default function SuppressedPane({
 
     return (
         <div className="flex flex-col flex-1 min-h-0">
-            {/* Fixed top: description + search */}
-            <div className="shrink-0 px-5 pt-5">
-                <p className="text-[11px] text-muted-foreground bg-secondary border border-border rounded-md px-3 py-2 mb-4 leading-relaxed">
-                    Suppressed terms are silently dropped from tag output. Use
-                    these for noisy OCR artefacts or format identifiers (e.g.{" "}
-                    <code className="text-primary">f4a</code>,{" "}
-                    <code className="text-primary">tolovers</code>) that should
-                    never appear as tags.
+            {/* Top: help + search */}
+            <div className="shrink-0 px-6 pt-5 pb-3 flex flex-col gap-3">
+                <p className="flex items-start gap-2 text-sm text-muted-foreground leading-relaxed">
+                    <Info
+                        size={14}
+                        aria-hidden
+                        className="shrink-0 mt-1 text-muted-foreground/70"
+                    />
+                    <span>
+                        Suppressed terms are silently dropped from output. Add
+                        OCR artefacts or format identifiers (
+                        <code className="font-mono text-foreground/80">f4a</code>
+                        ,{" "}
+                        <code className="font-mono text-foreground/80">
+                            tolovers
+                        </code>
+                        ) that should never appear as tags.
+                    </span>
                 </p>
                 <Input
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search suppressed terms…"
-                    className="mb-3"
+                    placeholder="Search suppressed."
+                    aria-label="Search suppressed terms"
                 />
             </div>
 
             {/* Scrollable chip grid */}
-            <div className="flex-1 min-h-0 overflow-y-auto px-5">
-                <div className="flex flex-wrap gap-2 pb-2 pt-1">
+            <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-3">
+                <div className="flex flex-wrap gap-1.5 pt-1">
                     {filtered.length === 0 && (
-                        <span className="text-xs text-muted-foreground italic py-2 w-full">
-                            {search ? "No matches" : "No suppressed terms yet"}
-                        </span>
+                        <p className="text-sm text-muted-foreground italic py-2 w-full">
+                            {search ? "No matches." : "No suppressed terms yet."}
+                        </p>
                     )}
                     {filtered.map((s) => (
                         <span
                             key={s.id}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-destructive/20 bg-destructive/8 text-destructive/70 text-xs"
+                            className="font-mono inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border bg-muted text-muted-foreground text-xs"
                         >
                             {s.term}
                             <button
+                                type="button"
                                 onClick={() => handleDelete(s)}
-                                className="text-destructive/40 hover:text-destructive transition-colors leading-none"
+                                className="text-muted-foreground/60 hover:text-destructive transition-colors leading-none p-0.5 -m-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                                 title="Remove"
+                                aria-label={`Remove ${s.term}`}
                             >
-                                <X size={10} />
+                                <X size={12} aria-hidden />
                             </button>
                         </span>
                     ))}
                 </div>
             </div>
 
-            {/* Fixed bottom: add row + error surface */}
-            <div className="shrink-0 px-5 pt-3 pb-5 border-t border-border">
+            {/* Bottom: error + add row */}
+            <div className="shrink-0 px-6 pt-3 pb-5 border-t border-border flex flex-col gap-2">
                 {error && (
-                    <div className="mb-2 text-[11px] text-destructive break-words">
+                    <p className="text-sm text-destructive break-words">
                         {error}
-                    </div>
+                    </p>
                 )}
                 <div className="flex gap-2">
                     <Input
@@ -129,15 +144,15 @@ export default function SuppressedPane({
                             if (e.key === "Enter") handleAdd();
                         }}
                         placeholder="Add term to suppress (e.g. f4a)"
-                        className="flex-1"
+                        className="flex-1 font-mono text-sm"
+                        aria-label="Add term to suppress"
                     />
                     <Button
-                        size="sm"
                         variant="outline"
                         onClick={handleAdd}
                         className="gap-1.5 shrink-0"
                     >
-                        <ShieldOff size={13} />
+                        <ShieldOff size={14} aria-hidden />
                         Suppress
                     </Button>
                 </div>

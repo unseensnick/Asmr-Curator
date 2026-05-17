@@ -12,6 +12,7 @@ export const API = {
   suppressedEntry: (id: number) => `/api/suppressed/${id}`,
   patreonFetch:    "/api/patreon/fetch",
   patreonCookie:   "/api/settings/patreon-cookie",
+  googleCookie:    "/api/settings/google-cookie",
   ingestDriveLink: "/api/patreon/ingest-drive-link",
   systemInfo:      "/api/system/info",
 } as const;
@@ -104,6 +105,7 @@ export { apiGet, apiPost, apiDelete, apiPut, apiPatch };
 // that motivated the backend's text/plain alternative.
 
 import type {
+  GoogleCookieStatus,
   IngestDriveLinkEvent,
   IngestDriveLinkResponse,
   PatreonCookieStatus,
@@ -117,6 +119,18 @@ export function getPatreonCookieStatus(): Promise<PatreonCookieStatus> {
 
 export function setPatreonCookie(cookie: string): Promise<PatreonCookieStatus> {
   return apiPut<PatreonCookieStatus>(API.patreonCookie, { cookie });
+}
+
+export function getGoogleCookieStatus(): Promise<GoogleCookieStatus> {
+  return apiGet<GoogleCookieStatus>(API.googleCookie);
+}
+
+// Manual setting is not exposed: Google cookies are an array of structured
+// entries that can't reasonably be pasted by hand. The browser extension
+// (extension/) is the sync path. Clearing IS supported here so the user can
+// drop a stale session from the UI without round-tripping curl.
+export function clearGoogleCookies(): Promise<GoogleCookieStatus> {
+  return apiPut<GoogleCookieStatus>(API.googleCookie, { cookies: [] });
 }
 
 /**

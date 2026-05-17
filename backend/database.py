@@ -263,9 +263,15 @@ def _migrate_legacy_to_vocabulary(conn):
 # ── Vocabulary CRUD ───────────────────────────────────────────────────────────
 
 def get_vocabulary() -> list[dict]:
+    # Ordered by id (insertion order) so the UI's drag-reorder is durable: the
+    # bulk-replace PUT /api/dictionary wipes and re-inserts in array order,
+    # which renumbers ids in that order — but the order only sticks if reads
+    # follow the ids back. On the alias collision in buildDictDerived (last
+    # write wins), the user's drag-reorder is the only knob to pick which
+    # entry wins on a contested alias.
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, canonical, aliases FROM tag_vocabulary ORDER BY canonical COLLATE NOCASE"
+            "SELECT id, canonical, aliases FROM tag_vocabulary ORDER BY id"
         ).fetchall()
         return [_vocab_row_to_dict(r) for r in rows]
 

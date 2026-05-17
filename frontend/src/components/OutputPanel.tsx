@@ -1,113 +1,109 @@
-import { RefreshCw, FileText, FolderOpen } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
+import { useEffect, useRef, useState } from "react";
+
 import CopyButton from "@/components/CopyButton";
-import SectionLabel from "@/components/SectionLabel";
+import { Checkbox } from "@/components/ui/checkbox";
+import { cn } from "@/lib/utils";
 
 interface OutputPanelProps {
   outputDash: string;
   outputPipe: string;
-  onRegenerate: () => void;
   stripBrackets: boolean;
   onStripBracketsChange: (v: boolean) => void;
 }
 
-
+/**
+ * Read-and-copy surface. Always visible beside the source panels. Shows two
+ * format variants of the same composed filename:
+ *
+ *   - Filename (dash-separated): for renaming files on disk.
+ *   - Tag string (pipe-separated): for ID3 tag fields, post body, comments.
+ *
+ * Generation is triggered exclusively by the Generate button in TagsEditor;
+ * this panel has no Regenerate button of its own. Each output row pulses
+ * its border briefly when the value changes so a Generate on the middle
+ * column gives an out-of-the-corner-of-the-eye acknowledgement on the
+ * right column. aria-live announces the same change to screen readers.
+ */
 export default function OutputPanel({
   outputDash,
   outputPipe,
-  onRegenerate,
   stripBrackets,
   onStripBracketsChange,
 }: OutputPanelProps) {
   return (
-    <div className="flex flex-col gap-4 flex-1">
-      {/* ── Dash card ── */}
-      <Card className="flex-1 rounded-xl border border-border shadow-none ring-0 p-5 gap-0">
-        <SectionLabel tone="primary" hint="— dash separator" className="mb-4">
-          Filename
-        </SectionLabel>
+    <div className="flex flex-col gap-6">
+      <OutputRow
+        labelId="output-filename-label"
+        label="Filename"
+        value={outputDash}
+        emptyText="Filename will appear here."
+      />
 
-        {!outputDash ? (
-          <div className="min-h-20 flex flex-col items-center justify-center gap-2 bg-secondary border border-dashed border-border rounded-lg text-muted-foreground text-xs text-center p-5">
-            <FileText size={28} className="opacity-25" />
-            <span>
-              Fill in the details below
-              <br />
-              and click Generate
-            </span>
-          </div>
-        ) : (
-          <>
-            <div className="bg-secondary border border-primary/35 rounded-lg p-3.5 text-sm text-foreground leading-7 break-all min-h-13">
-              {outputDash}
-            </div>
-            <div className="flex gap-2 mt-2.5 flex-wrap items-center">
-              <CopyButton text={outputDash} />
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onRegenerate}
-                className="gap-1.5"
-              >
-                <RefreshCw size={14} />
-                Regenerate
-              </Button>
-            </div>
-          </>
-        )}
-      </Card>
-
-      {/* ── Pipe card ── */}
-      <Card className="flex-1 rounded-xl border border-border shadow-none ring-0 p-5 gap-0">
-        <SectionLabel tone="info" hint="— pipe separator" className="mb-4">
-          Metadata
-        </SectionLabel>
-
-        {!outputPipe ? (
-          <div className="min-h-20 flex flex-col items-center justify-center gap-2 bg-secondary border border-dashed border-border rounded-lg text-muted-foreground text-xs text-center p-5">
-            <FolderOpen size={28} className="opacity-25" />
-            <span>
-              Fill in the details below
-              <br />
-              and click Generate
-            </span>
-          </div>
-        ) : (
-          <>
-            <div className="bg-secondary border border-info/35 rounded-lg p-3.5 text-sm text-foreground leading-7 break-all min-h-13">
-              {outputPipe}
-            </div>
-            <div className="flex gap-2 mt-2.5 flex-wrap items-center">
-              <CopyButton
-                text={outputPipe}
-                className="bg-info/15 border border-info/30 text-info hover:bg-info/25 hover:text-info"
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onRegenerate}
-                className="gap-1.5"
-              >
-                <RefreshCw size={14} />
-                Regenerate
-              </Button>
-            </div>
-          </>
-        )}
-
-        {/* Strip brackets option — always visible in pipe card */}
-        <label className="flex items-center gap-2 mt-3 cursor-pointer select-none w-fit">
+      <div className="flex flex-col gap-2">
+        <OutputRow
+          labelId="output-tagstring-label"
+          label="Tag string"
+          value={outputPipe}
+          emptyText="Tag string will appear here. Paste into ID3 fields, post body, or comments."
+        />
+        <label className="flex items-center gap-2 mt-1 cursor-pointer select-none w-fit">
           <Checkbox
             checked={stripBrackets}
             onCheckedChange={(v) => onStripBracketsChange(v === true)}
           />
-          <span className="text-[10px] text-muted-foreground tracking-[0.06em]">
-            Strip leading [brackets] from metadata title
+          <span className="text-xs text-muted-foreground">
+            Drop [bracket] markers from the edges of the title
           </span>
         </label>
-      </Card>
+      </div>
+    </div>
+  );
+}
+
+interface OutputRowProps {
+  labelId: string;
+  label: string;
+  value: string;
+  emptyText: string;
+}
+
+function OutputRow({ labelId, label, value, emptyText }: OutputRowProps) {
+  const [pulsing, setPulsing] = useState(false);
+  const prev = useRef(value);
+
+  useEffect(() => {
+    if (value && value !== prev.current) {
+      setPulsing(true);
+      const t = window.setTimeout(() => setPulsing(false), 600);
+      prev.current = value;
+      return () => window.clearTimeout(t);
+    }
+    prev.current = value;
+  }, [value]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-3">
+        <span
+          id={labelId}
+          className="text-sm font-medium tracking-wide text-muted-foreground"
+        >
+          {label}
+        </span>
+        <CopyButton text={value} disabled={!value} />
+      </div>
+      <div
+        aria-labelledby={labelId}
+        aria-live="polite"
+        className={cn(
+          "bg-muted/40 border rounded-md p-3 sm:p-3.5 min-h-14 font-mono text-sm leading-relaxed break-all text-foreground motion-safe:transition-colors motion-safe:duration-500",
+          pulsing ? "border-primary/60" : "border-border",
+        )}
+      >
+        {value || (
+          <span className="text-muted-foreground/70 italic">{emptyText}</span>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-# ASMR Workbench
+# ASMR Curator
 
 Self-hosted tool for organising a local ASMR library. Pulls audio from Patreon (including Drive-hosted files), writes consistent filenames against a tag dictionary you control, and keeps the whole catalogue under one filesystem you bind-mount into the container.
 

@@ -1,7 +1,7 @@
 [project]
 name = "asmr-filename-generator"
 version = "1.1.1"
-description = "Self-hosted ASMR Workbench — vision LLM extraction, tag dictionary, file rename + ID3, audio conversion"
+description = "Self-hosted ASMR Curator: vision LLM extraction, tag dictionary, file rename + ID3, audio conversion"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -26,3 +26,9 @@ dev = [
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
+# Add the repo root to sys.path so tests can `from backend.X import ...`.
+# `pythonpath` entries resolve relative to rootdir (= `backend/`), so `..`
+# is the repo root. The devcontainer sets PYTHONPATH separately, but CI
+# does not, and without this entry pytest collection fails with
+# `ModuleNotFoundError: No module named 'backend'`.
+pythonpath = [".."]

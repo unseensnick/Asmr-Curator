@@ -1,0 +1,213 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-05-17T00:00:00Z",
+  "title": "Design System: ASMR Curator",
+  "extensions": {
+    "colorMeta": {
+      "background": {
+        "role": "neutral",
+        "displayName": "Skyline Slate",
+        "canonical": "oklch(0.155 0.015 265)",
+        "tonalRamp": [
+          "oklch(0.080 0.005 265)",
+          "oklch(0.155 0.015 265)",
+          "oklch(0.230 0.020 265)",
+          "oklch(0.310 0.025 265)",
+          "oklch(0.420 0.022 265)",
+          "oklch(0.560 0.018 265)",
+          "oklch(0.760 0.012 265)",
+          "oklch(0.920 0.005 265)"
+        ]
+      },
+      "foreground": {
+        "role": "neutral",
+        "displayName": "Reading Cream",
+        "canonical": "oklch(0.918 0.012 85)",
+        "tonalRamp": [
+          "oklch(0.200 0.020 85)",
+          "oklch(0.350 0.025 85)",
+          "oklch(0.490 0.028 85)",
+          "oklch(0.620 0.025 85)",
+          "oklch(0.740 0.020 85)",
+          "oklch(0.840 0.015 85)",
+          "oklch(0.918 0.012 85)",
+          "oklch(0.975 0.006 85)"
+        ]
+      },
+      "primary": {
+        "role": "primary",
+        "displayName": "Amplifier Cyan",
+        "canonical": "oklch(0.55 0.09 195)",
+        "tonalRamp": [
+          "oklch(0.180 0.030 195)",
+          "oklch(0.280 0.050 195)",
+          "oklch(0.380 0.075 195)",
+          "oklch(0.470 0.085 195)",
+          "oklch(0.550 0.090 195)",
+          "oklch(0.680 0.085 195)",
+          "oklch(0.800 0.060 195)",
+          "oklch(0.930 0.025 195)"
+        ]
+      },
+      "info": {
+        "role": "tertiary",
+        "displayName": "Dim Indigo",
+        "canonical": "oklch(0.68 0.08 275)",
+        "tonalRamp": [
+          "oklch(0.220 0.030 275)",
+          "oklch(0.320 0.050 275)",
+          "oklch(0.420 0.070 275)",
+          "oklch(0.530 0.075 275)",
+          "oklch(0.680 0.080 275)",
+          "oklch(0.770 0.060 275)",
+          "oklch(0.870 0.030 275)",
+          "oklch(0.950 0.012 275)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Page title and result-state post title only. One per surface."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Primary reading text and form copy. 1rem floor."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Field group headers (Also include, Published between) and section markers. Uppercase + tracking is the signal."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Filenames, paths, tag chips, URLs, code-shaped content. The Two-Voices Rule signal."
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "ease-out-quart",
+        "value": "cubic-bezier(0.25, 1, 0.5, 1)",
+        "purpose": "Default easing for state transitions (hover, focus, open, close)."
+      },
+      {
+        "name": "duration-fast",
+        "value": "150ms",
+        "purpose": "Color and opacity transitions on interactive elements."
+      },
+      {
+        "name": "duration-medium",
+        "value": "220ms",
+        "purpose": "Disclosure reveals and panel state transitions."
+      }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" },
+      { "name": "xl", "value": "1280px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The CTA. Pill-shaped, full-width on key actions like Fetch from Patreon and Use for filename.",
+      "html": "<button class=\"ds-btn-primary\">Fetch from Patreon</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; height: 3rem; padding: 0 1rem; background: var(--primary); color: var(--primary-foreground); border: 1px solid transparent; border-radius: 1.625rem; font-family: 'Geist Variable', system-ui, sans-serif; font-size: 1rem; font-weight: 500; cursor: pointer; transition: background-color 150ms cubic-bezier(0.25, 1, 0.5, 1), transform 150ms cubic-bezier(0.25, 1, 0.5, 1); } .ds-btn-primary:hover { background: var(--primary); filter: brightness(1.05); } .ds-btn-primary:active { transform: translateY(1px); } .ds-btn-primary:focus-visible { outline: none; border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring), transparent 70%); } .ds-btn-primary:disabled { opacity: 0.5; pointer-events: none; }"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Secondary action. Hairline border on the page background, fills with muted on hover.",
+      "html": "<button class=\"ds-btn-outline\">Cancel</button>",
+      "css": ".ds-btn-outline { display: inline-flex; align-items: center; justify-content: center; gap: 0.375rem; height: 2.25rem; padding: 0 1rem; background: var(--background); color: var(--foreground); border: 1px solid var(--border); border-radius: 1.625rem; font-family: 'Geist Variable', system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; cursor: pointer; transition: background-color 150ms cubic-bezier(0.25, 1, 0.5, 1); } .ds-btn-outline:hover { background: var(--muted); color: var(--foreground); } .ds-btn-outline:focus-visible { outline: none; border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring), transparent 70%); }"
+    },
+    {
+      "name": "Input with leading icon",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "URL field. 48px tall (touch target), mono font (URLs are machine strings), lucide icon in the left padding.",
+      "html": "<div class=\"ds-input-wrap\"><svg class=\"ds-input-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71\"></path><path d=\"M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71\"></path></svg><input class=\"ds-input\" type=\"text\" placeholder=\"paste a Patreon URL\" /></div>",
+      "css": ".ds-input-wrap { position: relative; width: 100%; } .ds-input-icon { position: absolute; left: 0.875rem; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: color-mix(in oklch, var(--muted-foreground), transparent 30%); pointer-events: none; } .ds-input { width: 100%; height: 3rem; padding: 0 0.75rem 0 2.5rem; background: var(--background); color: var(--foreground); border: 1px solid var(--border); border-radius: 0.5rem; font-family: 'JetBrains Mono Variable', ui-monospace, monospace; font-size: 0.875rem; outline: none; transition: box-shadow 150ms cubic-bezier(0.25, 1, 0.5, 1); } .ds-input::placeholder { color: color-mix(in oklch, var(--muted-foreground), transparent 45%); } .ds-input:focus-visible { box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring), transparent 55%); }"
+    },
+    {
+      "name": "Mono Tag Chip",
+      "kind": "chip",
+      "refersTo": "tag-chip-mono",
+      "description": "Read-only chip for tags returned from the backend. Mono font is the signal that this is machine-produced data.",
+      "html": "<span class=\"ds-chip-mono\">whisper</span>",
+      "css": ".ds-chip-mono { display: inline-flex; align-items: center; padding: 0.25rem 0.5rem; background: var(--muted); color: var(--muted-foreground); border-radius: 0.5rem; font-family: 'JetBrains Mono Variable', ui-monospace, monospace; font-size: 0.75rem; line-height: 1; }"
+    },
+    {
+      "name": "Filter Chip (active)",
+      "kind": "chip",
+      "refersTo": "filter-chip-active",
+      "description": "Interactive content-type filter (Audio, Drive links, Video, etc.). Active state uses accent surface with brighter accent-foreground text.",
+      "html": "<button class=\"ds-chip-filter ds-chip-filter--active\" aria-pressed=\"true\">Audio</button>",
+      "css": ".ds-chip-filter { padding: 0.375rem 0.75rem; background: var(--background); color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 0.5rem; font-family: 'Geist Variable', system-ui, sans-serif; font-size: 0.875rem; cursor: pointer; transition: background-color 150ms cubic-bezier(0.25, 1, 0.5, 1), color 150ms cubic-bezier(0.25, 1, 0.5, 1); } .ds-chip-filter:hover { color: var(--foreground); border-color: color-mix(in oklch, var(--muted-foreground), transparent 70%); } .ds-chip-filter:focus-visible { outline: none; box-shadow: 0 0 0 2px color-mix(in oklch, var(--ring), transparent 50%); } .ds-chip-filter--active { background: var(--accent); color: var(--accent-foreground); border-color: var(--accent); } .ds-chip-filter--active:hover { color: var(--accent-foreground); }"
+    },
+    {
+      "name": "Mode Toggle Row",
+      "kind": "custom",
+      "refersTo": "mode-toggle",
+      "description": "Card-row pattern for binary modes (Don't download audio, Preview only). Full-row tap target with internal checkbox + label + hint.",
+      "html": "<label class=\"ds-mode-toggle\"><input type=\"checkbox\" class=\"ds-mode-toggle__check\" /><span class=\"ds-mode-toggle__body\"><span class=\"ds-mode-toggle__label\">Don't download audio</span><span class=\"ds-mode-toggle__hint\">Just save the post info. Use this when the file is already on disk.</span></span></label>",
+      "css": ".ds-mode-toggle { display: flex; align-items: flex-start; gap: 0.75rem; padding: 0.75rem; background: var(--background); border: 1px solid var(--border); border-radius: 0.5rem; cursor: pointer; user-select: none; transition: border-color 150ms cubic-bezier(0.25, 1, 0.5, 1); } .ds-mode-toggle:hover { border-color: color-mix(in oklch, var(--muted-foreground), transparent 70%); } .ds-mode-toggle__check { margin-top: 0.125rem; flex-shrink: 0; accent-color: var(--primary); width: 1rem; height: 1rem; } .ds-mode-toggle__body { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; } .ds-mode-toggle__label { font-family: 'Geist Variable', system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; color: var(--foreground); } .ds-mode-toggle__hint { font-family: 'Geist Variable', system-ui, sans-serif; font-size: 0.75rem; color: var(--muted-foreground); line-height: 1.5; }"
+    },
+    {
+      "name": "Result Row",
+      "kind": "card",
+      "refersTo": "result-row",
+      "description": "Multi-post list row. The entire title-area is the activation button (tap row to apply). External-link disclosure renders as a sibling so anchors stay reachable.",
+      "html": "<div class=\"ds-result-row\"><button class=\"ds-result-row__button\"><div class=\"ds-result-row__head\"><span class=\"ds-result-row__id\">#12345</span><span class=\"ds-result-row__title\">A soft whisper, before bed</span></div><div class=\"ds-result-row__meta\"><span class=\"ds-result-row__artist\">artist name</span><span class=\"ds-chip-mono\">whisper</span><span class=\"ds-chip-mono\">soft</span></div></button></div>",
+      "css": ".ds-result-row { background: var(--background); border: 1px solid var(--border); border-radius: 0.625rem; overflow: hidden; transition: border-color 150ms cubic-bezier(0.25, 1, 0.5, 1); } .ds-result-row:hover { border-color: color-mix(in oklch, var(--muted-foreground), transparent 60%); } .ds-result-row__button { width: 100%; padding: 1rem; background: transparent; color: inherit; border: 0; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 0.625rem; transition: background-color 150ms cubic-bezier(0.25, 1, 0.5, 1); } .ds-result-row__button:hover { background: color-mix(in oklch, var(--accent), transparent 60%); } .ds-result-row__button:focus-visible { outline: none; background: color-mix(in oklch, var(--accent), transparent 60%); box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--ring), transparent 60%); } .ds-result-row__head { display: flex; align-items: flex-start; gap: 0.625rem; min-width: 0; } .ds-result-row__id { flex-shrink: 0; padding: 0.125rem 0.375rem; border: 1px solid var(--border); border-radius: 0.375rem; font-family: 'JetBrains Mono Variable', ui-monospace, monospace; font-size: 0.625rem; letter-spacing: 0.04em; color: var(--muted-foreground); } .ds-result-row__title { font-family: 'Bricolage Grotesque Variable', 'Geist Variable', system-ui, sans-serif; font-size: 0.9375rem; font-weight: 500; color: var(--foreground); line-height: 1.4; flex: 1; min-width: 0; word-break: break-word; } .ds-result-row__meta { display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem; font-family: 'Geist Variable', system-ui, sans-serif; font-size: 0.75rem; } .ds-result-row__artist { color: var(--muted-foreground); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Penthouse Reading Nook",
+    "overview": "The product is what you reach for at night with headphones on, settled into a corner of a modern penthouse, the city glittering through the glass. The room is dim, the materials are cool (slate, polished concrete, glass, brushed metal), and one single accent carries the warmth: the brushed face of a hi-fi amplifier glowing teal-cyan from below. The visual system explicitly rejects four reflexes: not Spotify (saturated single accent on near-black), not Audacity (cold utilitarian DAW chrome), not Linear or Notion (cold-blue productivity SaaS), and not NSFW aggregator visual codes. The personality lives in the gap between those four.",
+    "keyCharacteristics": [
+      "Cool slate surfaces (hue 265, low chroma) carry the whole room.",
+      "One teal-cyan accent (hue 195, deeper L for confidence) is the only chromatic interest.",
+      "Foreground is warm cream (hue 85), the only warm element against the cool room.",
+      "Flat by default. No shadows at rest. Lift comes from value.",
+      "Designed for low light and imperfect eyesight: generous type, 48px tap targets.",
+      "Two voices: display sans for human writing, mono for machine writing."
+    ],
+    "rules": [
+      { "name": "The Cool-Surfaces Rule", "body": "Every surface sits at hue 265 with chroma between 0.015 and 0.040. Surfaces never read warm; warmth is reserved for the foreground and primary roles.", "section": "colors" },
+      { "name": "The One-Accent Rule", "body": "Teal-cyan (hue 195) is the only chromatic interest in the chrome. It carries the CTA, the focus ring, and the active filter state. No second accent competes for attention.", "section": "colors" },
+      { "name": "The Warm Foreground Rule", "body": "Text and primary foreground elements tilt warm-cream (hue 85). This single warm element against the cool room is the system's warm-cool axis. Pure white text is forbidden.", "section": "colors" },
+      { "name": "The No-Cold-Accent Rule", "body": "Despite cool slate surfaces, no Linear-blue or crypto-neon ever appears. The accent earns its place by being a specific brushed-metal teal-cyan (hue 195), not a generic productivity-tool blue.", "section": "colors" },
+      { "name": "The Two-Voices Rule", "body": "Display and body sans are for what the human writes. Mono is for what the machine writes. A label in mono or a filename in display is a bug, not a style choice.", "section": "typography" },
+      { "name": "The 1rem-Floor Rule", "body": "Body text is 1rem (16px) or larger. Always. Chips and captions may drop to 0.8125rem, but body copy never does.", "section": "typography" },
+      { "name": "The Display-Sparingly Rule", "body": "Bricolage Grotesque appears only in the page title and the headline of a result-state surface. Display type used everywhere is display type used nowhere.", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "At rest, no surface in the system casts a shadow. Lift only happens in response to state.", "section": "elevation" },
+      { "name": "The Value-Lift Rule", "body": "When a surface needs to feel elevated, the lift is communicated by raising the background lightness within the same hue family, not by adding a shadow.", "section": "elevation" },
+      { "name": "The Tinted-Shadow Rule", "body": "Where shadows do appear (popover, dialog), they tint toward the cool slate family, never pure black.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do treat the room as cool and the foreground as warm. Surfaces sit at hue 265 with low chroma; foreground text and the primary accent provide the warmth.",
+      "Do use Amplifier Cyan only where attention is intentional: the CTA, the focus ring, the active filter chip.",
+      "Do use JetBrains Mono for every filename, tag chip, raw path, URL, and machine-generated string.",
+      "Do floor body text at 1rem and touch targets at 44 by 44px (48 by 48px on tablet surfaces).",
+      "Do respect prefers-reduced-motion: any motion not essential to feedback is stripped behind motion-safe:.",
+      "Do verify both light and dark mode at WCAG AA before merging. Dark gets extra scrutiny."
+    ],
+    "donts": [
+      "Don't look like Spotify or any commercial music app. The Amplifier Cyan must never read as neon.",
+      "Don't look like Audacity or any pro-audio DAW. No cold-grey utilitarian chrome.",
+      "Don't look like Linear, Notion, or generic productivity SaaS. The accent is teal-cyan at hue 195, not a cold blue at 250.",
+      "Don't borrow visual codes from NSFW aggregators.",
+      "Don't leak backend jargon into UI vocabulary (itag, CDP, signed URL, Playwright, metadata_only, dry_run).",
+      "Don't introduce a second saturated accent color. The system is Committed to one warm-cool tension.",
+      "Don't go warm-rose, mauve, or sepia. Past iterations failed in those directions.",
+      "Don't use orchestrated mount animations or staggered section reveals. Motion is Responsive, not Choreographed.",
+      "Don't use side-stripe borders, gradient text, glassmorphism, hero-metric SaaS templates, identical card grids, or modals as a first thought.",
+      "Don't use #000 or #fff anywhere. Every neutral tilts toward the brand hue family."
+    ]
+  }
+}

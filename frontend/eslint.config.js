@@ -19,5 +19,17 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // Honor the `_`-prefix convention for intentionally-unused identifiers,
+      // including rest-destructured discards like `const { state: _state, ...rest } = obj`.
+      // The recommended preset doesn't set these patterns; without them, the
+      // convention silently fails CI.
+      '@typescript-eslint/no-unused-vars': ['error', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+        destructuredArrayIgnorePattern: '^_',
+      }],
+    },
   },
 ])
