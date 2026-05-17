@@ -1,4 +1,4 @@
-import { Check, X } from "lucide-react";
+import { Check, Loader2, X } from "lucide-react";
 import { type ReactNode } from "react";
 
 type StatusTone = "success" | "error" | "muted" | "info";
@@ -41,10 +41,7 @@ export default function StatusLine({
             className={`flex items-center gap-1.5 text-[11px] min-h-4 ${TONE_TO_COLOR[tone]} ${className}`}
         >
             {loading ? (
-                <span
-                    aria-hidden
-                    className="size-3 border-2 border-current/30 border-t-current rounded-full animate-spin shrink-0"
-                />
+                <Loader2 size={12} aria-hidden className="animate-spin shrink-0" />
             ) : tone === "success" ? (
                 <Check size={12} className="shrink-0" aria-hidden />
             ) : tone === "error" ? (

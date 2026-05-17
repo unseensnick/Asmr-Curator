@@ -144,6 +144,12 @@ export interface PatreonCookieStatus {
   length: number;
 }
 
+export interface GoogleCookieStatus {
+  set: boolean;
+  count: number;
+  length: number;
+}
+
 /** Response from `POST /api/patreon/ingest-drive-link`. Backend scrapes Drive
  * headlessly, downloads the audio, returns the destination path relative to
  * `LIBRARY_PATH`. */

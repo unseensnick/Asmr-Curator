@@ -36,7 +36,7 @@ log = logging.getLogger("asmr_workbench")
 # of large posts visible in logs before they OOM the server.
 MAX_IMAGE_B64_BYTES = 32 * 1024 * 1024
 
-app = FastAPI(title="ASMR Workbench API")
+app = FastAPI(title="ASMR Curator API")
 
 
 @app.on_event("shutdown")

@@ -34,19 +34,26 @@ class TestDefaultDbPath:
         importlib.reload(database)
         assert database._default_db_path() == "/data/dictionary.db"
 
+    @pytest.mark.skipif(
+        os.name != "nt",
+        reason=(
+            "Test exercises the Windows branch of _default_db_path, which "
+            "calls Path(__file__).resolve(). Monkeypatching os.name='nt' on a "
+            "POSIX interpreter makes pathlib try to instantiate WindowsPath, "
+            "which it refuses to do on Linux/macOS (NotImplementedError). "
+            "Run on a Windows runner to exercise this branch."
+        ),
+    )
     def test_windows_returns_repo_relative_path(self, monkeypatch, tmp_path):
         # On Windows, a host-side `uvicorn backend.main:app` previously
         # silently created `E:\data\dictionary.db` (POSIX `/data/...`
         # resolved against the current drive root). The Windows fallback
         # must point inside the repo instead.
-        monkeypatch.setattr(os, "name", "nt")
         monkeypatch.setenv("DB_PATH", str(tmp_path / "neutral.db"))
         import backend.database as database
         importlib.reload(database)
         result = database._default_db_path()
-        # On Linux test runners, Path() resolution gives forward slashes,
-        # so just verify the path component layout.
-        assert result.endswith("data/dictionary.db") or result.endswith(r"data\dictionary.db")
+        assert result.endswith(r"data\dictionary.db") or result.endswith("data/dictionary.db")
         assert "data" in result
         assert "dictionary.db" in result
 

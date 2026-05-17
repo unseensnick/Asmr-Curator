@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Download, Globe, Loader2 } from "lucide-react";
+import { AlertCircle, Check, Download, Globe, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ingestDriveLinkStream } from "@/lib/api";
 import type { ExternalLink, IngestDriveLinkEvent } from "@/lib/types";
@@ -33,12 +33,12 @@ export default function ExternalLinksHint({ postId, links }: ExternalLinksHintPr
     if (!links.length) return null;
     const n = links.length;
     return (
-        <details className="shrink-0 text-[10px]">
-            <summary className="flex items-center gap-1.5 cursor-pointer select-none text-primary/80 hover:text-primary tracking-[0.06em]">
-                <Globe size={11} />
-                {n} external link{n === 1 ? "" : "s"} — Drive links can be downloaded directly
+        <details className="shrink-0 text-xs">
+            <summary className="flex items-center gap-1.5 cursor-pointer select-none text-muted-foreground hover:text-foreground transition-colors">
+                <Globe size={12} aria-hidden />
+                {n} external link{n === 1 ? "" : "s"}. Drive links can be downloaded directly.
             </summary>
-            <ul className="mt-1.5 pl-4 flex flex-col gap-2">
+            <ul className="mt-2 pl-4 flex flex-col gap-2.5">
                 {links.map((link) => (
                     <ExternalLinkRow key={link.url} postId={postId} link={link} />
                 ))}
@@ -71,16 +71,16 @@ function stageLabel(event: IngestDriveLinkEvent): string {
         case "queued":
             if (event.ahead <= 0) return "Queued";
             return event.ahead === 1
-                ? "Queued — 1 download ahead"
-                : `Queued — ${event.ahead} downloads ahead`;
+                ? "Queued, 1 download ahead"
+                : `Queued, ${event.ahead} downloads ahead`;
         case "launching_browser":
-            return `Launching browser (${event.elapsed_s.toFixed(1)}s)`;
+            return `Opening browser (${event.elapsed_s.toFixed(1)}s)`;
         case "loading_page":
-            return `Loading Drive page (${event.elapsed_s.toFixed(1)}s)`;
+            return `Loading the Drive page (${event.elapsed_s.toFixed(1)}s)`;
         case "waiting_for_player":
-            return `Waiting for player (${event.elapsed_s.toFixed(1)}s)`;
+            return `Waiting for the audio player (${event.elapsed_s.toFixed(1)}s)`;
         case "captured":
-            return `Captured audio URL (${event.elapsed_s.toFixed(1)}s)`;
+            return `Found the audio (${event.elapsed_s.toFixed(1)}s)`;
         case "downloading": {
             if (event.bytes != null && event.total != null && event.total > 0) {
                 const pct = ((event.bytes / event.total) * 100).toFixed(0);
@@ -137,14 +137,14 @@ function ExternalLinkRow({ postId, link }: ExternalLinkRowProps) {
     const drive = isDriveUrl(href);
     const isRunning = state.kind === "running";
     return (
-        <li className="flex flex-col gap-1">
+        <li className="flex flex-col gap-1.5">
             <div className="flex items-start gap-2 flex-wrap">
                 <a
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
                     title={text ? href : undefined}
-                    className="font-mono text-muted-foreground hover:text-primary underline decoration-dotted underline-offset-2 break-all flex-1 min-w-0"
+                    className="font-mono text-xs text-muted-foreground hover:text-foreground underline decoration-dotted underline-offset-2 break-all flex-1 min-w-0"
                 >
                     {text || href}
                 </a>
@@ -154,31 +154,33 @@ function ExternalLinkRow({ postId, link }: ExternalLinkRowProps) {
                         variant="outline"
                         onClick={handleDownload}
                         disabled={isRunning}
-                        className="h-6 px-2 text-[10px] gap-1 shrink-0"
+                        className="h-7 px-2.5 text-xs gap-1.5 shrink-0"
                     >
                         {isRunning ? (
-                            <Loader2 size={11} className="animate-spin" />
+                            <Loader2 size={12} aria-hidden className="animate-spin" />
                         ) : (
-                            <Download size={11} />
+                            <Download size={12} aria-hidden />
                         )}
-                        {isRunning ? "Downloading…" : "Download"}
+                        {isRunning ? "Downloading" : "Download"}
                     </Button>
                 )}
             </div>
             {isRunning && (
-                <span className="text-muted-foreground text-[10px] pl-0.5">
+                <span className="text-muted-foreground text-xs pl-0.5">
                     {stageLabel(state.progress)}
                 </span>
             )}
             {state.kind === "done" && (
-                <span className="text-success text-[10px] pl-0.5">
-                    ✓ saved to <code className="font-mono">{state.audioPath}</code>{" "}
+                <span className="text-success text-xs pl-0.5 flex items-baseline gap-1.5 wrap-break-word">
+                    <Check size={12} aria-hidden className="self-center shrink-0" />
+                    Saved to <code className="font-mono">{state.audioPath}</code>{" "}
                     <span className="text-muted-foreground">({formatMB(state.size)})</span>
                 </span>
             )}
             {state.kind === "error" && (
-                <span className="text-destructive text-[10px] pl-0.5 wrap-break-word">
-                    ✗ {state.message}
+                <span className="text-destructive text-xs pl-0.5 flex items-baseline gap-1.5 wrap-break-word">
+                    <AlertCircle size={12} aria-hidden className="self-center shrink-0" />
+                    {state.message}
                 </span>
             )}
         </li>
