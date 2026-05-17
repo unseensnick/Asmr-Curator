@@ -21,7 +21,7 @@ paths:
 
 - `/api/extract`, `/api/preview-tags` — Ollama integration (vision LLM).
 - `/api/dictionary`, `/api/vocabulary/*`, `/api/suppressed/*` — dictionary CRUD.
-- `/api/files*` — file browser rooted at `AUDIO_ROOT`.
+- `/api/files*` — file browser rooted at `LIBRARY_PATH`.
 - `/api/rename` — file rename + optional ID3/FLAC/MP4 metadata write via `mutagen`.
 - `/api/convert` — audio conversion via `ffmpeg` subprocess.
 - `/api/settings/patreon-cookie`, `/api/patreon/*` — Patreon cookie storage + post fetch (delegates to `backend/patreon_fetch.py`).
@@ -42,12 +42,12 @@ paths:
 
 | Variable          | Default                  | Purpose                                                       |
 | ----------------- | ------------------------ | ------------------------------------------------------------- |
-| `AUDIO_ROOT`      | —                        | Root path for the file browser (required for file operations) |
+| `LIBRARY_PATH`      | —                        | Root path for the file browser (required for file operations) |
 | `DB_PATH`         | `/data/dictionary.db`    | SQLite database location                                      |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server endpoint                                        |
 | `OLLAMA_MODEL`    | `qwen2.5vl:7b`           | Vision model for extraction                                   |
 
-In Docker, `AUDIO_ROOT=/mnt/audio` and the host path is bind-mounted via `AUDIO_PATH` in `.env` (host) → `AUDIO_ROOT` (container). The devcontainer mounts the audio dir at `/mnt/audio` and runs as `devuser` in `/workspaces/asmr-filename-gen`.
+In Docker, `LIBRARY_PATH=/mnt/audio` and the host path is bind-mounted via `LIBRARY_PATH` in `.env` (host) → `LIBRARY_PATH` (container). The devcontainer mounts the audio dir at `/mnt/audio` and runs as `devuser` in `/workspaces/asmr-filename-gen`.
 
 ## Dev vs. production
 

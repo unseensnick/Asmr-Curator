@@ -50,8 +50,8 @@ async def _shutdown_drive_browser() -> None:
 # Resolve frontend dist path — built output from `cd frontend && npm run build`
 FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
 
-# Root for audio files — set via AUDIO_ROOT env var
-AUDIO_ROOT = Path(os.environ.get("AUDIO_ROOT", "/mnt/audio"))
+# Root for audio files — set via LIBRARY_PATH env var
+LIBRARY_PATH = Path(os.environ.get("LIBRARY_PATH", "/mnt/audio"))
 
 # ── Serve frontend (built assets) ─────────────────────────────────────────────
 if FRONTEND_DIST.exists():
@@ -86,12 +86,12 @@ def require_non_empty(value: str, field: str) -> str:
 
 
 def validate_audio_path(rel_path: str) -> Path:
-    resolved = (AUDIO_ROOT / rel_path.strip()).resolve()
-    audio_root = AUDIO_ROOT.resolve()
+    resolved = (LIBRARY_PATH / rel_path.strip()).resolve()
+    library_path = LIBRARY_PATH.resolve()
     # Use is_relative_to (or Path.relative_to with try/except on older Pythons) so
     # a sibling directory like /mnt/audio_evil doesn't satisfy a naive prefix
     # check against /mnt/audio. Python 3.9+ ships is_relative_to natively.
-    if not resolved.is_relative_to(audio_root):
+    if not resolved.is_relative_to(library_path):
         raise HTTPException(403, "Access denied")
     return resolved
 
@@ -298,7 +298,7 @@ QUALITY_FLAGS: dict[str, dict[str, list[str]]] = {
 
 @app.get("/api/files")
 def list_files(subdir: str = ""):
-    """List files and subdirectories inside AUDIO_ROOT/subdir (one level)."""
+    """List files and subdirectories inside LIBRARY_PATH/subdir (one level)."""
     target = validate_audio_path(subdir)
     if not target.exists():
         raise HTTPException(404, "Directory not found")
@@ -312,19 +312,19 @@ def list_files(subdir: str = ""):
             "name": entry.name,
             "type": "file" if entry.is_file() else "dir",
             "ext": ext,
-            "path": str(entry.relative_to(AUDIO_ROOT)),
+            "path": str(entry.relative_to(LIBRARY_PATH)),
             "needs_conversion": entry.is_file() and ext in NEEDS_CONVERSION_EXTS,
         })
 
     return {
-        "current": str(target.relative_to(AUDIO_ROOT)) if target != AUDIO_ROOT else "",
+        "current": str(target.relative_to(LIBRARY_PATH)) if target != LIBRARY_PATH else "",
         "entries": entries,
     }
 
 
 # Directories pruned during the audio search walk. These are noisy and never
 # contain user audio: patreon-dl's own working dir, dotfiles, common
-# build/cache dirs that may end up under AUDIO_ROOT if the user re-purposes
+# build/cache dirs that may end up under LIBRARY_PATH if the user re-purposes
 # the mount.
 _SEARCH_PRUNE_DIRS = {".patreon-dl", ".git", "node_modules", "__pycache__", ".DS_Store"}
 
@@ -337,7 +337,7 @@ _SEARCH_RESULT_LIMIT = 500
 @app.get("/api/files/search")
 def search_files(q: str = "", search_in: str = "filename"):
     """
-    Recursively walk AUDIO_ROOT and return all audio/video files.
+    Recursively walk LIBRARY_PATH and return all audio/video files.
     search_in: "filename" | "folder" | "both"
 
     Filters apply during the walk (extension + query), hidden / cache /
@@ -345,9 +345,9 @@ def search_files(q: str = "", search_in: str = "filename"):
     is capped at _SEARCH_RESULT_LIMIT entries. Sort is applied to the kept
     results only.
     """
-    audio_root = AUDIO_ROOT.resolve()
-    if not audio_root.exists():
-        raise HTTPException(404, f"Audio root not found at {audio_root} — check AUDIO_ROOT mount")
+    library_path = LIBRARY_PATH.resolve()
+    if not library_path.exists():
+        raise HTTPException(404, f"Audio root not found at {library_path} — check LIBRARY_PATH mount")
 
     q_lower = q.strip().lower()
     if search_in not in ("filename", "folder", "both"):
@@ -357,13 +357,13 @@ def search_files(q: str = "", search_in: str = "filename"):
     truncated = False
 
     try:
-        for dirpath, dirnames, filenames in os.walk(audio_root):
+        for dirpath, dirnames, filenames in os.walk(library_path):
             # Prune in place so os.walk doesn't descend into noisy subtrees.
             dirnames[:] = [
                 d for d in dirnames
                 if d not in _SEARCH_PRUNE_DIRS and not d.startswith(".")
             ]
-            rel_dir = Path(dirpath).relative_to(audio_root)
+            rel_dir = Path(dirpath).relative_to(library_path)
             folder = "" if str(rel_dir) == "." else str(rel_dir)
             folder_lc = folder.lower()
             for name in filenames:
@@ -407,23 +407,23 @@ def search_files(q: str = "", search_in: str = "filename"):
 
 @app.get("/api/files/debug")
 def debug_files():
-    """Show what's visible at AUDIO_ROOT — use to diagnose mount issues."""
-    audio_root = AUDIO_ROOT.resolve()
-    if not audio_root.exists():
-        return {"error": f"AUDIO_ROOT does not exist: {audio_root}", "audio_root": str(audio_root)}
+    """Show what's visible at LIBRARY_PATH — use to diagnose mount issues."""
+    library_path = LIBRARY_PATH.resolve()
+    if not library_path.exists():
+        return {"error": f"LIBRARY_PATH does not exist: {library_path}", "library_path": str(library_path)}
 
     top_level = []
     try:
-        for entry in sorted(audio_root.iterdir(), key=lambda e: e.name.lower())[:20]:
+        for entry in sorted(library_path.iterdir(), key=lambda e: e.name.lower())[:20]:
             top_level.append({
                 "name": entry.name,
                 "type": "dir" if entry.is_dir() else "file",
             })
     except Exception as e:
-        return {"error": str(e), "audio_root": str(audio_root)}
+        return {"error": str(e), "library_path": str(library_path)}
 
     return {
-        "audio_root": str(audio_root),
+        "library_path": str(library_path),
         "exists": True,
         "top_level_entries": top_level,
         "top_level_count": len(top_level),
@@ -438,7 +438,7 @@ class MetadataIn(BaseModel):
     album_artist: str = ""
 
 class RenameIn(BaseModel):
-    path: str                           # relative path to file inside AUDIO_ROOT
+    path: str                           # relative path to file inside LIBRARY_PATH
     new_name: str                       # new filename (just the name, no path)
     metadata: Optional[MetadataIn] = None   # tags to embed after rename
 
@@ -460,7 +460,7 @@ def rename_file(body: RenameIn):
     if not new_name or "/" in new_name or "\\" in new_name:
         raise HTTPException(400, "Invalid filename")
 
-    dest = validate_audio_path(str(src.parent.relative_to(AUDIO_ROOT) / new_name))
+    dest = validate_audio_path(str(src.parent.relative_to(LIBRARY_PATH) / new_name))
     reject_if_exists(dest)
 
     # Linux max filename length is 255 bytes (not chars — encode to check)
@@ -495,7 +495,7 @@ def rename_file(body: RenameIn):
         "renamed": True,
         "old_name": src.name,
         "new_name": dest.name,
-        "path": str(dest.relative_to(AUDIO_ROOT)),
+        "path": str(dest.relative_to(LIBRARY_PATH)),
         **({"metadata_error": metadata_error} if metadata_error else {}),
     }
 
@@ -508,7 +508,7 @@ def get_convert_formats():
 
 
 class ConvertIn(BaseModel):
-    path: str               # relative path inside AUDIO_ROOT
+    path: str               # relative path inside LIBRARY_PATH
     output_format: str      # "mp3" | "flac" | "aac" | "ogg"
     quality: str            # "low" | "standard" | "high" | "best" | "lossless"
     delete_original: bool = False
@@ -563,7 +563,7 @@ def convert_file(body: ConvertIn):
         "converted": True,
         "old_name": src.name,
         "new_name": dest.name,
-        "path": str(dest.relative_to(AUDIO_ROOT)),
+        "path": str(dest.relative_to(LIBRARY_PATH)),
     }
 
 
@@ -759,7 +759,7 @@ def patreon_fetch_endpoint(body: PatreonFetchIn):
     published_after = _validate_iso_date(body.published_after, "published_after")
     published_before = _validate_iso_date(body.published_before, "published_before")
 
-    output_dir = AUDIO_ROOT / PATREON_OUTPUT_SUBDIR
+    output_dir = LIBRARY_PATH / PATREON_OUTPUT_SUBDIR
     try:
         result = patreon_fetch(
             url, cookie, output_dir,
@@ -772,15 +772,15 @@ def patreon_fetch_endpoint(body: PatreonFetchIn):
     except PatreonFetchError as e:
         raise HTTPException(502, str(e))
 
-    audio_root = AUDIO_ROOT.resolve()
+    library_path = LIBRARY_PATH.resolve()
 
     def _rel(p: Optional[str]) -> Optional[str]:
         if not p:
             return None
         try:
-            return str(Path(p).resolve().relative_to(audio_root))
+            return str(Path(p).resolve().relative_to(library_path))
         except ValueError:
-            return p  # fell outside AUDIO_ROOT — return absolute path verbatim
+            return p  # fell outside LIBRARY_PATH — return absolute path verbatim
 
     posts = [
         {
@@ -870,7 +870,7 @@ async def ingest_external_audio(body: IngestExternalAudioIn):
 
     cleaned_url = audio_utils.strip_query_params(source_url)
 
-    # validate_audio_path enforces the AUDIO_ROOT boundary even if post_id
+    # validate_audio_path enforces the LIBRARY_PATH boundary even if post_id
     # somehow contains traversal segments that slipped past the prefix check.
     dest_dir = validate_audio_path(post_id)
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -929,9 +929,9 @@ async def ingest_external_audio(body: IngestExternalAudioIn):
             metadata_error = f"Metadata embed failed: {e}"
 
     # target was built from validate_audio_path(dest_dir), so it's always inside
-    # AUDIO_ROOT — relative_to is guaranteed to succeed. We don't fall back to
+    # LIBRARY_PATH — relative_to is guaranteed to succeed. We don't fall back to
     # the absolute path because that would leak the server's internal layout.
-    audio_path = str(target.relative_to(AUDIO_ROOT.resolve()))
+    audio_path = str(target.relative_to(LIBRARY_PATH.resolve()))
     result = {
         "audio_path": audio_path,
         "size": bytes_written,
@@ -958,7 +958,7 @@ class IngestDriveLinkIn(BaseModel):
 @app.post("/api/patreon/ingest-drive-link")
 async def ingest_drive_link(body: IngestDriveLinkIn):
     """Resolve a Drive viewer URL to its playback URL via headless Chromium,
-    clean it, and download into AUDIO_ROOT/<post_id>/.
+    clean it, and download into LIBRARY_PATH/<post_id>/.
 
     Returns a `text/event-stream` of progress events. The frontend consumes
     these with fetch + reader.read() rather than the standard JSON wrapper.
@@ -1019,6 +1019,16 @@ async def ingest_drive_link(body: IngestDriveLinkIn):
         # Snapshot the lock state and our position BEFORE incrementing so the
         # "ahead" count we surface to the UI is the number of requests that
         # were already in flight or queued when ours arrived.
+        #
+        # Caveat: with the default `DRIVE_SCRAPE_CONCURRENCY=1` the
+        # `_drive_scrape_lock.locked()` check is exact — the lock is either
+        # held (one scrape in flight) or free. Raising the env var above 1
+        # makes `Semaphore.locked()` only return True at FULL exhaustion, so
+        # the surfaced `ahead` count would under-report queue depth by
+        # `capacity - 1`. The env override is a power-user knob for scraping
+        # different Google accounts where the rotation race doesn't apply;
+        # if the under-report becomes annoying, replace the lock-locked
+        # check with an explicit "in_use >= capacity" comparison.
         contested = _drive_scrape_lock.locked()
         ahead_on_arrival = _drive_scrape_pending
         _drive_scrape_pending += 1
@@ -1038,8 +1048,8 @@ async def ingest_drive_link(body: IngestDriveLinkIn):
                     explicit_filename=body.filename,
                     on_progress=push,
                 )
-                audio_root = AUDIO_ROOT.resolve()
-                audio_path = str(result.audio_path.relative_to(audio_root))
+                library_path = LIBRARY_PATH.resolve()
+                audio_path = str(result.audio_path.relative_to(library_path))
                 await queue.put({
                     "state": "done",
                     "audio_path": audio_path,

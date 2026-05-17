@@ -28,9 +28,13 @@ ENV PATH="/home/devuser/.venv/bin:$PATH"
 
 # Playwright + Chromium for the Drive scrape path (POST /api/patreon/ingest-drive-link).
 # Pre-baked into the image so the postStartCommand doesn't have to download
-# ~180 MB on every container restart. The matching `playwright==1.49.0` pin is
+# ~180 MB on every container restart. The matching `playwright==1.59.0` pin is
 # in backend/requirements.txt, kept in lockstep.
-RUN /home/devuser/.venv/bin/pip install --no-cache-dir playwright==1.59.0 \
+#
+# `uv pip install --python <venv>/bin/python` (not `<venv>/bin/pip install`)
+# because uv 0.4+ stopped seeding pip into the venv by default. Same pattern
+# the postStartCommand uses for installing requirements.txt.
+RUN uv pip install --python /home/devuser/.venv/bin/python --no-cache-dir playwright==1.59.0 \
     && /home/devuser/.venv/bin/playwright install --with-deps chromium
 
 RUN curl https://get.volta.sh | bash

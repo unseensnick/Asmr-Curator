@@ -46,7 +46,7 @@ interface BatchProgress {
 }
 
 /**
- * File browser shell: server-backed search across `AUDIO_ROOT`, a
+ * File browser shell: server-backed search across `LIBRARY_PATH`, a
  * filterable list (filename / folder / both), batch convert mode, and
  * a single-file work area below the list.
  *
@@ -114,7 +114,7 @@ export default function FileBrowser({
             setError(
                 "Could not load files: " +
                     getErrorMessage(e) +
-                    " — check AUDIO_ROOT in devcontainer.json",
+                    " — check LIBRARY_PATH in devcontainer.json",
             );
             setFiles([]);
         } finally {
@@ -123,7 +123,7 @@ export default function FileBrowser({
     }
 
     // Defer the initial load until the panel is opened the first time —
-    // otherwise we walk the entire AUDIO_ROOT (a sync FastAPI route that
+    // otherwise we walk the entire LIBRARY_PATH (a sync FastAPI route that
     // ties up a worker thread) on every page load even when the user never
     // expands the file browser. `loadedOnceRef` keeps it strictly mount-once
     // per session so toggling open/closed doesn't re-fetch.

@@ -9,8 +9,8 @@ paths:
 
 - Validate all user input at the system boundary. Never trust request parameters.
 - Use parameterized queries. Never concatenate user input into SQL or shell commands. The backend uses `sqlite3` via `backend/database.py` helpers; all DB writes go through those helpers.
-- `backend/main.py` shells out to `ffmpeg` and (for Patreon fetch) external tools — quote and validate every user-supplied path or argument. Reject path traversal (`..`, absolute paths outside `AUDIO_ROOT`).
-- File operations under `/api/files*` and `/api/rename` must canonicalise paths and confirm they stay within `AUDIO_ROOT` before reading/writing.
+- `backend/main.py` shells out to `ffmpeg` and (for Patreon fetch) external tools — quote and validate every user-supplied path or argument. Reject path traversal (`..`, absolute paths outside `LIBRARY_PATH`).
+- File operations under `/api/files*` and `/api/rename` must canonicalise paths and confirm they stay within `LIBRARY_PATH` before reading/writing.
 - Sanitise output to prevent XSS in the React UI. Never dangerouslySetInnerHTML user-supplied strings.
 - Never log secrets, tokens, or absolute filesystem paths containing PII.
 - The Chrome extension (`extension/`) runs in the user's browser — treat anything the content script reads from the page as untrusted, and validate before forwarding to the backend.

@@ -433,7 +433,7 @@ def _is_google_request(url: str) -> bool:
 
 async def _dump_diagnostics(page, file_id: str, observed: list[str]) -> Optional[Path]:
     """Save a viewport screenshot + final URL + observed Google-host requests
-    (URLs with auth tokens redacted) to `<AUDIO_ROOT>/.drive-debug/<file_id>-<ts>/`.
+    (URLs with auth tokens redacted) to `<LIBRARY_PATH>/.drive-debug/<file_id>-<ts>/`.
     Returns the directory path, or None if writing failed.
 
     Called when the playback-URL listener times out. Screenshot is the
@@ -454,8 +454,8 @@ async def _dump_diagnostics(page, file_id: str, observed: list[str]) -> Optional
       • A README in the output dir warns the user that the screenshot may
         still show signed-in account info in the page chrome.
     """
-    audio_root = Path(os.environ.get("AUDIO_ROOT", ".")).resolve()
-    debug_root = audio_root / ".drive-debug"
+    library_path = Path(os.environ.get("LIBRARY_PATH", ".")).resolve()
+    debug_root = library_path / ".drive-debug"
     out_dir = debug_root / f"{file_id}-{int(time.time())}"
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -827,6 +827,13 @@ async def fetch_drive_audio(
 
         async def _on_drive_msg(payload):
             if not isinstance(payload, dict):
+                return
+            # Terminal-state guard: chunks may arrive after `done`/`error` has
+            # already set the event (the JS-side queue can dispatch concurrently
+            # with the Python-side coroutine that closes the .part file). Without
+            # this, a late chunk would try to write to a closed file handle and
+            # raise — harmless (caught below) but pollutes the error path.
+            if download_done_evt.is_set():
                 return
             kind = payload.get("kind")
             if kind == "headers":

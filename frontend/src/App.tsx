@@ -19,7 +19,7 @@ import {
 import type { AppDict, DictionaryApiResponse } from "@/lib/types";
 import { sanitizeFilename } from "@/lib/utils";
 
-type SourceMode = "screenshot" | "patreon";
+type SourceMode = "patreon" | "screenshot";
 
 export default function App() {
     // Theme is applied by the inline <script> in index.html before React mounts,
@@ -35,7 +35,7 @@ export default function App() {
     const [stripBrackets, setStripBrackets] = useState(true);
     const [dictOpen, setDictOpen] = useState(false);
     const [extractedArtist, setExtractedArtist] = useState("");
-    const [sourceMode, setSourceMode] = useState<SourceMode>("screenshot");
+    const [sourceMode, setSourceMode] = useState<SourceMode>("patreon");
 
     // ── Filename generation ───────────────────────────────────────────────────
     function generate() {
@@ -115,36 +115,36 @@ export default function App() {
                         className="h-auto p-0 gap-0 bg-transparent justify-start rounded-none border-b border-border w-full"
                     >
                         <TabsTrigger
-                            value="screenshot"
-                            className="px-4 py-2.5 text-xs font-display font-medium tracking-[0.04em] whitespace-nowrap rounded-none flex items-center gap-2"
-                        >
-                            <span className="size-1.5 rounded-full bg-primary shrink-0" />
-                            Screenshot
-                        </TabsTrigger>
-                        <TabsTrigger
                             value="patreon"
                             className="px-4 py-2.5 text-xs font-display font-medium tracking-[0.04em] whitespace-nowrap rounded-none flex items-center gap-2"
                         >
                             <span className="size-1.5 rounded-full bg-primary shrink-0" />
                             Patreon URL
                         </TabsTrigger>
+                        <TabsTrigger
+                            value="screenshot"
+                            className="px-4 py-2.5 text-xs font-display font-medium tracking-[0.04em] whitespace-nowrap rounded-none flex items-center gap-2"
+                        >
+                            <span className="size-1.5 rounded-full bg-primary shrink-0" />
+                            Screenshot
+                        </TabsTrigger>
                     </TabsList>
-
-                    <TabsContent
-                        value="screenshot"
-                        className="flex-1 mt-0 min-h-0 flex flex-col data-[state=inactive]:hidden"
-                    >
-                        <ScreenshotPanel
-                            dict={dict}
-                            onExtracted={handleExtracted}
-                        />
-                    </TabsContent>
 
                     <TabsContent
                         value="patreon"
                         className="flex-1 mt-0 min-h-0 flex flex-col data-[state=inactive]:hidden"
                     >
                         <PatreonPanel
+                            dict={dict}
+                            onExtracted={handleExtracted}
+                        />
+                    </TabsContent>
+
+                    <TabsContent
+                        value="screenshot"
+                        className="flex-1 mt-0 min-h-0 flex flex-col data-[state=inactive]:hidden"
+                    >
+                        <ScreenshotPanel
                             dict={dict}
                             onExtracted={handleExtracted}
                         />

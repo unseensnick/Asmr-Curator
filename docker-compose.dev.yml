@@ -1,0 +1,47 @@
+# Devcontainer compose — reads the same `.env` at the repo root that the
+# production `docker-compose.yml` reads. One source of truth for every
+# per-machine config (audio library path, Ollama host, Drive-scrape knobs).
+#
+# Lives at the repo root (not under `.devcontainer/`) because docker-compose
+# looks for `.env` in the directory containing the compose file. Keeping it
+# next to the prod `docker-compose.yml` means both resolve `.env` from the
+# same place. Referenced by `.devcontainer/devcontainer.json`'s
+# `dockerComposeFile: ../docker-compose.dev.yml` + `service: dev`.
+
+services:
+    dev:
+        build:
+            context: .
+            dockerfile: .devcontainer/Dockerfile
+        # Keep the container running so VS Code can attach a terminal.
+        # Without this, the container would exit immediately on start.
+        command: sleep infinity
+        volumes:
+            # Workspace bind-mount — VS Code edits files here.
+            - .:/workspaces/asmr-filename-gen:cached
+            # Audio library — same `LIBRARY_PATH` from `.env` that the
+            # production compose uses, mounted to the same container path.
+            - ${LIBRARY_PATH}:/mnt/audio:cached
+        environment:
+            - DB_PATH=/workspaces/asmr-filename-gen/data/dictionary.db
+            - PYTHONPATH=/workspaces/asmr-filename-gen
+            - UV_LINK_MODE=copy
+            - VIRTUAL_ENV=/home/devuser/.venv
+            - LIBRARY_PATH=/mnt/audio
+            # Default `host.docker.internal:11434` reaches Ollama running on
+            # the developer's workstation via Docker Desktop's host loopback
+            # (Win/Mac built-in; Linux uses `extra_hosts` below). Override in
+            # `.env` if Ollama is on a different LAN host.
+            - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+            - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5vl:7b}
+            - DRIVE_SCRAPE_CONCURRENCY=${DRIVE_SCRAPE_CONCURRENCY:-1}
+            - DRIVE_BROWSER_IDLE_TIMEOUT_S=${DRIVE_BROWSER_IDLE_TIMEOUT_S:-300}
+            - DRIVE_DOWNLOAD_TIMEOUT_S=${DRIVE_DOWNLOAD_TIMEOUT_S:-14400}
+        ports:
+            - "8000:8000"   # FastAPI / Uvicorn
+            - "5173:5173"   # Vite dev server
+        # Linux Docker needs explicit mapping so `host.docker.internal`
+        # resolves inside the container; Docker Desktop on Win/Mac handles
+        # this automatically but the line is harmless there.
+        extra_hosts:
+            - "host.docker.internal:host-gateway"

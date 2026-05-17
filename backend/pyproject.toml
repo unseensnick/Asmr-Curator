@@ -10,3 +10,19 @@ dependencies = [
     "python-multipart==0.0.12",
     "playwright==1.59.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[tool.pytest.ini_options]
+# `testpaths` is relative to the rootdir, which pytest sets to the dir
+# containing the configfile when `-c backend/pyproject.toml` is passed.
+# That means rootdir == `backend/`, and this entry must be `tests`
+# (not `backend/tests`) — otherwise pytest would try to collect from
+# `backend/backend/tests` and silently find nothing.
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+asyncio_mode = "auto"

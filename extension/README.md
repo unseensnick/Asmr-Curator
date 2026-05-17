@@ -72,7 +72,7 @@ The common workflow:
 3. Press play.
 4. The extension captures the playback URL the moment its size reaches
    ≥ 400 KB, strips `ump` and `range`, and — by default — immediately POSTs
-   it to the backend. The file lands at `AUDIO_ROOT/<post_id>/<filename>`
+   it to the backend. The file lands at `LIBRARY_PATH/<post_id>/<filename>`
    with no popup interaction. Toolbar badge briefly shows the pending
    capture count, then clears once the download completes.
 
@@ -145,9 +145,9 @@ endpoints it uses:
 
 - `PUT  /api/settings/patreon-cookie` — sync cookie (raw `text/plain` body).
 - `POST /api/patreon/ingest-external-audio` — `{ post_id, source_url }`,
-  downloads the URL into `AUDIO_ROOT/<post_id>/`.
+  downloads the URL into `LIBRARY_PATH/<post_id>/`.
 - `GET  /api/files` — used to list existing `post_id` directories under
-  `AUDIO_ROOT` when no parent post was detected.
+  `LIBRARY_PATH` when no parent post was detected.
 
 The backend currently has no CORS middleware, so the extension's
 `chrome-extension://…` / `moz-extension://…` origin is accepted by default.
