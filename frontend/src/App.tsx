@@ -106,13 +106,14 @@ export default function App() {
             />
 
             {/* Page grid: 1-col mobile → 2-col lg → 3-col dashboard at xl+.
-                Source order is Source → Output → Tags → Library so the lg
-                tier puts Source and Output side-by-side without overrides.
-                At xl the order utilities reshuffle Tags into the middle
-                slot. items-start lets the Source column grow vertically
-                (results list) without dragging the other columns taller. */}
+                Visual flow is Source → Edit → Output → Library at every
+                breakpoint. Base-level `order-*` utilities apply at every
+                size so the empty Output column never lands between Source
+                and Edit on mobile (1-col stack) or at lg (2-col).
+                items-start lets the Source column grow vertically (results
+                list) without dragging the other columns taller. */}
             <section className="mt-8 lg:mt-10 grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-[3fr_4fr_3fr] gap-6 lg:gap-10 items-start">
-                <div className="flex flex-col min-h-0">
+                <div className="order-1 flex flex-col min-h-0">
                     <Tabs
                         value={sourceMode}
                         onValueChange={(v) => setSourceMode(v as SourceMode)}
@@ -162,7 +163,7 @@ export default function App() {
                     </Tabs>
                 </div>
 
-                <div className="xl:order-3 flex flex-col">
+                <div className="order-3 lg:col-span-2 xl:col-span-1 flex flex-col">
                     <OutputPanel
                         outputDash={outputDash}
                         outputPipe={outputPipe}
@@ -171,7 +172,7 @@ export default function App() {
                     />
                 </div>
 
-                <div className="lg:col-span-2 xl:col-span-1 xl:order-2 flex flex-col">
+                <div className="order-2 flex flex-col">
                     <TagsEditor
                         title={title}
                         onTitleChange={setTitle}
@@ -185,7 +186,7 @@ export default function App() {
                     />
                 </div>
 
-                <div className="lg:col-span-2 xl:col-span-3 xl:order-4">
+                <div className="order-4 lg:col-span-2 xl:col-span-3">
                     <FileBrowser
                         outputDash={outputDash}
                         outputPipe={outputPipe}

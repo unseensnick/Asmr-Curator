@@ -188,7 +188,7 @@ export default function LibraryConfigModal({
                 className="w-full sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl overflow-hidden"
                 showCloseButton={false}
             >
-                <SheetTitle className="sr-only">Library settings</SheetTitle>
+                <SheetTitle className="sr-only">Dictionary</SheetTitle>
                 <SheetDescription className="sr-only">
                     Manage canonical tags, suppressed terms, and test
                     extraction against the dictionary.
@@ -197,7 +197,7 @@ export default function LibraryConfigModal({
                 {/* Header */}
                 <div className="flex items-center gap-3 px-5 py-4 border-b border-border shrink-0">
                     <span className="text-sm font-medium tracking-wide text-foreground">
-                        Library settings
+                        Dictionary
                     </span>
                     <span className="font-mono text-xs tabular-nums text-muted-foreground">
                         {dict.vocabulary.length.toLocaleString()} tag
@@ -212,7 +212,7 @@ export default function LibraryConfigModal({
                         type="button"
                         onClick={onClose}
                         className="ml-auto text-muted-foreground hover:text-foreground transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                        aria-label="Close library settings"
+                        aria-label="Close dictionary"
                         title="Close"
                     >
                         <X size={18} aria-hidden />
