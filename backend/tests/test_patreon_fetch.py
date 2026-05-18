@@ -354,16 +354,18 @@ class TestFindCachedPost:
 
         assert _find_cached_post(output_dir, "99999") is None
 
-    def test_finds_audio_in_flattened_library_path(self, tmp_path: Path):
+    def test_finds_audio_in_flattened_download_path(self, tmp_path: Path):
         # _flatten_audio moves audio from patreon-dl's tree into
-        # <LIBRARY_PATH>/<post_id>/ on a previous fetch. The cached-post
+        # <DOWNLOAD_PATH>/<post_id>/ on a previous fetch. The cached-post
         # lookup must find audio there, not just under the post_info dir.
+        # tmp_path plays the DOWNLOAD_PATH role here (the production caller
+        # passes DOWNLOAD_PATH / ".patreon-dl" as `output_dir`).
         output_dir = tmp_path / ".patreon-dl"
         post_dir = output_dir / "Patreon" / "creator" / "posts" / "12345"
         _write_sidecar(post_dir, "12345")
 
-        # Simulate flattened audio at <LIBRARY_PATH>/<post_id>/song.mp3
-        # (output_dir.parent IS the LIBRARY_PATH).
+        # Simulate flattened audio at <DOWNLOAD_PATH>/<post_id>/song.mp3
+        # (output_dir.parent IS the DOWNLOAD_PATH).
         flat_dir = tmp_path / "12345"
         flat_dir.mkdir()
         audio_file = flat_dir / "song.mp3"

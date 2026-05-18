@@ -55,6 +55,7 @@ RUN mkdir -p /data
 ENV DB_PATH=/data/dictionary.db
 ENV PYTHONPATH=/app
 ENV LIBRARY_PATH=/mnt/audio
+ENV DOWNLOAD_PATH=/mnt/downloads
 
 EXPOSE 8000
 

@@ -7,7 +7,7 @@
  *      one is observed and meets the size threshold, clean the URL (drop
  *      `ump` + `range`), resolve it back to its source Patreon post, and —
  *      if auto-ingest is on — immediately POST it to the backend so the
- *      file lands in LIBRARY_PATH/<post_id>/ without any popup interaction.
+ *      file lands in DOWNLOAD_PATH/<post_id>/ without any popup interaction.
  *   2. Serve runtime messages from the popup / content script:
  *        - SYNC_COOKIE       → push Patreon cookies to the backend
  *        - RECORD_CLICK      → log a Patreon → external-host <a href> click
@@ -15,7 +15,7 @@
  *        - INGEST_CAPTURE    → POST a chosen capture to the backend ingest endpoint
  *        - CLEAR_CAPTURES    → forget all candidates
  *        - GET_BACKEND_URL   → echo the configured backend URL
- *        - LIST_POSTS        → list post_id directories under LIBRARY_PATH (for the popup dropdown)
+ *        - LIST_POSTS        → list post_id directories under DOWNLOAD_PATH (for the popup dropdown)
  */
 
 // Shared helpers — loaded into the global scope of this background context.
@@ -341,11 +341,13 @@ async function ingestCapture({ cleanedUrl, postId, filename }) {
 async function listRecentPosts() {
   const backendUrl = await getBackendUrl();
   try {
-    const response = await fetch(`${backendUrl}/api/files`);
+    // post_id directories are under DOWNLOAD_PATH (ingest staging),
+    // not LIBRARY_PATH (the user's curated archive).
+    const response = await fetch(`${backendUrl}/api/files?root=downloads`);
     if (!response.ok) return { ok: false, error: `Backend returned ${response.status}` };
     const data = await response.json();
-    // /api/files lists LIBRARY_PATH — directories at this level correspond to
-    // patreon post_ids. Filter to numeric-looking names.
+    // Directories at the DOWNLOAD_PATH root correspond to patreon post_ids.
+    // Filter to numeric-looking names.
     const posts = (data.entries || [])
       .filter((e) => e.type === "dir" && /^\d+$/.test(e.name))
       .map((e) => ({ post_id: e.name }));

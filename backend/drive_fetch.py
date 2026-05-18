@@ -106,6 +106,17 @@ BROWSER_IDLE_TIMEOUT_S = float(os.environ.get("DRIVE_BROWSER_IDLE_TIMEOUT_S", "3
 # (seconds, float).
 DOWNLOAD_TIMEOUT_S = float(os.environ.get("DRIVE_DOWNLOAD_TIMEOUT_S", "14400"))
 
+# Drive's CDN serves the same playback URL non-deterministically: most
+# attempts return the full audio, but a fraction return only the m4a init
+# segment (~1 KB) — likely the player's service-worker cache or a CDN edge
+# probe response. Retrying the in-page fetch with the same cleaned URL
+# almost always works on the next try, so when we see a short body we
+# loop a few times before giving up. Each attempt re-issues `fetch(url)`
+# inside the same Playwright page (cookies, TLS fingerprint preserved);
+# we don't re-navigate or re-capture the URL.
+SHORT_BODY_THRESHOLD_BYTES = 50_000
+MAX_DOWNLOAD_ATTEMPTS = int(os.environ.get("DRIVE_DOWNLOAD_RETRIES", "4"))
+
 
 # User-agent string handed to the headless Chromium context. Drive sometimes
 # serves a degraded experience to unknown UAs; matching a recent stable
@@ -433,7 +444,7 @@ def _is_google_request(url: str) -> bool:
 
 async def _dump_diagnostics(page, file_id: str, observed: list[str]) -> Optional[Path]:
     """Save a viewport screenshot + final URL + observed Google-host requests
-    (URLs with auth tokens redacted) to `<LIBRARY_PATH>/.drive-debug/<file_id>-<ts>/`.
+    (URLs with auth tokens redacted) to `<DOWNLOAD_PATH>/.drive-debug/<file_id>-<ts>/`.
     Returns the directory path, or None if writing failed.
 
     Called when the playback-URL listener times out. Screenshot is the
@@ -454,8 +465,8 @@ async def _dump_diagnostics(page, file_id: str, observed: list[str]) -> Optional
       • A README in the output dir warns the user that the screenshot may
         still show signed-in account info in the page chrome.
     """
-    library_path = Path(os.environ.get("LIBRARY_PATH", ".")).resolve()
-    debug_root = library_path / ".drive-debug"
+    download_path = Path(os.environ.get("DOWNLOAD_PATH", ".")).resolve()
+    debug_root = download_path / ".drive-debug"
     out_dir = debug_root / f"{file_id}-{int(time.time())}"
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -896,119 +907,172 @@ async def fetch_drive_audio(
 
         await page.expose_function("__driveDownload", _on_drive_msg)
 
-        await _emit(on_progress, {
-            "state": "downloading",
-            "bytes": 0,
-            "total": None,
-            "elapsed_s": _elapsed(started),
-        })
+        # Retry loop: Drive sometimes serves the m4a init segment instead
+        # of the full body for a given playback URL, but the next attempt
+        # at the same cleaned URL almost always works. We loop up to
+        # MAX_DOWNLOAD_ATTEMPTS, treating any sub-threshold body as a
+        # retryable failure. State holders are mutated in-place so the
+        # _on_drive_msg closure stays valid across attempts.
+        target: Optional[Path] = None
+        part: Optional[Path] = None
+        bytes_written = 0
+        last_short_bytes: Optional[int] = None
+        for attempt in range(1, MAX_DOWNLOAD_ATTEMPTS + 1):
+            # Reset per-attempt state in place (don't rebind names —
+            # _on_drive_msg captures these via closure).
+            bytes_holder["n"] = 0
+            total_holder["n"] = 0
+            download_state.clear()
+            download_state.update({
+                "error": None,
+                "f": None,
+                "target": None,
+                "part": None,
+                "headers_seen": False,
+            })
+            download_done_evt.clear()
 
-        download_started = time.monotonic()
-        heartbeat_task = asyncio.create_task(
-            _download_heartbeat(
-                on_progress, started, download_started, total_holder, bytes_holder
-            )
-        )
+            await _emit(on_progress, {
+                "state": "downloading",
+                "bytes": 0,
+                "total": None,
+                "elapsed_s": _elapsed(started),
+                **(
+                    {"retry_attempt": attempt, "max_attempts": MAX_DOWNLOAD_ATTEMPTS}
+                    if attempt > 1 else {}
+                ),
+            })
 
-        # JS-side streaming reader. Note `String.fromCharCode` is called in
-        # a loop (not via spread) because fetch chunks can occasionally
-        # exceed the function-arg cap on some Chromium versions; the loop
-        # is robust across chunk sizes.
-        fetch_task = asyncio.create_task(page.evaluate(
-            """
-            async (url) => {
-                try {
-                    const res = await fetch(url, { credentials: 'include' });
-                    const headersObj = {};
-                    res.headers.forEach((v, k) => { headersObj[k] = v; });
-                    await window.__driveDownload({
-                        kind: 'headers',
-                        status: res.status,
-                        ok: res.ok,
-                        headers: headersObj,
-                        contentLength: +(res.headers.get('content-length') || 0),
-                    });
-                    if (!res.ok) return;
-                    const reader = res.body.getReader();
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) {
-                            await window.__driveDownload({ kind: 'done' });
-                            return;
-                        }
-                        let bin = '';
-                        for (let i = 0; i < value.length; i++) {
-                            bin += String.fromCharCode(value[i]);
-                        }
-                        await window.__driveDownload({ kind: 'chunk', data: btoa(bin) });
-                    }
-                } catch (e) {
-                    await window.__driveDownload({
-                        kind: 'error',
-                        message: (e && e.message) ? e.message : String(e),
-                    });
-                }
-            }
-            """,
-            cleaned_url,
-        ))
-
-        try:
-            try:
-                await asyncio.wait_for(
-                    download_done_evt.wait(), timeout=DOWNLOAD_TIMEOUT_S
+            download_started = time.monotonic()
+            heartbeat_task = asyncio.create_task(
+                _download_heartbeat(
+                    on_progress, started, download_started, total_holder, bytes_holder
                 )
-            except asyncio.TimeoutError as e:
-                raise DriveFetchError(
-                    f"Drive download timed out after {DOWNLOAD_TIMEOUT_S:.0f}s.",
-                    code="timeout",
-                ) from e
-        finally:
-            heartbeat_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await heartbeat_task
-            # Close the .part file handle even on error/timeout.
-            f = download_state.get("f")
-            if f is not None and not f.closed:
-                with contextlib.suppress(Exception):
-                    f.close()
-            # Drain the JS task. If it's still running (timeout case), the
-            # page-close in the outer finally will cancel its in-flight
-            # fetch via AbortError; we just need to not leak the awaitable.
-            if not fetch_task.done():
-                fetch_task.cancel()
+            )
+
+            # JS-side streaming reader. Note `String.fromCharCode` is
+            # called in a loop (not via spread) because fetch chunks can
+            # occasionally exceed the function-arg cap on some Chromium
+            # versions; the loop is robust across chunk sizes. `cache:
+            # 'no-store'` and a random query-string nonce defeat the
+            # player's service-worker / HTTP cache so each retry actually
+            # hits the network.
+            fetch_task = asyncio.create_task(page.evaluate(
+                """
+                async (url) => {
+                    try {
+                        const res = await fetch(url, {
+                            credentials: 'include',
+                            cache: 'no-store',
+                        });
+                        const headersObj = {};
+                        res.headers.forEach((v, k) => { headersObj[k] = v; });
+                        await window.__driveDownload({
+                            kind: 'headers',
+                            status: res.status,
+                            ok: res.ok,
+                            headers: headersObj,
+                            contentLength: +(res.headers.get('content-length') || 0),
+                        });
+                        if (!res.ok) return;
+                        const reader = res.body.getReader();
+                        while (true) {
+                            const { done, value } = await reader.read();
+                            if (done) {
+                                await window.__driveDownload({ kind: 'done' });
+                                return;
+                            }
+                            let bin = '';
+                            for (let i = 0; i < value.length; i++) {
+                                bin += String.fromCharCode(value[i]);
+                            }
+                            await window.__driveDownload({ kind: 'chunk', data: btoa(bin) });
+                        }
+                    } catch (e) {
+                        await window.__driveDownload({
+                            kind: 'error',
+                            message: (e && e.message) ? e.message : String(e),
+                        });
+                    }
+                }
+                """,
+                cleaned_url,
+            ))
+
+            try:
+                try:
+                    await asyncio.wait_for(
+                        download_done_evt.wait(), timeout=DOWNLOAD_TIMEOUT_S
+                    )
+                except asyncio.TimeoutError as e:
+                    raise DriveFetchError(
+                        f"Drive download timed out after {DOWNLOAD_TIMEOUT_S:.0f}s.",
+                        code="timeout",
+                    ) from e
+            finally:
+                heartbeat_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await fetch_task
+                    await heartbeat_task
+                # Close the .part file handle even on error/timeout.
+                f = download_state.get("f")
+                if f is not None and not f.closed:
+                    with contextlib.suppress(Exception):
+                        f.close()
+                # Drain the JS task. If it's still running (timeout case),
+                # the page-close in the outer finally will cancel its
+                # in-flight fetch via AbortError; we just need to not leak
+                # the awaitable.
+                if not fetch_task.done():
+                    fetch_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        await fetch_task
 
-        target = download_state.get("target")
-        part = download_state.get("part")
-        bytes_written = bytes_holder["n"]
+            target = download_state.get("target")
+            part = download_state.get("part")
+            bytes_written = bytes_holder["n"]
 
-        if download_state["error"]:
-            if part is not None:
-                part.unlink(missing_ok=True)
-            raise DriveFetchError(
-                f"Drive fetch failed: {download_state['error']}",
-                code="fetch_failed",
-            )
-        if part is None or target is None:
-            raise DriveFetchError(
-                "Drive fetch reported done but no file was created — "
-                "headers callback never fired.",
-                code="fetch_failed",
-            )
+            if download_state["error"]:
+                if part is not None:
+                    part.unlink(missing_ok=True)
+                raise DriveFetchError(
+                    f"Drive fetch failed: {download_state['error']}",
+                    code="fetch_failed",
+                )
+            if part is None or target is None:
+                raise DriveFetchError(
+                    "Drive fetch reported done but no file was created — "
+                    "headers callback never fired.",
+                    code="fetch_failed",
+                )
 
-        # Sanity check: probe responses or empty bodies should never
-        # masquerade as a successful download. 50 KB is well below any
-        # real ASMR audio and well above what a probe response would land
-        # at. Mirrors the previous body-based check.
-        if bytes_written < 50_000:
+            # Success: full body landed. Break out and rename .part →
+            # target below.
+            if bytes_written >= SHORT_BODY_THRESHOLD_BYTES:
+                break
+
+            # Short body. If we have attempts left, log + unlink + retry.
+            # Otherwise fall through to the post-loop error path.
+            last_short_bytes = bytes_written
             part.unlink(missing_ok=True)
+            target = None
+            part = None
+            if attempt < MAX_DOWNLOAD_ATTEMPTS:
+                log.info(
+                    "drive-fetch: attempt %d/%d returned %d bytes (likely init segment); retrying",
+                    attempt, MAX_DOWNLOAD_ATTEMPTS, last_short_bytes,
+                )
+                # Tiny pause so we don't hammer Drive's CDN in a tight loop.
+                await asyncio.sleep(0.5)
+
+        # If the loop exited without a full body, raise with diagnostics.
+        if target is None or part is None or bytes_written < SHORT_BODY_THRESHOLD_BYTES:
             debug_dir = await _dump_diagnostics(page, file_id, observed_google)
             raise DriveFetchError(
-                f"Downloaded only {bytes_written} bytes — almost certainly "
-                "not the real audio (probe response or Drive returned an "
-                f"empty body). Diagnostics: {debug_dir if debug_dir else '(could not write)'}",
+                f"Downloaded only {last_short_bytes or bytes_written} bytes "
+                f"after {MAX_DOWNLOAD_ATTEMPTS} attempts — Drive served the "
+                "init segment instead of the full audio every time. This "
+                "usually clears on its own: wait a minute or two and click "
+                f"Download again. Diagnostics: {debug_dir if debug_dir else '(could not write)'}",
                 code="fetch_failed",
                 debug_dir=debug_dir,
             )

@@ -46,6 +46,13 @@ export default function App() {
     const [extractedArtist, setExtractedArtist] = useState("");
     const [sourceMode, setSourceMode] = useState<SourceMode>("patreon");
     const [powerMode, setPowerMode] = useState<boolean>(() => loadPowerMode());
+    // After a Patreon Apply the user can click "Rename and move <file>" to
+    // jump straight to the FileBrowser Downloads tab with the downloaded
+    // file pre-selected. Lifted state because PatreonPanel and FileBrowser
+    // live in different columns and need to coordinate.
+    const [bridgeRequest, setBridgeRequest] = useState<
+        { path: string; filename: string } | null
+    >(null);
 
     // Persist power mode so the toggle survives reloads.
     useEffect(() => {
@@ -146,6 +153,9 @@ export default function App() {
                                 onExtracted={handleExtracted}
                                 powerMode={powerMode}
                                 onOpenCookies={() => setCookiesOpen(true)}
+                                onBridgeToDownloads={(path, filename) =>
+                                    setBridgeRequest({ path, filename })
+                                }
                             />
                         </TabsContent>
 
@@ -192,6 +202,8 @@ export default function App() {
                         outputPipe={outputPipe}
                         extractedArtist={extractedArtist}
                         defaultOpen={false}
+                        bridgeRequest={bridgeRequest}
+                        onBridgeConsumed={() => setBridgeRequest(null)}
                     />
                 </div>
             </section>

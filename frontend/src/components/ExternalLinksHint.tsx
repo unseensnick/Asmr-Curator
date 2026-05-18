@@ -82,12 +82,19 @@ function stageLabel(event: IngestDriveLinkEvent): string {
         case "captured":
             return `Found the audio (${event.elapsed_s.toFixed(1)}s)`;
         case "downloading": {
+            // Drive sometimes serves the m4a init segment instead of the
+            // full body; the backend retries the same URL automatically.
+            // When retry_attempt > 1, prefix the stage so the user knows
+            // it isn't stuck.
+            const retryPrefix = event.retry_attempt && event.retry_attempt > 1
+                ? `Retry ${event.retry_attempt}/${event.max_attempts ?? "?"}: `
+                : "";
             if (event.bytes != null && event.total != null && event.total > 0) {
                 const pct = ((event.bytes / event.total) * 100).toFixed(0);
-                return `Downloading ${formatMB(event.bytes)} / ${formatMB(event.total)} (${pct}%)`;
+                return `${retryPrefix}Downloading ${formatMB(event.bytes)} / ${formatMB(event.total)} (${pct}%)`;
             }
             const elapsed = event.download_elapsed_s ?? event.elapsed_s;
-            return `Downloading… ${elapsed.toFixed(1)}s`;
+            return `${retryPrefix}Downloading… ${elapsed.toFixed(1)}s`;
         }
         case "done":
             return `Saved to ${event.audio_path}`;
