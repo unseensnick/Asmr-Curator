@@ -1,6 +1,5 @@
 import {
     AlertTriangle,
-    ArrowUpRight,
     Check,
     ChevronDown,
     ChevronRight,
@@ -389,10 +388,6 @@ interface MoveResponse {
     new_name: string;
 }
 
-interface SystemInfoResponse {
-    os_explorer: boolean;
-}
-
 function MoveToLibrarySection({
     selected,
     fromRoot,
@@ -416,24 +411,6 @@ function MoveToLibrarySection({
     const [newFolderOpen, setNewFolderOpen] = useState(false);
     const [newFolderName, setNewFolderName] = useState("");
     const [newFolderBusy, setNewFolderBusy] = useState(false);
-
-    // OS-explorer capability gate. Fetched once on mount; the button hides
-    // when running in Docker / devcontainer where the host's file manager
-    // isn't reachable.
-    const [canOpenOs, setCanOpenOs] = useState(false);
-    useEffect(() => {
-        let cancelled = false;
-        apiGet<SystemInfoResponse>(API.systemInfo)
-            .then((data) => {
-                if (!cancelled) setCanOpenOs(!!data.os_explorer);
-            })
-            .catch(() => {
-                /* non-fatal — button stays hidden */
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, []);
 
     async function loadSubdir(s: string) {
         setLoading(true);
@@ -524,17 +501,6 @@ function MoveToLibrarySection({
         }
     }
 
-    async function handleOpenInOs() {
-        try {
-            await apiPost(API.systemExplore, {
-                root: "library",
-                subdir,
-            });
-        } catch (e) {
-            onError("Couldn't open file explorer: " + getErrorMessage(e));
-        }
-    }
-
     const breadcrumbs = subdir ? subdir.split("/") : [];
     const destinationLabel = subdir ? `Library / ${subdir}` : "Library";
 
@@ -598,18 +564,6 @@ function MoveToLibrarySection({
                                 <FolderPlus size={12} aria-hidden />
                                 New folder
                             </Button>
-                            {canOpenOs && (
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={handleOpenInOs}
-                                    className="gap-1.5"
-                                    title="Open this folder in the host file manager"
-                                >
-                                    <ArrowUpRight size={12} aria-hidden />
-                                    Open in OS
-                                </Button>
-                            )}
                         </span>
                     </div>
 
