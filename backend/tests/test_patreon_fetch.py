@@ -12,9 +12,11 @@ from backend.patreon_fetch import (
     ExternalLink,
     _anchor_text,
     _extract_external_links,
+    _find_cached_creator_posts,
     _find_cached_post,
     _is_allowlisted_host,
     _post_id_from_url,
+    _vanity_from_url,
     _walk_prosemirror_nodes,
 )
 
@@ -388,3 +390,187 @@ class TestFindCachedPost:
 
         # No matching sidecar → None, not an exception.
         assert _find_cached_post(output_dir, "12345") is None
+
+
+# ── _vanity_from_url ───────────────────────────────────────────────────────
+
+
+class TestVanityFromUrl:
+    def test_extracts_vanity_from_c_path(self):
+        url = "https://www.patreon.com/c/solargirlasmr/posts?vanity=solargirlasmr"
+        assert _vanity_from_url(url) == "solargirlasmr"
+
+    def test_extracts_vanity_from_legacy_short_path(self):
+        assert _vanity_from_url("https://www.patreon.com/solargirlasmr") == "solargirlasmr"
+
+    def test_returns_none_for_single_post_url(self):
+        url = "https://www.patreon.com/posts/exclusive-love-155300507"
+        assert _vanity_from_url(url) is None
+
+    def test_returns_none_for_reserved_paths(self):
+        assert _vanity_from_url("https://www.patreon.com/home") is None
+        assert _vanity_from_url("https://www.patreon.com/search") is None
+
+    def test_returns_none_for_empty_or_non_string(self):
+        assert _vanity_from_url("") is None
+        assert _vanity_from_url(None) is None  # type: ignore[arg-type]
+
+
+# ── _find_cached_creator_posts ─────────────────────────────────────────────
+
+
+def _write_creator_sidecar(
+    post_dir: Path,
+    post_id: str,
+    *,
+    title: str = "Test",
+    vanity: str = "solargirlasmr",
+    published_at: str = "",
+    campaign_id: str = "c1",
+):
+    """Helper: create a sidecar that carries campaign vanity + published_at,
+    in addition to the user/artist relationship `_write_sidecar` covers."""
+    info_dir = post_dir / "post_info"
+    info_dir.mkdir(parents=True, exist_ok=True)
+    sidecar = {
+        "data": {
+            "id": post_id,
+            "attributes": {"title": title, "content": "", "published_at": published_at},
+            "relationships": {
+                "user": {"data": {"id": "u1"}},
+                "campaign": {"data": {"id": campaign_id}},
+            },
+        },
+        "included": [
+            {"type": "user", "id": "u1", "attributes": {"full_name": "Solar Girl"}},
+            {"type": "campaign", "id": campaign_id, "attributes": {"vanity": vanity}},
+        ],
+    }
+    (info_dir / "post-api.json").write_text(json.dumps(sidecar), encoding="utf-8")
+
+
+class TestFindCachedCreatorPosts:
+    def test_returns_empty_when_nothing_cached(self, tmp_path: Path):
+        assert _find_cached_creator_posts(tmp_path, "solargirlasmr", None, None) == []
+
+    def test_returns_all_posts_for_creator(self, tmp_path: Path):
+        output_dir = tmp_path / ".patreon-dl"
+        for pid in ("100", "200", "300"):
+            _write_creator_sidecar(
+                output_dir / "Patreon" / "creator" / "posts" / pid,
+                pid,
+                published_at=f"2025-11-{int(pid) // 100:02d}T00:00:00.000+00:00",
+            )
+
+        found = _find_cached_creator_posts(output_dir, "solargirlasmr", None, None)
+        assert {p.post_id for p in found} == {"100", "200", "300"}
+
+    def test_filters_out_other_creators(self, tmp_path: Path):
+        output_dir = tmp_path / ".patreon-dl"
+        _write_creator_sidecar(
+            output_dir / "Patreon" / "solar" / "posts" / "100",
+            "100",
+            vanity="solargirlasmr",
+            campaign_id="c-solar",
+        )
+        _write_creator_sidecar(
+            output_dir / "Patreon" / "other" / "posts" / "200",
+            "200",
+            vanity="someoneelse",
+            campaign_id="c-other",
+        )
+
+        found = _find_cached_creator_posts(output_dir, "solargirlasmr", None, None)
+        assert [p.post_id for p in found] == ["100"]
+
+    def test_published_after_filter_excludes_earlier_posts(self, tmp_path: Path):
+        output_dir = tmp_path / ".patreon-dl"
+        _write_creator_sidecar(
+            output_dir / "Patreon" / "creator" / "posts" / "100",
+            "100",
+            published_at="2025-09-01T00:00:00.000+00:00",
+        )
+        _write_creator_sidecar(
+            output_dir / "Patreon" / "creator" / "posts" / "200",
+            "200",
+            published_at="2025-11-01T00:00:00.000+00:00",
+        )
+
+        found = _find_cached_creator_posts(
+            output_dir, "solargirlasmr", "2025-10-01", None,
+        )
+        assert [p.post_id for p in found] == ["200"]
+
+    def test_published_before_filter_excludes_later_posts(self, tmp_path: Path):
+        output_dir = tmp_path / ".patreon-dl"
+        _write_creator_sidecar(
+            output_dir / "Patreon" / "creator" / "posts" / "100",
+            "100",
+            published_at="2025-09-01T00:00:00.000+00:00",
+        )
+        _write_creator_sidecar(
+            output_dir / "Patreon" / "creator" / "posts" / "200",
+            "200",
+            published_at="2025-11-01T00:00:00.000+00:00",
+        )
+
+        found = _find_cached_creator_posts(
+            output_dir, "solargirlasmr", None, "2025-10-01",
+        )
+        assert [p.post_id for p in found] == ["100"]
+
+    def test_results_ordered_newest_first(self, tmp_path: Path):
+        output_dir = tmp_path / ".patreon-dl"
+        _write_creator_sidecar(
+            output_dir / "Patreon" / "creator" / "posts" / "100",
+            "100",
+            published_at="2025-09-01T00:00:00.000+00:00",
+        )
+        _write_creator_sidecar(
+            output_dir / "Patreon" / "creator" / "posts" / "200",
+            "200",
+            published_at="2025-11-01T00:00:00.000+00:00",
+        )
+        _write_creator_sidecar(
+            output_dir / "Patreon" / "creator" / "posts" / "300",
+            "300",
+            published_at="2025-10-01T00:00:00.000+00:00",
+        )
+
+        found = _find_cached_creator_posts(output_dir, "solargirlasmr", None, None)
+        assert [p.post_id for p in found] == ["200", "300", "100"]
+
+    def test_skips_corrupt_sidecar(self, tmp_path: Path):
+        output_dir = tmp_path / ".patreon-dl"
+        _write_creator_sidecar(
+            output_dir / "Patreon" / "creator" / "posts" / "100", "100",
+        )
+        bad_dir = output_dir / "Patreon" / "creator" / "posts" / "bad" / "post_info"
+        bad_dir.mkdir(parents=True)
+        (bad_dir / "post-api.json").write_text("{not json", encoding="utf-8")
+
+        found = _find_cached_creator_posts(output_dir, "solargirlasmr", None, None)
+        assert [p.post_id for p in found] == ["100"]
+
+    def test_slugified_artist_fallback_when_campaign_missing(self, tmp_path: Path):
+        # Some patreon-dl payloads omit the campaign object from `included`
+        # entirely. The fallback slugifies the artist's full_name
+        # ("Solar Girl ASMR" → "solargirlasmr") and matches that against
+        # the URL vanity.
+        output_dir = tmp_path / ".patreon-dl"
+        info_dir = output_dir / "Patreon" / "solar" / "posts" / "100" / "post_info"
+        info_dir.mkdir(parents=True)
+        sidecar_no_campaign = {
+            "data": {
+                "id": "100",
+                "attributes": {"title": "Cached", "published_at": ""},
+                "relationships": {"user": {"data": {"id": "u1"}}},
+            },
+            "included": [
+                {"type": "user", "id": "u1", "attributes": {"full_name": "Solar Girl ASMR"}},
+            ],
+        }
+        (info_dir / "post-api.json").write_text(json.dumps(sidecar_no_campaign), encoding="utf-8")
+
+        found = _find_cached_creator_posts(output_dir, "solargirlasmr", None, None)
+        assert [p.post_id for p in found] == ["100"]

@@ -95,7 +95,7 @@ export default function Header({
         <Button
           variant="outline"
           onClick={onOpenLibrarySettings}
-          title="Open library settings"
+          title="Open dictionary"
           className="gap-2"
         >
           <BookOpen size={14} aria-hidden />

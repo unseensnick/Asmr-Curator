@@ -66,6 +66,22 @@ _POST_URL_ID_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Creator URL → vanity slug. Matches both styles Patreon currently serves:
+#   patreon.com/c/<vanity>[/posts][?vanity=…]   (newer canonical)
+#   patreon.com/<vanity>[/posts]                (older shorthand)
+# The fast-path in `fetch()` reads the vanity to filter cached sidecars
+# down to a single creator's posts. Falls back to patreon-dl when no
+# vanity is parseable.
+_VANITY_C_RE = re.compile(r"patreon\.com/c/([^/?#]+)", re.IGNORECASE)
+_VANITY_OLD_RE = re.compile(r"patreon\.com/([^/?#]+)", re.IGNORECASE)
+# Reserved path segments that can appear at patreon.com/<segment> but
+# aren't creator vanities — skipping them prevents false positives like
+# treating `patreon.com/home` as a creator URL.
+_RESERVED_VANITY_PATHS = frozenset({
+    "c", "posts", "home", "search", "settings", "join", "login",
+    "messages", "api", "policy", "about", "help", "creators", "auth",
+})
+
 # Patterns for pulling URLs out of a post's `attributes.content` HTML.
 # patreon-dl preserves Patreon's markup verbatim there. Creators store links
 # in several shapes; we scan all of them and let EXTERNAL_HOST_ALLOWLIST
@@ -192,14 +208,21 @@ def fetch(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Metadata-only fast path for a previously-fetched single-post URL.
-    # Skip the patreon-dl subprocess entirely — with `use.status.cache`
-    # (default 1) it would just hit its cache and exit without writing
-    # anything new, so the result would be identical to what's already on
-    # disk. Avoiding the subprocess removes ~all the latency (network
-    # round-trip + Node startup + db.sqlite touch) for what is otherwise a
-    # pure filesystem read. Creator URLs and first-time fetches fall
-    # through to the normal flow.
+    # Metadata-only fast path: skip the patreon-dl subprocess entirely
+    # when the requested info is already on disk. With `use.status.cache`
+    # (default 1) patreon-dl would just hit its cache and exit without
+    # writing anything new, so the result would be identical to what's
+    # already cached. Avoiding the subprocess removes ~all the latency
+    # (network round-trip + Node startup + db.sqlite touch) for what is
+    # otherwise a pure filesystem read.
+    #
+    # Two flavors:
+    #   • Single post URL  → look up one cached sidecar by post id.
+    #   • Creator URL      → walk every cached sidecar whose campaign
+    #     vanity matches the URL, apply the same date filter
+    #     patreon-dl would apply server-side, return all matches.
+    #
+    # First-time fetches (no sidecars) fall through to the normal flow.
     if metadata_only:
         cached_post_id = _post_id_from_url(url)
         if cached_post_id:
@@ -210,6 +233,21 @@ def fetch(
                     posts=[cached],
                     log_tail="",
                 )
+        else:
+            vanity = _vanity_from_url(url)
+            if vanity:
+                cached_posts = _find_cached_creator_posts(
+                    output_dir,
+                    vanity,
+                    published_after=published_after,
+                    published_before=published_before,
+                )
+                if cached_posts:
+                    return FetchResult(
+                        output_dir=str(output_dir),
+                        posts=cached_posts,
+                        log_tail="",
+                    )
 
     opts = PatreonFetchOptions(
         cookie=cookie,
@@ -424,24 +462,104 @@ def _post_id_from_url(url: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
-def _find_cached_post(output_dir: Path, post_id: str) -> Optional[FetchedPost]:
-    """Find a previously-downloaded post's metadata without the mtime filter
-    `_collect_posts` uses.
+def _vanity_from_url(url: str) -> Optional[str]:
+    """Return the creator vanity slug if `url` is a Patreon creator URL.
 
-    When the user re-fetches a single-post URL in metadata-only mode,
-    patreon-dl's `stop.on = previouslyDownloaded` + status cache make it
-    exit without re-writing `post-api.json`. The mtime-filtered
-    `_collect_posts` then returns empty and the user would see a
-    misleading "no new posts" error even though the metadata sits on
-    disk from the original fetch. This helper surfaces that cached
-    sidecar so the user doesn't have to nuke `.patreon-dl/` to recover
-    it.
+    Handles both the new canonical form (`patreon.com/c/<vanity>`) and the
+    older shorthand (`patreon.com/<vanity>`). Single-post URLs return None
+    so the caller routes them to the post-id fast path instead. Reserved
+    paths (`home`, `search`, `settings`, …) are filtered out — they look
+    like vanities to the regex but never name a creator.
+    """
+    if not isinstance(url, str) or not url:
+        return None
+    # Single-post URLs go through the post-id path, not the vanity path.
+    if _POST_URL_ID_RE.search(url):
+        return None
+    m = _VANITY_C_RE.search(url)
+    if m:
+        return m.group(1).lower()
+    m = _VANITY_OLD_RE.search(url)
+    if m:
+        candidate = m.group(1).lower()
+        if candidate and candidate not in _RESERVED_VANITY_PATHS:
+            return candidate
+    return None
 
-    Walks the output tree for a `post-api.json` whose embedded ID
-    matches `post_id`. For audio path, falls back to the flattened
-    location at `<LIBRARY_PATH>/<post_id>/` when no audio remains under
-    the patreon-dl post folder (`_flatten_audio` from prior runs moved
-    it there). Returns None if nothing matches.
+
+def _campaign_vanity_from_payload(payload: dict) -> Optional[str]:
+    """Pull the campaign vanity out of a Patreon JSON:API post payload.
+
+    Follows post → campaign relationship into the `included` array, same
+    shape `_extract_artist` uses for the user relationship. Returns the
+    lowercased vanity so it can be compared against `_vanity_from_url`.
+    """
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        return None
+    rel = ((data.get("relationships") or {}).get("campaign") or {}).get("data") or {}
+    campaign_id = rel.get("id")
+    if not campaign_id:
+        return None
+    included = payload.get("included")
+    if not isinstance(included, list):
+        return None
+    for item in included:
+        if (
+            isinstance(item, dict)
+            and item.get("type") == "campaign"
+            and item.get("id") == campaign_id
+        ):
+            vanity = (item.get("attributes") or {}).get("vanity")
+            if isinstance(vanity, str) and vanity:
+                return vanity.lower()
+    return None
+
+
+def _slugify(s: str) -> str:
+    """Lowercase + strip non-alphanumeric. Used as a permissive fallback
+    when matching a creator's `full_name` against the URL vanity ("Solar
+    Girl ASMR" → "solargirlasmr"). Vanity slugs on Patreon are usually a
+    flattened version of the display name."""
+    if not isinstance(s, str):
+        return ""
+    return "".join(ch for ch in s.lower() if ch.isalnum())
+
+
+def _published_at_from_payload(payload: dict) -> str:
+    """Extract `published_at` from a Patreon JSON:API post payload.
+
+    Returned as an ISO-8601 string (e.g. "2025-11-15T12:34:56.000+00:00").
+    Empty string when the field is missing or malformed — the caller
+    treats empty as "no date known, don't filter".
+    """
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        return ""
+    pub = (data.get("attributes") or {}).get("published_at")
+    if isinstance(pub, str) and pub:
+        return pub
+    return ""
+
+
+def _iter_cached_posts(output_dir: Path):
+    """Yield `(FetchedPost, published_at, raw_payload)` for every parseable
+    sidecar under `output_dir`.
+
+    Shared walker for the metadata-only re-fetch fast paths (single-post
+    by id, creator-URL by vanity). Both need the same parse + audio-path
+    resolution + flatten-fallback; only the match predicate differs.
+
+    Skips sidecars that fail to parse (corrupt JSON or unexpected shape).
+    Audio path falls back to `<LIBRARY_PATH>/<post_id>/` when none remains
+    under the patreon-dl post folder — `_flatten_audio` from a prior fetch
+    moved it there. `output_dir.parent` IS LIBRARY_PATH because output_dir
+    is `LIBRARY_PATH/.patreon-dl/`.
+
+    Not shared with `_collect_posts` because that walker filters by sidecar
+    mtime (newer than the current fetch's start time) and explicitly does
+    not want the flatten fallback — its concern is "what did THIS run
+    write", which is the opposite of "what's cached from earlier runs".
     """
     for api_file in output_dir.rglob("post-api.json"):
         try:
@@ -451,24 +569,18 @@ def _find_cached_post(output_dir: Path, post_id: str) -> Optional[FetchedPost]:
         parsed = _parse_post_api(data)
         if parsed is None:
             continue
-        candidate_id, title, tags, artist, external_links = parsed
-        if candidate_id != post_id:
-            continue
+        post_id, title, tags, artist, external_links = parsed
         post_dir = api_file.parent.parent
-        # _find_first_audio looks under post_dir; for a post whose audio
-        # was already flattened in a prior fetch it returns None, so also
-        # peek at LIBRARY_PATH/<post_id>/ (output_dir is the patreon-dl root
-        # under LIBRARY_PATH — see _flatten_audio's `patreon_root.parent`).
         audio_path = _find_first_audio(post_dir)
         if audio_path is None:
-            flattened_dir = output_dir.parent / candidate_id
+            flattened_dir = output_dir.parent / post_id
             if flattened_dir.is_dir():
                 for entry in sorted(flattened_dir.iterdir()):
                     if entry.is_file() and entry.suffix.lower() in AUDIO_EXTS:
                         audio_path = entry
                         break
-        return FetchedPost(
-            post_id=candidate_id,
+        post = FetchedPost(
+            post_id=post_id,
             title=title,
             tags=tags,
             artist=artist,
@@ -476,6 +588,73 @@ def _find_cached_post(output_dir: Path, post_id: str) -> Optional[FetchedPost]:
             audio_path=str(audio_path) if audio_path else None,
             external_links=external_links,
         )
+        yield post, _published_at_from_payload(data), data
+
+
+def _find_cached_creator_posts(
+    output_dir: Path,
+    vanity: str,
+    published_after: Optional[str],
+    published_before: Optional[str],
+) -> list[FetchedPost]:
+    """Walk cached sidecars under `output_dir` for posts belonging to the
+    creator identified by `vanity`.
+
+    Mirrors what patreon-dl would return for a creator URL in metadata-only
+    mode: every post sidecar belonging to this creator, filtered by the
+    same `posts.published.after` / `posts.published.before` date bounds
+    patreon-dl applies server-side (inclusive both ends). Empty list means
+    "nothing cached for this creator" — caller falls through to the
+    patreon-dl subprocess. Returned ordering is newest-first by
+    `published_at`, matching patreon-dl's walk order so the UI presents
+    the same sequence either way.
+
+    Match strategy: prefer `relationships.campaign.vanity` from the
+    sidecar (the precise signal), fall back to a slugified `full_name`
+    when the `included` array omits the campaign object. Patreon vanity
+    slugs typically equal the creator's display name with whitespace and
+    punctuation stripped ("Solar Girl ASMR" → "solargirlasmr"), so the
+    fallback resolves the common case without requiring the campaign
+    include to be present.
+    """
+    target = vanity.lower()
+    matches: list[tuple[str, FetchedPost]] = []
+    for post, published_at, data in _iter_cached_posts(output_dir):
+        sidecar_vanity = (
+            _campaign_vanity_from_payload(data) or _slugify(post.artist) or None
+        )
+        if sidecar_vanity != target:
+            continue
+        # Compare yyyy-MM-dd prefix against patreon-dl-style bounds. Skip
+        # filtering when published_at is missing — we still want the post
+        # to surface, same as patreon-dl would.
+        date_prefix = published_at[:10]
+        if published_after and date_prefix and date_prefix < published_after:
+            continue
+        if published_before and date_prefix and date_prefix > published_before:
+            continue
+        matches.append((published_at, post))
+    # Newest-first; empty published_at sorts last (rare; usually drafts).
+    matches.sort(key=lambda x: x[0] or "", reverse=True)
+    return [post for _, post in matches]
+
+
+def _find_cached_post(output_dir: Path, post_id: str) -> Optional[FetchedPost]:
+    """Find a previously-downloaded post's metadata by id, ignoring the
+    mtime filter `_collect_posts` uses.
+
+    When the user re-fetches a single-post URL in metadata-only mode,
+    patreon-dl's `stop.on = previouslyDownloaded` + status cache make it
+    exit without re-writing `post-api.json`. The mtime-filtered
+    `_collect_posts` then returns empty and the user would see a
+    misleading "no new posts" error even though the metadata sits on
+    disk from the original fetch. This helper surfaces that cached
+    sidecar so the user doesn't have to nuke `.patreon-dl/` to recover
+    it.
+    """
+    for post, _, _ in _iter_cached_posts(output_dir):
+        if post.post_id == post_id:
+            return post
     return None
 
 

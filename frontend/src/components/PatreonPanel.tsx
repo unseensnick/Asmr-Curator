@@ -6,13 +6,13 @@ import ExternalLinksHint from "@/components/ExternalLinksHint";
 import PatreonResultsList from "@/components/PatreonResultsList";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { fetchPatreonPost } from "@/lib/api";
 import { parseTitleLine } from "@/lib/parser";
 import type { AppDict, PatreonContentType, PatreonPost } from "@/lib/types";
@@ -100,16 +100,6 @@ export default function PatreonPanel({
       // non-fatal
     }
   }, [contentTypes]);
-
-  function toggleContentType(t: PatreonContentType) {
-    setContentTypes((prev) => {
-      if (prev.includes(t)) {
-        const next = prev.filter((x) => x !== t);
-        return next.length > 0 ? next : ["audio"];
-      }
-      return [...prev, t];
-    });
-  }
 
   async function handleFetch() {
     const trimmed = url.trim();
@@ -244,7 +234,7 @@ export default function PatreonPanel({
           </div>
         ) : !hasResult ? (
           <p className="text-sm text-muted-foreground leading-relaxed">
-            Single post or creator URL.
+            A single post URL fetches one file. A creator URL pulls their back-catalogue.
           </p>
         ) : null}
       </div>
@@ -274,44 +264,38 @@ export default function PatreonPanel({
         </CollapsibleTrigger>
         <CollapsibleContent className="overflow-hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:slide-in-from-top-1 data-[state=closed]:slide-out-to-top-1">
           <div className="pt-4 flex flex-col gap-5">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <ModeToggle
-                checked={metadataOnly}
-                onCheckedChange={setMetadataOnly}
-                disabled={dryRun}
-                label="Don't download audio"
-                hint="Just save the post info. Use this when the file is already on disk."
-              />
-              <ModeToggle
-                checked={dryRun}
-                onCheckedChange={setDryRun}
-                disabled={metadataOnly}
-                label="Preview only"
-                hint="Walk the pipeline without writing anything to disk."
-              />
-            </div>
+            <FetchModeSelector
+              metadataOnly={metadataOnly}
+              dryRun={dryRun}
+              onMetadataOnlyChange={setMetadataOnly}
+              onDryRunChange={setDryRun}
+            />
 
             <FieldGroup label="Also include" disabled={metadataOnly}>
-              <div className="flex flex-wrap gap-1.5">
-                {ALL_CONTENT_TYPES.map(({ value, label }) => {
-                  const active = contentTypes.includes(value);
-                  const className = active
-                    ? "text-sm px-3 py-1.5 rounded-md border bg-accent border-accent text-accent-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                    : "text-sm px-3 py-1.5 rounded-md border border-border bg-background text-muted-foreground hover:text-foreground hover:border-muted-foreground/30 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
-                  return (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => toggleContentType(value)}
-                      disabled={metadataOnly}
-                      aria-pressed={active}
-                      className={className}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
+              <ToggleGroup
+                type="multiple"
+                value={contentTypes}
+                onValueChange={(values) =>
+                  setContentTypes(
+                    values.length > 0
+                      ? (values as PatreonContentType[])
+                      : ["audio"],
+                  )
+                }
+                disabled={metadataOnly}
+                className="flex flex-wrap gap-1.5"
+              >
+                {ALL_CONTENT_TYPES.map(({ value, label }) => (
+                  <ToggleGroupItem
+                    key={value}
+                    value={value}
+                    aria-label={label}
+                    className="text-sm px-3 py-1.5 h-auto rounded-md border border-border bg-background text-muted-foreground hover:text-foreground hover:border-muted-foreground/30 data-[state=on]:bg-accent data-[state=on]:text-accent-foreground data-[state=on]:border-transparent"
+                  >
+                    {label}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
               <p className="text-xs text-muted-foreground/80 mt-2 leading-relaxed">
                 Audio-only by default. Add{" "}
                 <strong className="font-medium text-foreground">Drive links</strong>{" "}
@@ -366,39 +350,69 @@ export default function PatreonPanel({
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-interface ModeToggleProps {
-  checked: boolean;
-  onCheckedChange: (v: boolean) => void;
-  disabled?: boolean;
-  label: string;
-  hint: string;
+type FetchMode = "full" | "info" | "preview";
+
+interface FetchModeSelectorProps {
+  metadataOnly: boolean;
+  dryRun: boolean;
+  onMetadataOnlyChange: (v: boolean) => void;
+  onDryRunChange: (v: boolean) => void;
 }
 
-function ModeToggle({
-  checked,
-  onCheckedChange,
-  disabled,
-  label,
-  hint,
-}: ModeToggleProps) {
-  const wrapClass = disabled
-    ? "flex items-start gap-3 p-3 rounded-md border border-border bg-background opacity-50 cursor-not-allowed select-none"
-    : "flex items-start gap-3 p-3 rounded-md border border-border bg-background hover:border-muted-foreground/30 transition-colors cursor-pointer select-none";
+/**
+ * Three-option segmented control replacing the prior pair of mutually-
+ * exclusive checkboxes (Don't download audio / Preview only). Internal
+ * state stays as two booleans because the API contract still carries
+ * `metadata_only` and `dry_run` as separate fields; the selector flips
+ * them coordinately and renders a single dynamic hint underneath so the
+ * user sees what their current selection does.
+ */
+function FetchModeSelector({
+  metadataOnly,
+  dryRun,
+  onMetadataOnlyChange,
+  onDryRunChange,
+}: FetchModeSelectorProps) {
+  const mode: FetchMode = dryRun ? "preview" : metadataOnly ? "info" : "full";
+  const hint: Record<FetchMode, string> = {
+    full: "Pulls audio and post info into the library.",
+    info: "Saves the post info only. Use this when the file is already on disk.",
+    preview: "Walks the pipeline without writing anything to disk.",
+  };
+
+  function setMode(next: FetchMode) {
+    if (next === "full") {
+      onMetadataOnlyChange(false);
+      onDryRunChange(false);
+    } else if (next === "info") {
+      onMetadataOnlyChange(true);
+      onDryRunChange(false);
+    } else {
+      onMetadataOnlyChange(false);
+      onDryRunChange(true);
+    }
+  }
+
   return (
-    <label className={wrapClass}>
-      <Checkbox
-        checked={checked}
-        onCheckedChange={(v) => onCheckedChange(v === true)}
-        disabled={disabled}
-        className="mt-0.5 shrink-0"
-      />
-      <span className="flex flex-col gap-1 min-w-0">
-        <span className="text-sm font-medium text-foreground">{label}</span>
-        <span className="text-xs text-muted-foreground leading-relaxed">
-          {hint}
-        </span>
-      </span>
-    </label>
+    <div className="flex flex-col gap-2">
+      <ToggleGroup
+        type="single"
+        value={mode}
+        onValueChange={(v) => v && setMode(v as FetchMode)}
+        className="border border-border rounded-md overflow-hidden gap-0"
+      >
+        {(["full", "info", "preview"] as FetchMode[]).map((m) => (
+          <ToggleGroupItem
+            key={m}
+            value={m}
+            className="flex-1 text-sm px-3 py-1.5 h-auto rounded-none! border-r border-border last:border-r-0 bg-background text-muted-foreground hover:text-foreground data-[state=on]:bg-accent data-[state=on]:text-accent-foreground data-[state=on]:border-accent"
+          >
+            {m === "full" ? "Full fetch" : m === "info" ? "Info only" : "Preview"}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+      <p className="text-xs text-muted-foreground leading-relaxed">{hint[mode]}</p>
+    </div>
   );
 }
 

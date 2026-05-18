@@ -35,6 +35,7 @@ export default function OutputPanel({
       <OutputRow
         labelId="output-filename-label"
         label="Filename"
+        separator="-"
         value={outputDash}
         emptyText="Filename will appear here."
       />
@@ -43,6 +44,7 @@ export default function OutputPanel({
         <OutputRow
           labelId="output-tagstring-label"
           label="Tag string"
+          separator="|"
           value={outputPipe}
           emptyText="Tag string will appear here. Paste into ID3 fields, post body, or comments."
         />
@@ -63,11 +65,15 @@ export default function OutputPanel({
 interface OutputRowProps {
   labelId: string;
   label: string;
+  /** The literal character that joins title/tags/suffix in this row's
+   *  value. Rendered as a small mono badge next to the label so the eye
+   *  learns which row produces which separator without parsing the value. */
+  separator: string;
   value: string;
   emptyText: string;
 }
 
-function OutputRow({ labelId, label, value, emptyText }: OutputRowProps) {
+function OutputRow({ labelId, label, separator, value, emptyText }: OutputRowProps) {
   const [pulsing, setPulsing] = useState(false);
   const prev = useRef(value);
 
@@ -86,9 +92,15 @@ function OutputRow({ labelId, label, value, emptyText }: OutputRowProps) {
       <div className="flex items-center justify-between gap-3">
         <span
           id={labelId}
-          className="text-sm font-medium tracking-wide text-muted-foreground"
+          className="text-sm font-medium tracking-wide text-muted-foreground inline-flex items-center gap-2"
         >
           {label}
+          <span
+            aria-hidden
+            className="font-mono text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground/80"
+          >
+            {separator}
+          </span>
         </span>
         <CopyButton text={value} disabled={!value} />
       </div>

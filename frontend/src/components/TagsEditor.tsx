@@ -231,6 +231,14 @@ export default function TagsEditor({
             id="tags-editor-suffix"
             value={suffix}
             onChange={(e) => onSuffixChange(e.target.value)}
+            onBlur={(e) => {
+              // Normalize the format suffix on blur so trivial typos like
+              // "f4a", " F4A", or "F4A " don't propagate into filenames.
+              // Values are conventionally uppercase ASMR codes (F4A, F4M,
+              // F4F, M4A, GN4A, etc.); the user defines their own.
+              const normalized = e.target.value.trim().toUpperCase();
+              if (normalized !== suffix) onSuffixChange(normalized);
+            }}
             placeholder="F4A"
             className="h-12 font-mono text-sm"
             aria-describedby="tags-editor-suffix-hint"
