@@ -62,6 +62,9 @@ export const emptyDict = (): AppDict => ({
 export interface FileEntry {
   name: string;
   ext: string;
+  /** Relative to the queried root (LIBRARY_PATH for the Library tab,
+   *  DOWNLOAD_PATH for the Downloads tab). Pair with `root` when sending
+   *  to the backend. */
   path: string;
   folder: string;
   needs_conversion?: boolean;
@@ -69,6 +72,22 @@ export interface FileEntry {
 
 export type SearchMode = "filename" | "folder" | "both";
 export type RenameSep = "dash" | "pipe";
+
+/** One entry in `/api/files` (single-level directory listing). Used by the
+ *  Library folder-tree picker to drill in one level at a time. */
+export interface ListedEntry {
+  name: string;
+  type: "file" | "dir";
+  ext: string | null;
+  path: string;
+  needs_conversion?: boolean;
+}
+
+export interface ListedDirResponse {
+  current: string;
+  root: "library" | "downloads";
+  entries: ListedEntry[];
+}
 
 // ── Conversion ────────────────────────────────────────────────────────────────
 
@@ -152,7 +171,7 @@ export interface GoogleCookieStatus {
 
 /** Response from `POST /api/patreon/ingest-drive-link`. Backend scrapes Drive
  * headlessly, downloads the audio, returns the destination path relative to
- * `LIBRARY_PATH`. */
+ * `DOWNLOAD_PATH`. */
 export interface IngestDriveLinkResponse {
   audio_path: string;
   size: number;
@@ -176,6 +195,11 @@ export type IngestDriveLinkEvent =
       total: number | null;
       download_elapsed_s?: number;
       elapsed_s: number;
+      /** Present only when the backend is on attempt 2+ of a retry loop
+       *  (Drive sometimes serves an init segment instead of the full
+       *  body; the backend retries the same URL automatically). */
+      retry_attempt?: number;
+      max_attempts?: number;
     }
   | ({ state: "done" } & IngestDriveLinkResponse)
   | {

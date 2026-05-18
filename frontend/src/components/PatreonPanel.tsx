@@ -29,6 +29,10 @@ interface PatreonPanelProps {
    *  user can fix an expired/missing session without hunting through the
    *  Settings menu. */
   onOpenCookies?: () => void;
+  /** Optional bridge into the FileBrowser Downloads tab. Called after the
+   *  user clicks the post-Apply "Rename and move <file>" link so the
+   *  downloaded file is auto-selected for the rename + move flow. */
+  onBridgeToDownloads?: (path: string, filename: string) => void;
 }
 
 const CONTENT_TYPE_KEY = "patreon.contentTypes";
@@ -70,6 +74,7 @@ export default function PatreonPanel({
   onExtracted,
   powerMode = false,
   onOpenCookies,
+  onBridgeToDownloads,
 }: PatreonPanelProps) {
   const [url, setUrl] = useState("");
   const [metadataOnly, setMetadataOnly] = useState(false);
@@ -85,6 +90,9 @@ export default function PatreonPanel({
   const [post, setPost] = useState<PatreonPost | null>(null);
   const [posts, setPosts] = useState<PatreonPost[]>([]);
   const [logTail, setLogTail] = useState<string>("");
+  // Remember the last post the user applied so the bridge link knows
+  // which downloaded file to hand off to the FileBrowser Downloads tab.
+  const [lastApplied, setLastApplied] = useState<PatreonPost | null>(null);
 
   // Power mode controls the "More options" disclosure: on means open, off
   // means closed. We let the Collapsible own its own open state via
@@ -107,6 +115,7 @@ export default function PatreonPanel({
     setFetching(true);
     setFetchStatus(null);
     setApplyStatus(null);
+    setLastApplied(null);
     setPost(null);
     setPosts([]);
     setLogTail("");
@@ -173,6 +182,7 @@ export default function PatreonPanel({
       type: "success",
       msg: `Applied #${p.post_id} — edit tags or generate filename.`,
     });
+    setLastApplied(p);
   }
 
   const fetchLabel = dryRun
@@ -328,6 +338,22 @@ export default function PatreonPanel({
       {hasResult && (
         <div className="border-t border-border/50 pt-5 flex flex-col gap-4">
           {applyStatus && <StatusBanner status={applyStatus} />}
+          {lastApplied?.audio_path && onBridgeToDownloads && (
+            <button
+              type="button"
+              onClick={() => {
+                const filename = lastApplied.audio_path!.split("/").pop() ?? lastApplied.audio_path!;
+                onBridgeToDownloads(lastApplied.audio_path!, filename);
+              }}
+              className="text-sm font-medium text-primary hover:underline underline-offset-4 self-start inline-flex items-center gap-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            >
+              <ExternalLink size={12} aria-hidden />
+              Rename and move{" "}
+              <span className="font-mono">
+                {lastApplied.audio_path.split("/").pop()}
+              </span>
+            </button>
+          )}
           {posts.length > 0 && (
             <p className="text-sm text-muted-foreground">
               <strong className="font-semibold text-foreground">{posts.length}</strong>{" "}

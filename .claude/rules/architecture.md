@@ -21,10 +21,13 @@ paths:
 
 - `/api/extract`, `/api/preview-tags` — Ollama integration (vision LLM).
 - `/api/dictionary`, `/api/vocabulary/*`, `/api/suppressed/*` — dictionary CRUD.
-- `/api/files*` — file browser rooted at `LIBRARY_PATH`.
-- `/api/rename` — file rename + optional ID3/FLAC/MP4 metadata write via `mutagen`.
-- `/api/convert` — audio conversion via `ffmpeg` subprocess.
-- `/api/settings/patreon-cookie`, `/api/patreon/*` — Patreon cookie storage + post fetch (delegates to `backend/patreon_fetch.py`).
+- `/api/files*` — file browser rooted at the requested `root` (`library` → `LIBRARY_PATH`, `downloads` → `DOWNLOAD_PATH`). Default is `library`.
+- `/api/rename` — file rename + optional ID3/FLAC/MP4 metadata write via `mutagen`. Takes a `root` field, same options as above.
+- `/api/convert` — audio conversion via `ffmpeg` subprocess. Takes a `root` field.
+- `/api/mkdir` — create a subfolder under `LIBRARY_PATH/<parent>/`. Scoped to `LIBRARY_PATH` only.
+- `/api/move` — move a file from `from_root` (library or downloads) into `LIBRARY_PATH/<to_subdir>/`, optionally renaming during the move. Uses `shutil.move` so the operation crosses mounts.
+- `/api/settings/patreon-cookie`, `/api/patreon/*` — Patreon cookie storage + post fetch (delegates to `backend/patreon_fetch.py`); ingest endpoints write to `DOWNLOAD_PATH`.
+- `/api/system/info`, `/api/system/explore` — capability flag (`os_explorer`) + host-OS file-manager launcher. Explorer launcher disabled inside Docker / devcontainer (detected via `/.dockerenv`).
 - `/` — SPA fallback serving `frontend/dist/index.html`.
 
 ## Module responsibilities
@@ -42,12 +45,13 @@ paths:
 
 | Variable          | Default                  | Purpose                                                       |
 | ----------------- | ------------------------ | ------------------------------------------------------------- |
-| `LIBRARY_PATH`      | —                        | Root path for the file browser (required for file operations) |
+| `LIBRARY_PATH`    | — (**required**)         | Curated audio archive — root for the FileBrowser Library tab and the destination for the Move-to-library step. Backend errors on startup if unset. |
+| `DOWNLOAD_PATH`   | — (**required**)         | Ingest staging — where patreon-dl, Drive scrape, external-audio ingest write. Root for the FileBrowser Downloads tab. Backend errors on startup if unset or equal to `LIBRARY_PATH`. |
 | `DB_PATH`         | `/data/dictionary.db`    | SQLite database location                                      |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server endpoint                                        |
 | `OLLAMA_MODEL`    | `qwen2.5vl:7b`           | Vision model for extraction                                   |
 
-In Docker, `LIBRARY_PATH=/mnt/audio` and the host path is bind-mounted via `LIBRARY_PATH` in `.env` (host) → `LIBRARY_PATH` (container). The devcontainer mounts the audio dir at `/mnt/audio` and runs as `devuser` in `/workspaces/asmr-filename-gen`.
+In Docker, both paths are bind-mounted via `LIBRARY_PATH` + `DOWNLOAD_PATH` in `.env` (host) → `/mnt/audio` + `/mnt/downloads` (container). The devcontainer mounts them at the same container paths and runs as `devuser` in `/workspaces/asmr-filename-gen`. The two host paths must be distinct directories.
 
 ## Dev vs. production
 

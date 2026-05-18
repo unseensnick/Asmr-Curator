@@ -1,7 +1,11 @@
 export const API = {
+  files:           "/api/files",
   search:          "/api/files/search",
   rename:          "/api/rename",
   convert:         "/api/convert",
+  mkdir:           "/api/mkdir",
+  move:            "/api/move",
+  systemExplore:   "/api/system/explore",
   extract:         "/api/extract",
   previewTags:     "/api/preview-tags",
   dictionary:      "/api/dictionary",
@@ -16,6 +20,9 @@ export const API = {
   ingestDriveLink: "/api/patreon/ingest-drive-link",
   systemInfo:      "/api/system/info",
 } as const;
+
+/** Root selector for file ops. Library = curated archive, Downloads = ingest staging. */
+export type FileRoot = "library" | "downloads";
 
 // Thin fetch wrappers — all requests go to the same origin (FastAPI).
 //

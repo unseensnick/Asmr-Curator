@@ -9,7 +9,9 @@ import asyncio
 import json
 import logging
 import os
+import platform
 import re
+import shutil
 import subprocess
 import time
 import tomllib
@@ -50,8 +52,42 @@ async def _shutdown_drive_browser() -> None:
 # Resolve frontend dist path — built output from `cd frontend && npm run build`
 FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
 
-# Root for audio files — set via LIBRARY_PATH env var
-LIBRARY_PATH = Path(os.environ.get("LIBRARY_PATH", "/mnt/audio"))
+
+def _require_env_path(name: str) -> Path:
+    """Resolve a required env var into a directory Path, or raise with a
+    clear setup-time message. Both DOWNLOAD_PATH and LIBRARY_PATH must be
+    set and point to existing directories; there is no silent fallback."""
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError(
+            f"{name} environment variable is not set. Set it to an existing "
+            f"directory and restart. See README.md for the DOWNLOAD_PATH / "
+            f"LIBRARY_PATH split."
+        )
+    path = Path(value).resolve()
+    if not path.exists():
+        raise RuntimeError(
+            f"{name}={value} does not exist on disk. Create the directory "
+            f"or point the variable at an existing path."
+        )
+    if not path.is_dir():
+        raise RuntimeError(f"{name}={value} is not a directory.")
+    return path
+
+
+# Two required roots. DOWNLOAD_PATH is where ingest writes (patreon-dl
+# staging, flattened audio, Drive/external downloads). LIBRARY_PATH is the
+# user's curated archive that FileBrowser browses. They must be different
+# directories for the split to mean anything; the runtime check below makes
+# the misconfiguration noisy instead of silently broken.
+DOWNLOAD_PATH = _require_env_path("DOWNLOAD_PATH")
+LIBRARY_PATH = _require_env_path("LIBRARY_PATH")
+if DOWNLOAD_PATH == LIBRARY_PATH:
+    raise RuntimeError(
+        "DOWNLOAD_PATH and LIBRARY_PATH must point at different directories. "
+        "Set them to two distinct paths (e.g. DOWNLOAD_PATH=~/asmr-downloads, "
+        "LIBRARY_PATH=~/Music/ASMR)."
+    )
 
 # ── Serve frontend (built assets) ─────────────────────────────────────────────
 if FRONTEND_DIST.exists():
@@ -85,15 +121,35 @@ def require_non_empty(value: str, field: str) -> str:
     return stripped
 
 
-def validate_audio_path(rel_path: str) -> Path:
-    resolved = (LIBRARY_PATH / rel_path.strip()).resolve()
-    library_path = LIBRARY_PATH.resolve()
-    # Use is_relative_to (or Path.relative_to with try/except on older Pythons) so
-    # a sibling directory like /mnt/audio_evil doesn't satisfy a naive prefix
-    # check against /mnt/audio. Python 3.9+ ships is_relative_to natively.
-    if not resolved.is_relative_to(library_path):
+def validate_under_root(rel_path: str, root: Path) -> Path:
+    """Resolve `rel_path` under `root` and reject any path that escapes it.
+
+    Uses is_relative_to so a sibling directory like /mnt/audio_evil doesn't
+    satisfy a naive prefix check against /mnt/audio (Python 3.9+).
+    """
+    resolved = (root / rel_path.strip()).resolve()
+    root_resolved = root.resolve()
+    if not resolved.is_relative_to(root_resolved):
         raise HTTPException(403, "Access denied")
     return resolved
+
+
+def validate_under_library(rel_path: str) -> Path:
+    return validate_under_root(rel_path, LIBRARY_PATH)
+
+
+def validate_under_download(rel_path: str) -> Path:
+    return validate_under_root(rel_path, DOWNLOAD_PATH)
+
+
+def root_for(name: str) -> Path:
+    """Pick a configured root by user-facing name. Endpoints that take a
+    `root` field call this to dispatch into the right path tree."""
+    if name == "library":
+        return LIBRARY_PATH
+    if name == "downloads":
+        return DOWNLOAD_PATH
+    raise HTTPException(400, f"Invalid root: {name!r}. Use 'library' or 'downloads'.")
 
 
 def require_file(path: Path) -> None:
@@ -106,6 +162,30 @@ def reject_if_exists(path: Path) -> None:
         raise HTTPException(409, f"File already exists: {path.name}")
 
 
+def _detect_os_explorer() -> Optional[str]:
+    """Return the OS-specific command for opening a folder in the user's
+    file manager, or None if the current environment doesn't support it.
+
+    Disabled inside Docker / devcontainers because the host's file manager
+    isn't reachable from container PID 1 — running xdg-open in there would
+    do nothing visible (or worse, fail silently). The frontend reads the
+    `os_explorer` flag in /api/system/info and hides the button when False.
+    """
+    if Path("/.dockerenv").exists():
+        return None
+    sysname = platform.system().lower()
+    if sysname == "windows":
+        return "explorer"
+    if sysname == "darwin":
+        return "open"
+    if sysname == "linux" and shutil.which("xdg-open"):
+        return "xdg-open"
+    return None
+
+
+OS_EXPLORER_CMD = _detect_os_explorer()
+
+
 # ── Health ────────────────────────────────────────────────────────────────────
 @app.get("/api/health")
 def health():
@@ -114,7 +194,14 @@ def health():
 # ── System info (model name + app version for the UI status bar) ─────────────
 @app.get("/api/system/info")
 def system_info():
-    return {"model": OLLAMA_MODEL, "version": APP_VERSION}
+    return {
+        "model": OLLAMA_MODEL,
+        "version": APP_VERSION,
+        # Capability flag: True means the backend can open folders in the
+        # host file manager (frontend renders the Open in OS button). False
+        # in Docker/devcontainer and on hosts without a known opener.
+        "os_explorer": OS_EXPLORER_CMD is not None,
+    }
 
 # ── Vision extraction via Ollama ──────────────────────────────────────────────
 
@@ -297,9 +384,12 @@ QUALITY_FLAGS: dict[str, dict[str, list[str]]] = {
 }
 
 @app.get("/api/files")
-def list_files(subdir: str = ""):
-    """List files and subdirectories inside LIBRARY_PATH/subdir (one level)."""
-    target = validate_audio_path(subdir)
+def list_files(subdir: str = "", root: str = "library"):
+    """List files and subdirectories inside `<root>/subdir` (one level).
+    Default root is library; downloads surfaces the ingest staging tree.
+    """
+    root_path = root_for(root)
+    target = validate_under_root(subdir, root_path)
     if not target.exists():
         raise HTTPException(404, "Directory not found")
     if not target.is_dir():
@@ -312,12 +402,13 @@ def list_files(subdir: str = ""):
             "name": entry.name,
             "type": "file" if entry.is_file() else "dir",
             "ext": ext,
-            "path": str(entry.relative_to(LIBRARY_PATH)),
+            "path": str(entry.relative_to(root_path)),
             "needs_conversion": entry.is_file() and ext in NEEDS_CONVERSION_EXTS,
         })
 
     return {
-        "current": str(target.relative_to(LIBRARY_PATH)) if target != LIBRARY_PATH else "",
+        "current": str(target.relative_to(root_path)) if target != root_path else "",
+        "root": root,
         "entries": entries,
     }
 
@@ -335,19 +426,23 @@ _SEARCH_RESULT_LIMIT = 500
 
 
 @app.get("/api/files/search")
-def search_files(q: str = "", search_in: str = "filename"):
+def search_files(q: str = "", search_in: str = "filename", root: str = "library"):
     """
-    Recursively walk LIBRARY_PATH and return all audio/video files.
+    Recursively walk the chosen root and return all audio/video files.
     search_in: "filename" | "folder" | "both"
+    root: "library" | "downloads"
 
     Filters apply during the walk (extension + query), hidden / cache /
     patreon-dl-working directories are pruned in place, and the result list
     is capped at _SEARCH_RESULT_LIMIT entries. Sort is applied to the kept
     results only.
     """
-    library_path = LIBRARY_PATH.resolve()
-    if not library_path.exists():
-        raise HTTPException(404, f"Audio root not found at {library_path} — check LIBRARY_PATH mount")
+    root_path = root_for(root).resolve()
+    if not root_path.exists():
+        raise HTTPException(
+            404,
+            f"Audio root not found at {root_path} — check the {root.upper()}_PATH mount",
+        )
 
     q_lower = q.strip().lower()
     if search_in not in ("filename", "folder", "both"):
@@ -357,13 +452,13 @@ def search_files(q: str = "", search_in: str = "filename"):
     truncated = False
 
     try:
-        for dirpath, dirnames, filenames in os.walk(library_path):
+        for dirpath, dirnames, filenames in os.walk(root_path):
             # Prune in place so os.walk doesn't descend into noisy subtrees.
             dirnames[:] = [
                 d for d in dirnames
                 if d not in _SEARCH_PRUNE_DIRS and not d.startswith(".")
             ]
-            rel_dir = Path(dirpath).relative_to(library_path)
+            rel_dir = Path(dirpath).relative_to(root_path)
             folder = "" if str(rel_dir) == "." else str(rel_dir)
             folder_lc = folder.lower()
             for name in filenames:
@@ -398,7 +493,7 @@ def search_files(q: str = "", search_in: str = "filename"):
 
     results.sort(key=lambda r: (r["folder"].lower(), r["name"].lower()))
 
-    response: dict = {"query": q, "search_in": search_in, "total": len(results), "files": results}
+    response: dict = {"query": q, "search_in": search_in, "root": root, "total": len(results), "files": results}
     if truncated:
         response["truncated"] = True
         response["limit"] = _SEARCH_RESULT_LIMIT
@@ -406,28 +501,190 @@ def search_files(q: str = "", search_in: str = "filename"):
 
 
 @app.get("/api/files/debug")
-def debug_files():
-    """Show what's visible at LIBRARY_PATH — use to diagnose mount issues."""
-    library_path = LIBRARY_PATH.resolve()
-    if not library_path.exists():
-        return {"error": f"LIBRARY_PATH does not exist: {library_path}", "library_path": str(library_path)}
+def debug_files(root: str = "library"):
+    """Show what's visible at the chosen root — diagnoses mount issues."""
+    root_path = root_for(root).resolve()
+    env_name = f"{root.upper()}_PATH"
+    if not root_path.exists():
+        return {"error": f"{env_name} does not exist: {root_path}", "root_path": str(root_path), "root": root}
 
     top_level = []
     try:
-        for entry in sorted(library_path.iterdir(), key=lambda e: e.name.lower())[:20]:
+        for entry in sorted(root_path.iterdir(), key=lambda e: e.name.lower())[:20]:
             top_level.append({
                 "name": entry.name,
                 "type": "dir" if entry.is_dir() else "file",
             })
     except Exception as e:
-        return {"error": str(e), "library_path": str(library_path)}
+        return {"error": str(e), "root_path": str(root_path), "root": root}
 
     return {
-        "library_path": str(library_path),
+        "root": root,
+        "root_path": str(root_path),
         "exists": True,
         "top_level_entries": top_level,
         "top_level_count": len(top_level),
     }
+
+# ── Folder creation + cross-root move ────────────────────────────────────────
+#
+# Two endpoints power the "Move to library" flow built into SelectedFilePanel
+# (and the standalone "New folder" affordance on the Library tab):
+#
+#   • /api/mkdir creates a subfolder under LIBRARY_PATH. Both the move-flow
+#     picker's inline "New folder…" input AND the Library tab's standalone
+#     "New folder" button route here, so there's one server-side validator
+#     for folder-name shape regardless of where the user starts.
+#
+#   • /api/move handles the optional "move from downloads (or library) into
+#     a chosen library subfolder" step. Source can be in either root;
+#     destination is always LIBRARY_PATH. shutil.move (not Path.rename) so
+#     the operation works across mounts — DOWNLOAD_PATH and LIBRARY_PATH
+#     will often be on different volumes in real setups.
+
+
+def _validate_folder_name(name: str) -> str:
+    """Reject folder names that would escape the validator or create dotfiles
+    the FileBrowser hides. Returns the cleaned name."""
+    name = name.strip()
+    if not name:
+        raise HTTPException(400, "Folder name cannot be empty.")
+    if "/" in name or "\\" in name:
+        raise HTTPException(400, "Names can't contain `/` or `\\`.")
+    if name in (".", ".."):
+        raise HTTPException(400, "Invalid folder name.")
+    if name.startswith("."):
+        raise HTTPException(400, "Folder names can't start with a dot.")
+    return name
+
+
+class MkdirIn(BaseModel):
+    subdir: str                   # the new folder name (single segment, no slashes)
+    parent: Optional[str] = None  # relative path under LIBRARY_PATH (empty = root)
+
+
+@app.post("/api/mkdir", status_code=201)
+def make_directory(body: MkdirIn):
+    """Create a single subfolder under LIBRARY_PATH/<parent>/.
+
+    Scoped to LIBRARY_PATH only — DOWNLOAD_PATH is transient working storage
+    that the user doesn't curate. The 409 on name collision matches the
+    Patreon-fetch + rename idiom so the frontend has one error-handling path.
+    """
+    subdir = _validate_folder_name(body.subdir)
+    parent_rel = (body.parent or "").strip()
+    target_rel = f"{parent_rel}/{subdir}" if parent_rel else subdir
+    target = validate_under_library(target_rel)
+    if target.exists():
+        raise HTTPException(409, "That name already exists.")
+    try:
+        target.mkdir(parents=True, exist_ok=False)
+    except OSError as e:
+        raise HTTPException(500, f"Couldn't create folder: {e}")
+    return {
+        "created": True,
+        "path": str(target.relative_to(LIBRARY_PATH.resolve())),
+        "name": target.name,
+    }
+
+
+class MoveIn(BaseModel):
+    from_path: str                # relative path of the source file
+    from_root: str                # "library" | "downloads"
+    to_subdir: str                # destination folder relative to LIBRARY_PATH ("" = root)
+    new_name: Optional[str] = None  # optional rename during the move
+
+
+@app.post("/api/move")
+def move_file(body: MoveIn):
+    """Move a file from `from_root` into LIBRARY_PATH/<to_subdir>/, optionally
+    renaming during the move so the user can do "rename + move" atomically.
+
+    Uses shutil.move so the operation crosses mounts (DOWNLOAD_PATH and
+    LIBRARY_PATH commonly live on different volumes). Filename collisions
+    return 409 with a plain message — no silent overwrites.
+    """
+    src_root = root_for(body.from_root)
+    src = validate_under_root(body.from_path, src_root)
+    require_file(src)
+    if not src.is_file():
+        raise HTTPException(400, "Source path is not a file.")
+
+    to_subdir = (body.to_subdir or "").strip()
+    dest_dir = validate_under_library(to_subdir)
+    if not dest_dir.exists():
+        raise HTTPException(404, "Destination folder does not exist.")
+    if not dest_dir.is_dir():
+        raise HTTPException(400, "Destination is not a folder.")
+
+    final_name = (body.new_name or src.name).strip()
+    if not final_name or "/" in final_name or "\\" in final_name:
+        raise HTTPException(400, "Invalid filename.")
+    name_bytes = len(final_name.encode("utf-8"))
+    if name_bytes > 255:
+        raise HTTPException(
+            422,
+            f"Filename too long: {name_bytes} bytes (max 255). Remove some tags to shorten it.",
+        )
+
+    dest_rel = (
+        f"{dest_dir.relative_to(LIBRARY_PATH.resolve())}/{final_name}"
+        if to_subdir
+        else final_name
+    )
+    dest = validate_under_library(dest_rel)
+    if dest.exists():
+        raise HTTPException(
+            409,
+            "A file with that name already exists at the destination.",
+        )
+
+    try:
+        shutil.move(str(src), str(dest))
+    except OSError as e:
+        raise HTTPException(500, f"Move failed: {e}")
+
+    return {
+        "moved": True,
+        "to_path": str(dest.relative_to(LIBRARY_PATH.resolve())),
+        "new_name": dest.name,
+    }
+
+
+# ── System: open in OS file manager ──────────────────────────────────────────
+
+class ExploreIn(BaseModel):
+    root: str = "library"   # "library" | "downloads"
+    subdir: str = ""        # relative path under the chosen root ("" = root)
+
+
+@app.post("/api/system/explore")
+def open_in_explorer(body: ExploreIn):
+    """Open the given subdir in the host OS file manager.
+
+    Only useful when the backend runs on the same machine as the user
+    (i.e. NOT inside Docker / devcontainer where host paths aren't
+    reachable). /api/system/info exposes `os_explorer: bool` so the
+    frontend can hide the trigger when this won't work.
+    """
+    if OS_EXPLORER_CMD is None:
+        raise HTTPException(
+            501,
+            "Opening the file manager isn't supported in this environment.",
+        )
+    root_path = root_for(body.root)
+    target = validate_under_root(body.subdir, root_path)
+    if not target.exists():
+        raise HTTPException(404, "Folder does not exist.")
+    if not target.is_dir():
+        raise HTTPException(400, "Path is not a folder.")
+    try:
+        # Popen (not run) — we don't wait for the GUI process to exit.
+        subprocess.Popen([OS_EXPLORER_CMD, str(target)])
+    except OSError as e:
+        raise HTTPException(500, f"Couldn't open file manager: {e}")
+    return {"opened": True}
+
 
 # ── Rename ────────────────────────────────────────────────────────────────────
 
@@ -438,13 +695,15 @@ class MetadataIn(BaseModel):
     album_artist: str = ""
 
 class RenameIn(BaseModel):
-    path: str                           # relative path to file inside LIBRARY_PATH
+    path: str                           # relative path to file inside the chosen root
     new_name: str                       # new filename (just the name, no path)
+    root: str = "library"               # "library" | "downloads"
     metadata: Optional[MetadataIn] = None   # tags to embed after rename
 
 @app.post("/api/rename")
 def rename_file(body: RenameIn):
-    src = validate_audio_path(body.path)
+    root_path = root_for(body.root)
+    src = validate_under_root(body.path, root_path)
     require_file(src)
     if not src.is_file():
         raise HTTPException(400, "Path is not a file")
@@ -460,7 +719,7 @@ def rename_file(body: RenameIn):
     if not new_name or "/" in new_name or "\\" in new_name:
         raise HTTPException(400, "Invalid filename")
 
-    dest = validate_audio_path(str(src.parent.relative_to(LIBRARY_PATH) / new_name))
+    dest = validate_under_root(str(src.parent.relative_to(root_path) / new_name), root_path)
     reject_if_exists(dest)
 
     # Linux max filename length is 255 bytes (not chars — encode to check)
@@ -495,7 +754,8 @@ def rename_file(body: RenameIn):
         "renamed": True,
         "old_name": src.name,
         "new_name": dest.name,
-        "path": str(dest.relative_to(LIBRARY_PATH)),
+        "path": str(dest.relative_to(root_path)),
+        "root": body.root,
         **({"metadata_error": metadata_error} if metadata_error else {}),
     }
 
@@ -508,15 +768,17 @@ def get_convert_formats():
 
 
 class ConvertIn(BaseModel):
-    path: str               # relative path inside LIBRARY_PATH
+    path: str               # relative path inside the chosen root
     output_format: str      # "mp3" | "flac" | "aac" | "ogg"
     quality: str            # "low" | "standard" | "high" | "best" | "lossless"
+    root: str = "library"   # "library" | "downloads"
     delete_original: bool = False
 
 
 @app.post("/api/convert")
 def convert_file(body: ConvertIn):
-    src = validate_audio_path(body.path)
+    root_path = root_for(body.root)
+    src = validate_under_root(body.path, root_path)
     require_file(src)
     if not src.is_file():
         raise HTTPException(400, "Path is not a file")
@@ -563,7 +825,8 @@ def convert_file(body: ConvertIn):
         "converted": True,
         "old_name": src.name,
         "new_name": dest.name,
-        "path": str(dest.relative_to(LIBRARY_PATH)),
+        "path": str(dest.relative_to(root_path)),
+        "root": body.root,
     }
 
 
@@ -759,7 +1022,7 @@ def patreon_fetch_endpoint(body: PatreonFetchIn):
     published_after = _validate_iso_date(body.published_after, "published_after")
     published_before = _validate_iso_date(body.published_before, "published_before")
 
-    output_dir = LIBRARY_PATH / PATREON_OUTPUT_SUBDIR
+    output_dir = DOWNLOAD_PATH / PATREON_OUTPUT_SUBDIR
     try:
         result = patreon_fetch(
             url, cookie, output_dir,
@@ -772,15 +1035,15 @@ def patreon_fetch_endpoint(body: PatreonFetchIn):
     except PatreonFetchError as e:
         raise HTTPException(502, str(e))
 
-    library_path = LIBRARY_PATH.resolve()
+    download_path = DOWNLOAD_PATH.resolve()
 
     def _rel(p: Optional[str]) -> Optional[str]:
         if not p:
             return None
         try:
-            return str(Path(p).resolve().relative_to(library_path))
+            return str(Path(p).resolve().relative_to(download_path))
         except ValueError:
-            return p  # fell outside LIBRARY_PATH — return absolute path verbatim
+            return p  # fell outside DOWNLOAD_PATH — return absolute path verbatim
 
     posts = [
         {
@@ -870,9 +1133,10 @@ async def ingest_external_audio(body: IngestExternalAudioIn):
 
     cleaned_url = audio_utils.strip_query_params(source_url)
 
-    # validate_audio_path enforces the LIBRARY_PATH boundary even if post_id
-    # somehow contains traversal segments that slipped past the prefix check.
-    dest_dir = validate_audio_path(post_id)
+    # validate_under_download enforces the DOWNLOAD_PATH boundary even if
+    # post_id somehow contains traversal segments that slipped past the
+    # prefix check.
+    dest_dir = validate_under_download(post_id)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     timeout = httpx.Timeout(connect=15.0, read=300.0, write=60.0, pool=15.0)
@@ -928,10 +1192,11 @@ async def ingest_external_audio(body: IngestExternalAudioIn):
         except Exception as e:
             metadata_error = f"Metadata embed failed: {e}"
 
-    # target was built from validate_audio_path(dest_dir), so it's always inside
-    # LIBRARY_PATH — relative_to is guaranteed to succeed. We don't fall back to
-    # the absolute path because that would leak the server's internal layout.
-    audio_path = str(target.relative_to(LIBRARY_PATH.resolve()))
+    # target was built from validate_under_download(dest_dir), so it's always
+    # inside DOWNLOAD_PATH — relative_to is guaranteed to succeed. We don't fall
+    # back to the absolute path because that would leak the server's internal
+    # layout.
+    audio_path = str(target.relative_to(DOWNLOAD_PATH.resolve()))
     result = {
         "audio_path": audio_path,
         "size": bytes_written,
@@ -958,7 +1223,7 @@ class IngestDriveLinkIn(BaseModel):
 @app.post("/api/patreon/ingest-drive-link")
 async def ingest_drive_link(body: IngestDriveLinkIn):
     """Resolve a Drive viewer URL to its playback URL via headless Chromium,
-    clean it, and download into LIBRARY_PATH/<post_id>/.
+    clean it, and download into DOWNLOAD_PATH/<post_id>/.
 
     Returns a `text/event-stream` of progress events. The frontend consumes
     these with fetch + reader.read() rather than the standard JSON wrapper.
@@ -1000,7 +1265,7 @@ async def ingest_drive_link(body: IngestDriveLinkIn):
     except (ValueError, json.JSONDecodeError) as e:
         raise HTTPException(500, f"Google cookie in settings is malformed: {e}")
 
-    dest_dir = validate_audio_path(post_id)
+    dest_dir = validate_under_download(post_id)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     # ── SSE generator ─────────────────────────────────────────────────────
@@ -1048,8 +1313,8 @@ async def ingest_drive_link(body: IngestDriveLinkIn):
                     explicit_filename=body.filename,
                     on_progress=push,
                 )
-                library_path = LIBRARY_PATH.resolve()
-                audio_path = str(result.audio_path.relative_to(library_path))
+                download_path = DOWNLOAD_PATH.resolve()
+                audio_path = str(result.audio_path.relative_to(download_path))
                 await queue.put({
                     "state": "done",
                     "audio_path": audio_path,

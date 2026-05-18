@@ -1,7 +1,7 @@
 {
   "name": "Full Stack Dev (Debian)",
 
-  "// dockerComposeFile / service": "Sources every per-machine config (LIBRARY_PATH, OLLAMA_BASE_URL, etc.) from the repo root's `.env` via `../docker-compose.dev.yml`. The dev compose lives at the repo root (not in this folder) so docker-compose's project directory matches where `.env` is — same arrangement as the production compose next to it. No personal data lives in this file.",
+  "// dockerComposeFile / service": "Sources every per-machine config (LIBRARY_PATH, DOWNLOAD_PATH, OLLAMA_BASE_URL, etc.) from the repo root's `.env` via `../docker-compose.dev.yml`. The dev compose lives at the repo root (not in this folder) so docker-compose's project directory matches where `.env` is — same arrangement as the production compose next to it. No personal data lives in this file.",
   "dockerComposeFile": "../docker-compose.dev.yml",
   "service": "dev",
   "workspaceFolder": "/workspaces/asmr-filename-gen",

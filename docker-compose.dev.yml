@@ -19,15 +19,20 @@ services:
         volumes:
             # Workspace bind-mount — VS Code edits files here.
             - .:/workspaces/asmr-filename-gen:cached
-            # Audio library — same `LIBRARY_PATH` from `.env` that the
+            # Curated archive — same `LIBRARY_PATH` from `.env` that the
             # production compose uses, mounted to the same container path.
             - ${LIBRARY_PATH}:/mnt/audio:cached
+            # Ingest staging — backend writes patreon-dl / Drive / external
+            # audio downloads here. Must be a distinct host directory from
+            # LIBRARY_PATH (the backend errors on startup if they collide).
+            - ${DOWNLOAD_PATH}:/mnt/downloads:cached
         environment:
             - DB_PATH=/workspaces/asmr-filename-gen/data/dictionary.db
             - PYTHONPATH=/workspaces/asmr-filename-gen
             - UV_LINK_MODE=copy
             - VIRTUAL_ENV=/home/devuser/.venv
             - LIBRARY_PATH=/mnt/audio
+            - DOWNLOAD_PATH=/mnt/downloads
             # Default `host.docker.internal:11434` reaches Ollama running on
             # the developer's workstation via Docker Desktop's host loopback
             # (Win/Mac built-in; Linux uses `extra_hosts` below). Override in

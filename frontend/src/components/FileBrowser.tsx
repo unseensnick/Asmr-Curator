@@ -1,10 +1,13 @@
 import {
     AlertTriangle,
+    Check,
     ChevronDown,
+    FolderPlus,
     ListChecks,
     Loader2,
     RefreshCw,
     Repeat,
+    X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -18,8 +21,9 @@ import {
     CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { API, apiGet, apiPost } from "@/lib/api";
+import { API, apiGet, apiPost, type FileRoot } from "@/lib/api";
 import { FORMAT_EXT, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
 import type {
     ConvertFormat,
@@ -34,6 +38,13 @@ interface FileBrowserProps {
     outputPipe: string;
     extractedArtist: string;
     defaultOpen?: boolean;
+    /** Triggered by the Patreon panel's post-Apply bridge link. When set,
+     *  the FileBrowser opens, switches to the Downloads tab, selects the
+     *  named file (synthesising the entry from the bridge payload), and
+     *  scrolls itself into view. The parent should clear it via
+     *  `onBridgeConsumed` once the request has been handled. */
+    bridgeRequest?: { path: string; filename: string } | null;
+    onBridgeConsumed?: () => void;
 }
 
 interface SearchResponse {
@@ -53,27 +64,28 @@ interface BatchProgress {
 }
 
 /**
- * File library shell. Server-backed search across `LIBRARY_PATH`, a filter
- * (filename / folder / both), a single-file rename + convert work area,
- * and a batch convert mode. Deferred-fetch until first expand so the
- * LIBRARY_PATH walk doesn't tie up a worker on page load.
+ * File library shell. Two tabs: Library (browses LIBRARY_PATH, the user's
+ * curated archive) and Downloads (browses DOWNLOAD_PATH, the ingest staging
+ * tree). Each tab runs a server-backed flat search; the work area on the
+ * right is shared (a SelectedFilePanel handles rename, convert, and the
+ * optional Move-to-library step regardless of which tab the file came
+ * from). Deferred-fetch until first expand so the walk doesn't tie up a
+ * worker on page load.
  *
- * `defaultOpen` drives the initial collapsed/expanded state; at widescreen
- * the page passes `true` so the library is a first-class workspace below
- * the dashboard rather than a click-to-reveal afterthought. We only use it
- * as the initial value — once the user toggles manually, their choice
- * sticks even if they resize across the breakpoint.
+ * `defaultOpen` drives the initial collapsed/expanded state.
  *
  * Two-column layout on lg+ viewports: the searchable file list left, the
- * work area (SelectedFilePanel, batch convert panel, or a placeholder)
- * right. Stacks on smaller viewports.
+ * work area right. Stacks on smaller viewports.
  */
 export default function FileBrowser({
     outputDash,
     outputPipe,
     extractedArtist,
     defaultOpen = false,
+    bridgeRequest = null,
+    onBridgeConsumed,
 }: FileBrowserProps) {
+    const [root, setRoot] = useState<FileRoot>("library");
     const [files, setFiles] = useState<FileEntry[]>([]);
     const [query, setQuery] = useState("");
     const [searchMode, setSearchMode] = useState<SearchMode>("filename");
@@ -81,6 +93,20 @@ export default function FileBrowser({
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [open, setOpen] = useState(defaultOpen);
+    // Files pending move from DOWNLOAD_PATH — refreshed on open, on tab
+    // switch, and after a successful move. Drives the badge on the
+    // Downloads tab so the user notices forgotten downloads at a glance.
+    const [downloadsCount, setDownloadsCount] = useState<number | null>(null);
+    // New folder affordance (Library tab only). When open, shows an inline
+    // input row above the file list; submits to /api/mkdir at the library
+    // root (or under the current subdir if the picker later threads one).
+    const [newFolderOpen, setNewFolderOpen] = useState(false);
+    const [newFolderName, setNewFolderName] = useState("");
+    const [newFolderBusy, setNewFolderBusy] = useState(false);
+    const [newFolderHint, setNewFolderHint] = useState<{
+        kind: "success" | "error";
+        text: string;
+    } | null>(null);
 
     // Conversion preferences, persist across sessions.
     const [convertFormat, setConvertFormat] = useState<ConvertFormat>(() => {
@@ -102,6 +128,7 @@ export default function FileBrowser({
     );
 
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const rootRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
         localStorage.setItem("convertFormat", convertFormat);
@@ -112,20 +139,22 @@ export default function FileBrowser({
 
     // ── Load files ────────────────────────────────────────────────────────
 
-    async function loadFiles(q: string, mode: SearchMode) {
+    async function loadFiles(q: string, mode: SearchMode, rt: FileRoot) {
         setLoading(true);
         setError("");
         try {
             const params = new URLSearchParams();
             if (q.trim()) params.set("q", q.trim());
             params.set("search_in", mode);
+            params.set("root", rt);
             const data = await apiGet<SearchResponse>(
                 `${API.search}?${params.toString()}`,
             );
             setFiles(data.files);
         } catch (e) {
+            const envName = rt === "library" ? "LIBRARY_PATH" : "DOWNLOAD_PATH";
             setError(
-                "Couldn't reach the library. Check that LIBRARY_PATH is set and points to a valid folder. " +
+                `Couldn't reach the ${rt}. Check that ${envName} is set and points to a valid folder. ` +
                     getErrorMessage(e),
             );
             setFiles([]);
@@ -134,27 +163,121 @@ export default function FileBrowser({
         }
     }
 
-    // Deferred initial fetch: walking LIBRARY_PATH ties up a sync FastAPI
+    // Background refresh of the Downloads count so the badge stays accurate
+    // without forcing the user onto that tab. Fires on open, on root
+    // change, and after any move (parent calls refreshDownloadsCount via
+    // the SelectedFilePanel's onListReload callback).
+    async function refreshDownloadsCount() {
+        try {
+            const data = await apiGet<SearchResponse>(
+                `${API.search}?root=downloads`,
+            );
+            setDownloadsCount(data.files.length);
+        } catch {
+            // Non-fatal — badge just won't appear. The main loadFiles call
+            // surfaces any real error.
+            setDownloadsCount(null);
+        }
+    }
+
+    // Deferred initial fetch: walking either tree ties up a sync FastAPI
     // worker thread; don't do it until the user opens the panel.
     const loadedOnceRef = useRef(false);
     useEffect(() => {
         if (!open || loadedOnceRef.current) return;
         loadedOnceRef.current = true;
-        loadFiles("", "filename");
+        loadFiles("", "filename", root);
+        refreshDownloadsCount();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-on-open by design
     }, [open]);
 
     function handleQueryChange(val: string) {
         setQuery(val);
         if (debounceRef.current) clearTimeout(debounceRef.current);
         debounceRef.current = setTimeout(
-            () => loadFiles(val, searchMode),
+            () => loadFiles(val, searchMode, root),
             300,
         );
     }
 
     function handleModeChange(mode: SearchMode) {
         setSearchMode(mode);
-        loadFiles(query, mode);
+        loadFiles(query, mode, root);
+    }
+
+    // Consume bridge requests from PatreonPanel: open the panel, switch
+    // to Downloads, synthesise a FileEntry so SelectedFilePanel can drive
+    // rename + move without waiting for the (just-completed) search to
+    // include the file, scroll into view, then clear.
+    useEffect(() => {
+        if (!bridgeRequest) return;
+        const { path, filename } = bridgeRequest;
+        setOpen(true);
+        if (root !== "downloads") {
+            setRoot("downloads");
+            setBatchSelected(new Set());
+            loadFiles(query, searchMode, "downloads");
+        }
+        const ext = (() => {
+            const m = filename.match(/(\.[^.]+)$/);
+            return m ? m[1].toLowerCase() : "";
+        })();
+        const folder = path.includes("/")
+            ? path.slice(0, path.lastIndexOf("/"))
+            : "";
+        setSelected({
+            name: filename,
+            ext,
+            path,
+            folder,
+            needs_conversion: NEEDS_CONVERSION_EXTS.has(ext),
+        });
+        // Wait a tick so the panel has had a chance to expand before we
+        // measure. requestAnimationFrame is enough; no need for setTimeout.
+        requestAnimationFrame(() => {
+            rootRef.current?.scrollIntoView({
+                behavior: "smooth",
+                block: "start",
+            });
+        });
+        onBridgeConsumed?.();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- responds only to bridge changes
+    }, [bridgeRequest]);
+
+    function handleRootChange(next: FileRoot) {
+        if (next === root) return;
+        setRoot(next);
+        setSelected(null);
+        setBatchSelected(new Set());
+        setNewFolderOpen(false);
+        setNewFolderHint(null);
+        loadFiles(query, searchMode, next);
+    }
+
+    // ── New folder (Library tab) ─────────────────────────────────────────
+
+    async function handleMkdir() {
+        const name = newFolderName.trim();
+        if (!name) return;
+        setNewFolderBusy(true);
+        setNewFolderHint(null);
+        try {
+            await apiPost(API.mkdir, { subdir: name });
+            setNewFolderHint({
+                kind: "success",
+                text: `Created “${name}”.`,
+            });
+            setNewFolderName("");
+            setNewFolderOpen(false);
+            // The flat search doesn't show empty folders, so the file list
+            // won't change visually — but reload anyway in case the user
+            // already moved something here.
+            loadFiles(query, searchMode, root);
+        } catch (e) {
+            setNewFolderHint({ kind: "error", text: getErrorMessage(e) });
+        } finally {
+            setNewFolderBusy(false);
+        }
     }
 
     // ── Batch convert ─────────────────────────────────────────────────────
@@ -205,6 +328,7 @@ export default function FileBrowser({
                     path: file.path,
                     output_format: convertFormat,
                     quality,
+                    root,
                     delete_original: deleteOriginal,
                 });
                 results.push({ name: file.name, ok: true });
@@ -223,7 +347,7 @@ export default function FileBrowser({
             results: [...results],
         });
         setBatchSelected(new Set());
-        await loadFiles(query, searchMode);
+        await loadFiles(query, searchMode, root);
     }
 
     function toggleBatchMode() {
@@ -236,7 +360,10 @@ export default function FileBrowser({
 
     return (
         <Collapsible open={open} onOpenChange={setOpen}>
-            <div className="bg-card border border-border rounded-xl p-6 sm:p-7 flex flex-col gap-5">
+            <div
+                ref={rootRef}
+                className="bg-card border border-border rounded-xl p-6 sm:p-7 flex flex-col gap-5"
+            >
                 <CollapsibleTrigger asChild>
                     <button
                         type="button"
@@ -255,12 +382,52 @@ export default function FileBrowser({
                                 {files.length.toLocaleString()}
                             </span>
                         )}
+                        {downloadsCount !== null && downloadsCount > 0 && (
+                            <span
+                                className="ml-auto font-mono text-xs tabular-nums text-muted-foreground/80"
+                                title={`${downloadsCount} file${downloadsCount === 1 ? "" : "s"} waiting in Downloads`}
+                            >
+                                {downloadsCount} pending
+                            </span>
+                        )}
                     </button>
                 </CollapsibleTrigger>
 
                 <CollapsibleContent className="overflow-hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0">
                     <div className="flex flex-col gap-4">
                         {error && <ErrorBanner message={error} />}
+
+                        <Tabs
+                            value={root}
+                            onValueChange={(v) =>
+                                handleRootChange(v as FileRoot)
+                            }
+                        >
+                            <TabsList
+                                variant="line"
+                                className="h-auto p-0 gap-0 bg-transparent justify-start rounded-none border-b border-border w-full"
+                            >
+                                <TabsTrigger
+                                    value="library"
+                                    className="px-4 py-2.5 text-xs font-medium tracking-[0.04em] whitespace-nowrap rounded-none"
+                                >
+                                    Library
+                                </TabsTrigger>
+                                <TabsTrigger
+                                    value="downloads"
+                                    className="px-4 py-2.5 text-xs font-medium tracking-[0.04em] whitespace-nowrap rounded-none"
+                                >
+                                    Downloads
+                                    {downloadsCount !== null &&
+                                        downloadsCount > 0 && (
+                                            <span className="ml-1.5 font-mono tabular-nums text-muted-foreground/80">
+                                                · {downloadsCount}
+                                            </span>
+                                        )}
+                                </TabsTrigger>
+                            </TabsList>
+                        </Tabs>
+
                         <SearchRow
                             query={query}
                             onQueryChange={handleQueryChange}
@@ -269,8 +436,42 @@ export default function FileBrowser({
                             loading={loading}
                             batchMode={batchMode}
                             onToggleBatchMode={toggleBatchMode}
-                            onRefresh={() => loadFiles(query, searchMode)}
+                            onRefresh={() =>
+                                loadFiles(query, searchMode, root)
+                            }
+                            showNewFolder={root === "library"}
+                            newFolderOpen={newFolderOpen}
+                            onToggleNewFolder={() => {
+                                setNewFolderOpen((v) => !v);
+                                setNewFolderHint(null);
+                                setNewFolderName("");
+                            }}
                         />
+
+                        {root === "library" && newFolderOpen && (
+                            <NewFolderInput
+                                value={newFolderName}
+                                busy={newFolderBusy}
+                                onChange={setNewFolderName}
+                                onSubmit={handleMkdir}
+                                onCancel={() => {
+                                    setNewFolderOpen(false);
+                                    setNewFolderName("");
+                                    setNewFolderHint(null);
+                                }}
+                            />
+                        )}
+                        {newFolderHint && (
+                            <p
+                                className={
+                                    newFolderHint.kind === "success"
+                                        ? "text-xs text-success"
+                                        : "text-xs text-destructive"
+                                }
+                            >
+                                {newFolderHint.text}
+                            </p>
+                        )}
 
                         <div className="grid grid-cols-1 lg:grid-cols-[3fr_4fr] gap-4 items-start">
                             <FileList
@@ -279,6 +480,15 @@ export default function FileBrowser({
                                 selected={selected}
                                 batchMode={batchMode}
                                 batchSelected={batchSelected}
+                                emptyText={
+                                    root === "library"
+                                        ? query
+                                            ? "No matching files."
+                                            : "Library is empty. Fetch some posts and use Move to library to file them here."
+                                        : query
+                                          ? "No matching downloads."
+                                          : "No pending downloads."
+                                }
                                 onSelect={(file) =>
                                     setSelected(
                                         selected?.path === file.path
@@ -289,6 +499,7 @@ export default function FileBrowser({
                                 onBatchToggle={toggleBatch}
                             />
                             <WorkArea
+                                root={root}
                                 batchMode={batchMode}
                                 batchSelected={batchSelected}
                                 batchProgress={batchProgress}
@@ -314,9 +525,29 @@ export default function FileBrowser({
                                 extractedArtist={extractedArtist}
                                 onDeselect={() => setSelected(null)}
                                 onSelectedChange={setSelected}
-                                onListReload={() =>
-                                    loadFiles(query, searchMode)
-                                }
+                                onListReload={() => {
+                                    loadFiles(query, searchMode, root);
+                                    refreshDownloadsCount();
+                                }}
+                                onMovedToLibrary={(toPath, name) => {
+                                    // After a successful move, switch to
+                                    // the Library tab and select the moved
+                                    // file so the user sees the new
+                                    // location without hunting.
+                                    handleRootChange("library");
+                                    setSelected({
+                                        name,
+                                        ext:
+                                            "." + name.split(".").pop()!,
+                                        path: toPath,
+                                        folder:
+                                            toPath
+                                                .split("/")
+                                                .slice(0, -1)
+                                                .join("/") ?? "",
+                                    });
+                                    refreshDownloadsCount();
+                                }}
                                 onError={setError}
                             />
                         </div>
@@ -353,6 +584,10 @@ interface SearchRowProps {
     batchMode: boolean;
     onToggleBatchMode: () => void;
     onRefresh: () => void;
+    /** Library tab only; the Downloads tab doesn't curate folder structure. */
+    showNewFolder: boolean;
+    newFolderOpen: boolean;
+    onToggleNewFolder: () => void;
 }
 
 function SearchRow({
@@ -364,6 +599,9 @@ function SearchRow({
     batchMode,
     onToggleBatchMode,
     onRefresh,
+    showNewFolder,
+    newFolderOpen,
+    onToggleNewFolder,
 }: SearchRowProps) {
     return (
         <div className="flex flex-wrap gap-2 items-center">
@@ -403,6 +641,20 @@ function SearchRow({
                 )}
             </ToggleGroup>
 
+            {showNewFolder && (
+                <Button
+                    size="sm"
+                    variant={newFolderOpen ? "default" : "outline"}
+                    onClick={onToggleNewFolder}
+                    className="shrink-0 gap-1.5"
+                    title="Create a new folder in the library"
+                    aria-label="Create a new folder"
+                    aria-pressed={newFolderOpen}
+                >
+                    <FolderPlus size={14} aria-hidden />
+                    <span className="hidden sm:inline">New folder</span>
+                </Button>
+            )}
             <Button
                 size="sm"
                 variant={batchMode ? "default" : "outline"}
@@ -433,12 +685,77 @@ function SearchRow({
     );
 }
 
+interface NewFolderInputProps {
+    value: string;
+    busy: boolean;
+    onChange: (v: string) => void;
+    onSubmit: () => void;
+    onCancel: () => void;
+}
+
+function NewFolderInput({
+    value,
+    busy,
+    onChange,
+    onSubmit,
+    onCancel,
+}: NewFolderInputProps) {
+    return (
+        <div className="flex gap-2 items-center bg-muted/40 border border-border rounded-md px-3 py-2">
+            <FolderPlus
+                size={14}
+                aria-hidden
+                className="text-muted-foreground shrink-0"
+            />
+            <Input
+                autoFocus
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                        e.preventDefault();
+                        onSubmit();
+                    } else if (e.key === "Escape") {
+                        e.preventDefault();
+                        onCancel();
+                    }
+                }}
+                placeholder="New folder name"
+                disabled={busy}
+                aria-label="New folder name"
+                className="flex-1 h-8 font-mono text-sm"
+            />
+            <Button
+                size="sm"
+                variant="outline"
+                onClick={onSubmit}
+                disabled={busy || !value.trim()}
+                className="shrink-0"
+                aria-label="Create folder"
+            >
+                <Check size={14} aria-hidden />
+            </Button>
+            <Button
+                size="sm"
+                variant="ghost"
+                onClick={onCancel}
+                disabled={busy}
+                className="shrink-0"
+                aria-label="Cancel new folder"
+            >
+                <X size={14} aria-hidden />
+            </Button>
+        </div>
+    );
+}
+
 interface FileListProps {
     files: FileEntry[];
     loading: boolean;
     selected: FileEntry | null;
     batchMode: boolean;
     batchSelected: Set<string>;
+    emptyText: string;
     onSelect: (file: FileEntry) => void;
     onBatchToggle: (path: string) => void;
 }
@@ -449,6 +766,7 @@ function FileList({
     selected,
     batchMode,
     batchSelected,
+    emptyText,
     onSelect,
     onBatchToggle,
 }: FileListProps) {
@@ -461,11 +779,11 @@ function FileList({
                         aria-hidden
                         className="animate-spin text-muted-foreground shrink-0"
                     />
-                    Loading your library.
+                    Loading.
                 </div>
             ) : files.length === 0 ? (
-                <div className="flex items-center justify-center py-10 text-sm text-muted-foreground italic">
-                    No matching files.
+                <div className="flex items-center justify-center py-10 text-sm text-muted-foreground italic px-4 text-center leading-relaxed">
+                    {emptyText}
                 </div>
             ) : (
                 files.map((file) => (
@@ -488,6 +806,7 @@ function FileList({
 }
 
 interface WorkAreaProps {
+    root: FileRoot;
     batchMode: boolean;
     batchSelected: Set<string>;
     batchProgress: BatchProgress | null;
@@ -508,6 +827,7 @@ interface WorkAreaProps {
     onDeselect: () => void;
     onSelectedChange: (next: FileEntry) => void;
     onListReload: () => void;
+    onMovedToLibrary: (toPath: string, name: string) => void;
     onError: (msg: string) => void;
 }
 
@@ -534,6 +854,7 @@ function WorkArea(props: WorkAreaProps) {
         return (
             <SelectedFilePanel
                 selected={props.selected}
+                root={props.root}
                 outputDash={props.outputDash}
                 outputPipe={props.outputPipe}
                 extractedArtist={props.extractedArtist}
@@ -546,6 +867,7 @@ function WorkArea(props: WorkAreaProps) {
                 onDeselect={props.onDeselect}
                 onSelectedChange={props.onSelectedChange}
                 onListReload={props.onListReload}
+                onMovedToLibrary={props.onMovedToLibrary}
                 onError={props.onError}
             />
         );
@@ -554,7 +876,9 @@ function WorkArea(props: WorkAreaProps) {
     // be a useless wedge of space below the file list).
     return (
         <div className="hidden lg:flex items-center justify-center min-h-40 border-2 border-dashed border-border rounded-md text-sm text-muted-foreground italic px-4 py-6 text-center">
-            Select a file to rename or convert.
+            {props.root === "downloads"
+                ? "Pick a download to rename, convert, or move into the library."
+                : "Select a file to rename or convert."}
         </div>
     );
 }
