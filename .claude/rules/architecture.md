@@ -27,7 +27,7 @@ paths:
 - `/api/mkdir` — create a subfolder under `LIBRARY_PATH/<parent>/`. Scoped to `LIBRARY_PATH` only.
 - `/api/move` — move a file from `from_root` (library or downloads) into `LIBRARY_PATH/<to_subdir>/`, optionally renaming during the move. Uses `shutil.move` so the operation crosses mounts.
 - `/api/settings/patreon-cookie`, `/api/patreon/*` — Patreon cookie storage + post fetch (delegates to `backend/patreon_fetch.py`); ingest endpoints write to `DOWNLOAD_PATH`.
-- `/api/system/info`, `/api/system/explore` — capability flag (`os_explorer`) + host-OS file-manager launcher. Explorer launcher disabled inside Docker / devcontainer (detected via `/.dockerenv`).
+- `/api/system/info` — Ollama model and app version. Used by Header + LibraryExplorerSheet (formerly also carried an `os_explorer` capability flag for a host-subprocess file-manager launcher; removed when the in-app `LibraryExplorerSheet` replaced that approach).
 - `/` — SPA fallback serving `frontend/dist/index.html`.
 
 ## Module responsibilities

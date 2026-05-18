@@ -53,7 +53,8 @@ For posts that can't be fetched via patreon-dl — a creator you don't subscribe
 ## Other features
 
 - **File browser + rename** with embedded ID3 / FLAC / MP4 metadata. Two tabs: **Library** (your curated archive under `LIBRARY_PATH`) and **Downloads** (ingest staging under `DOWNLOAD_PATH`, with a pending-count badge so forgotten downloads don't sit unnoticed). Live search by filename, folder, or both inside the active tab. Direct rename only on `.mp3` / `.flac` / `.ogg` (formats with embeddable tags); other formats convert first.
-- **Move to library** (optional) — every selected file in the work area carries a `Move to library` collapsible with a folder-tree picker rooted at `LIBRARY_PATH`. Drill into subfolders, create new ones inline, optionally apply the generated filename during the move, then commit. If you ran the backend on your own machine (not Docker), an `Open in OS` button drops you into the host file manager at the same folder for bulk reorganization the in-app picker isn't built for.
+- **Move to library** (optional) — every selected file in the work area carries a `Move to library` collapsible with a folder-tree picker rooted at `LIBRARY_PATH`. Drill into subfolders, create new ones inline, optionally apply the generated filename during the move, then commit.
+- **Browse library** — `Browse` button in the FileBrowser toolbar opens a right-side Sheet with a folder-tree view of `LIBRARY_PATH` (files AND folders, navigated one level at a time with a breadcrumb). Click a file to pick it for renaming or moving without going through flat search. Filter input above the listing for big folders; the sheet preserves its position across opens so filing 10 posts into one subfolder takes one navigation, not ten. Right-click any row for the Delete action — empty folders confirm before `rmdir`, non-empty folders show the contents count and confirm before `shutil.rmtree`, files confirm before `unlink`. New folders are created from this Sheet too; the FileBrowser used to carry a separate `+ New folder` button at library root, but it's been removed in favour of the more capable Sheet primitive. Same Sheet style as Library settings + Cookies — works in every deployment (host, devcontainer, Unraid/TrueNAS Docker) because it's an in-app component, not a subprocess into the host's file manager.
 - **New folder** (Library tab) — a `+ New folder` button beside the search input creates a subfolder at `LIBRARY_PATH` root without needing to start a move flow. Same `/api/mkdir` endpoint the move picker reuses.
 - **Audio conversion** via `ffmpeg` to mp3 / flac / ogg with quality presets. Batch mode for multiple files at once.
 - **Tag vocabulary + suppressed terms** — persistent SQLite dictionary, with canonical forms and optional aliases. The full vocabulary is injected into the LLM prompt so the screenshot workflow uses your tag forms instead of inventing its own. Suppressed terms are dropped from output silently.
@@ -293,15 +294,16 @@ Every file endpoint accepts a `root` parameter (`"library"` for `LIBRARY_PATH`, 
 | POST   | `/api/rename`       | Rename a file in place (same parent directory). Body: `{ path, new_name, root, metadata? }`. Only `.mp3` / `.flac` / `.ogg` (formats with embeddable metadata) can be renamed directly; other formats must be converted first |
 | POST   | `/api/mkdir`        | Create a subfolder under `LIBRARY_PATH/<parent>/`. Body: `{ subdir, parent? }`. Scoped to `LIBRARY_PATH` only — `DOWNLOAD_PATH` is transient and not curated. Returns 409 on name collision |
 | POST   | `/api/move`         | Move a file from `from_root` (library or downloads) into a `LIBRARY_PATH/<to_subdir>/` folder, optionally renaming during the move. Body: `{ from_path, from_root, to_subdir, new_name? }`. Uses `shutil.move` so the operation crosses mounts (DOWNLOAD_PATH and LIBRARY_PATH are commonly on different volumes). Returns 409 on filename collision at the destination — no silent overwrites |
+| POST   | `/api/delete`       | Delete a file or folder under the chosen root. Body: `{ path, root, recursive? }`. Files unlink (single target). Empty folders `rmdir`. Non-empty folders return 409 with `{ count, path }` when `recursive=false`; pass `recursive=true` (after a user prompt) for `shutil.rmtree`. Refuses to delete the root itself |
+| POST   | `/api/rename-path`  | Rename a file or folder in place (same parent directory). Body: `{ path, new_name, root }`. Distinct from `/api/rename` — that one is file-only and combines the rename with optional ID3/FLAC/MP4 metadata embed; this one handles any path (folders, any extension) without the metadata step. Drives the Library explorer's right-click Rename + F2 shortcut |
 
 `/api/files/search` accepts `search_in=filename` (default), `search_in=folder`, or `search_in=both`.
 
 ### System
 
-| Method | Path                   | Description                                                                                                                                 |
-| ------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/api/system/info`     | `{ model, version, os_explorer }`. `os_explorer` is True when the backend can open folders in the host file manager (disabled in Docker / devcontainer) |
-| POST   | `/api/system/explore`  | Open the given subdir in the host OS file manager (`explorer.exe` on Windows, `open` on macOS, `xdg-open` on Linux). Body: `{ root, subdir? }`. Returns 501 if not supported in the current environment |
+| Method | Path                   | Description                                                |
+| ------ | ---------------------- | ---------------------------------------------------------- |
+| GET    | `/api/system/info`     | `{ model, version }` — Ollama model and app version       |
 
 **Note**: All file endpoints require both `LIBRARY_PATH` and `DOWNLOAD_PATH` to be set and mounted.
 

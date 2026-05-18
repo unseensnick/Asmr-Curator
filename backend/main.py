@@ -9,7 +9,6 @@ import asyncio
 import json
 import logging
 import os
-import platform
 import re
 import shutil
 import subprocess
@@ -162,30 +161,6 @@ def reject_if_exists(path: Path) -> None:
         raise HTTPException(409, f"File already exists: {path.name}")
 
 
-def _detect_os_explorer() -> Optional[str]:
-    """Return the OS-specific command for opening a folder in the user's
-    file manager, or None if the current environment doesn't support it.
-
-    Disabled inside Docker / devcontainers because the host's file manager
-    isn't reachable from container PID 1 — running xdg-open in there would
-    do nothing visible (or worse, fail silently). The frontend reads the
-    `os_explorer` flag in /api/system/info and hides the button when False.
-    """
-    if Path("/.dockerenv").exists():
-        return None
-    sysname = platform.system().lower()
-    if sysname == "windows":
-        return "explorer"
-    if sysname == "darwin":
-        return "open"
-    if sysname == "linux" and shutil.which("xdg-open"):
-        return "xdg-open"
-    return None
-
-
-OS_EXPLORER_CMD = _detect_os_explorer()
-
-
 # ── Health ────────────────────────────────────────────────────────────────────
 @app.get("/api/health")
 def health():
@@ -194,14 +169,7 @@ def health():
 # ── System info (model name + app version for the UI status bar) ─────────────
 @app.get("/api/system/info")
 def system_info():
-    return {
-        "model": OLLAMA_MODEL,
-        "version": APP_VERSION,
-        # Capability flag: True means the backend can open folders in the
-        # host file manager (frontend renders the Open in OS button). False
-        # in Docker/devcontainer and on hosts without a known opener.
-        "os_explorer": OS_EXPLORER_CMD is not None,
-    }
+    return {"model": OLLAMA_MODEL, "version": APP_VERSION}
 
 # ── Vision extraction via Ollama ──────────────────────────────────────────────
 
@@ -426,11 +394,21 @@ _SEARCH_RESULT_LIMIT = 500
 
 
 @app.get("/api/files/search")
-def search_files(q: str = "", search_in: str = "filename", root: str = "library"):
+def search_files(
+    q: str = "",
+    search_in: str = "filename",
+    root: str = "library",
+    subdir: str = "",
+):
     """
     Recursively walk the chosen root and return all audio/video files.
     search_in: "filename" | "folder" | "both"
     root: "library" | "downloads"
+    subdir: optional relative path to scope the walk under. When set, the
+        walk starts at `<root>/<subdir>` so the explorer's "search in
+        the current folder" UX matches real file explorers (typing in
+        the filter while inside `Solar Girl ASMR/` searches that subtree
+        only, not the whole library).
 
     Filters apply during the walk (extension + query), hidden / cache /
     patreon-dl-working directories are pruned in place, and the result list
@@ -448,11 +426,20 @@ def search_files(q: str = "", search_in: str = "filename", root: str = "library"
     if search_in not in ("filename", "folder", "both"):
         raise HTTPException(400, "search_in must be 'filename', 'folder', or 'both'")
 
+    # Scope the walk to `subdir` when provided. Reuses the shared validator
+    # so a `..` segment or an absolute path can't escape the root.
+    if subdir.strip():
+        scope = validate_under_root(subdir, root_path)
+        if not scope.exists() or not scope.is_dir():
+            raise HTTPException(404, f"Folder not found under {root}: {subdir}")
+    else:
+        scope = root_path
+
     results: list[dict] = []
     truncated = False
 
     try:
-        for dirpath, dirnames, filenames in os.walk(root_path):
+        for dirpath, dirnames, filenames in os.walk(scope):
             # Prune in place so os.walk doesn't descend into noisy subtrees.
             dirnames[:] = [
                 d for d in dirnames
@@ -493,7 +480,14 @@ def search_files(q: str = "", search_in: str = "filename", root: str = "library"
 
     results.sort(key=lambda r: (r["folder"].lower(), r["name"].lower()))
 
-    response: dict = {"query": q, "search_in": search_in, "root": root, "total": len(results), "files": results}
+    response: dict = {
+        "query": q,
+        "search_in": search_in,
+        "root": root,
+        "subdir": subdir,
+        "total": len(results),
+        "files": results,
+    }
     if truncated:
         response["truncated"] = True
         response["limit"] = _SEARCH_RESULT_LIMIT
@@ -589,56 +583,82 @@ def make_directory(body: MkdirIn):
 
 
 class MoveIn(BaseModel):
-    from_path: str                # relative path of the source file
+    from_path: str                # relative path of the source (file OR folder)
     from_root: str                # "library" | "downloads"
     to_subdir: str                # destination folder relative to LIBRARY_PATH ("" = root)
     new_name: Optional[str] = None  # optional rename during the move
 
 
-@app.post("/api/move")
-def move_file(body: MoveIn):
-    """Move a file from `from_root` into LIBRARY_PATH/<to_subdir>/, optionally
-    renaming during the move so the user can do "rename + move" atomically.
+def _plan_move(
+    from_path: str,
+    from_root: str,
+    to_subdir: str,
+    new_name: Optional[str],
+) -> tuple[Path, Path]:
+    """Validate a single move request and return (src, dest) absolute paths.
 
-    Uses shutil.move so the operation crosses mounts (DOWNLOAD_PATH and
-    LIBRARY_PATH commonly live on different volumes). Filename collisions
-    return 409 with a plain message — no silent overwrites.
+    Centralises the file-or-folder rules shared by /api/move and
+    /api/move/batch: existence, cycle protection (no folder into itself),
+    destination-folder existence, filename shape + 255-byte cap, collision
+    rejection. Raises HTTPException on any failure so single-item callers
+    surface the matching status code; the batch caller converts each
+    exception into a per-item error entry.
     """
-    src_root = root_for(body.from_root)
-    src = validate_under_root(body.from_path, src_root)
-    require_file(src)
-    if not src.is_file():
-        raise HTTPException(400, "Source path is not a file.")
+    src_root = root_for(from_root)
+    src = validate_under_root(from_path, src_root)
+    require_file(src)  # checks existence; misnamed but applies to dirs too
 
-    to_subdir = (body.to_subdir or "").strip()
-    dest_dir = validate_under_library(to_subdir)
+    to_subdir_clean = (to_subdir or "").strip()
+    dest_dir = validate_under_library(to_subdir_clean)
     if not dest_dir.exists():
         raise HTTPException(404, "Destination folder does not exist.")
     if not dest_dir.is_dir():
         raise HTTPException(400, "Destination is not a folder.")
 
-    final_name = (body.new_name or src.name).strip()
+    # Cycle protection: when src is a folder, dest can't be inside it.
+    # Compare resolved paths so symlinks can't smuggle a cycle past us.
+    if src.is_dir():
+        src_resolved = src.resolve()
+        dest_resolved = dest_dir.resolve()
+        if dest_resolved == src_resolved or src_resolved in dest_resolved.parents:
+            raise HTTPException(400, "Can't move a folder into itself.")
+
+    final_name = (new_name or src.name).strip()
     if not final_name or "/" in final_name or "\\" in final_name:
-        raise HTTPException(400, "Invalid filename.")
+        raise HTTPException(400, "Invalid name.")
     name_bytes = len(final_name.encode("utf-8"))
     if name_bytes > 255:
         raise HTTPException(
             422,
-            f"Filename too long: {name_bytes} bytes (max 255). Remove some tags to shorten it.",
+            f"Name too long: {name_bytes} bytes (max 255). Shorten it.",
         )
 
     dest_rel = (
         f"{dest_dir.relative_to(LIBRARY_PATH.resolve())}/{final_name}"
-        if to_subdir
+        if to_subdir_clean
         else final_name
     )
     dest = validate_under_library(dest_rel)
     if dest.exists():
         raise HTTPException(
             409,
-            "A file with that name already exists at the destination.",
+            "Something with that name already exists at the destination.",
         )
+    return src, dest
 
+
+@app.post("/api/move")
+def move_file(body: MoveIn):
+    """Move a file or folder from `from_root` into LIBRARY_PATH/<to_subdir>/,
+    optionally renaming during the move so the user can do "rename + move"
+    atomically.
+
+    Source can be a file (the SelectedFilePanel rename+move case) or a
+    folder (the explorer's cut+paste-folder case). shutil.move handles
+    both natively, including cross-mount falls-back to copytree + rmtree.
+    Filename / foldername collisions return 409 — no silent overwrites.
+    """
+    src, dest = _plan_move(body.from_path, body.from_root, body.to_subdir, body.new_name)
     try:
         shutil.move(str(src), str(dest))
     except OSError as e:
@@ -651,39 +671,230 @@ def move_file(body: MoveIn):
     }
 
 
-# ── System: open in OS file manager ──────────────────────────────────────────
-
-class ExploreIn(BaseModel):
-    root: str = "library"   # "library" | "downloads"
-    subdir: str = ""        # relative path under the chosen root ("" = root)
+class MoveBatchItem(BaseModel):
+    from_path: str
+    new_name: Optional[str] = None  # rename-during-move (rarely useful in batch)
 
 
-@app.post("/api/system/explore")
-def open_in_explorer(body: ExploreIn):
-    """Open the given subdir in the host OS file manager.
+class MoveBatchIn(BaseModel):
+    items: list[MoveBatchItem]
+    from_root: str               # one source root for the whole batch
+    to_subdir: str               # one destination subdir under LIBRARY_PATH
 
-    Only useful when the backend runs on the same machine as the user
-    (i.e. NOT inside Docker / devcontainer where host paths aren't
-    reachable). /api/system/info exposes `os_explorer: bool` so the
-    frontend can hide the trigger when this won't work.
+
+@app.post("/api/move/batch")
+def move_batch(body: MoveBatchIn):
+    """Move many files / folders into a single LIBRARY_PATH destination.
+
+    Partial-success-friendly: never aborts the batch on the first error.
+    Each item gets its own `{ ok, to_path?, error? }` slot in the
+    `results` list so the client can refresh the listing and surface a
+    "moved N of M" banner with per-item failure reasons.
+
+    Reuses `_plan_move` for validation so the rules match `/api/move`
+    exactly (existence, cycle, collision, 255-byte name cap).
     """
-    if OS_EXPLORER_CMD is None:
-        raise HTTPException(
-            501,
-            "Opening the file manager isn't supported in this environment.",
-        )
+    if not body.items:
+        return {"moved": 0, "results": []}
+
+    results: list[dict] = []
+    moved = 0
+    for item in body.items:
+        try:
+            src, dest = _plan_move(item.from_path, body.from_root, body.to_subdir, item.new_name)
+            shutil.move(str(src), str(dest))
+        except HTTPException as e:
+            # Map status code to a stable error.code the client can branch on.
+            code = (
+                "collision" if e.status_code == 409
+                else "not_found" if e.status_code == 404
+                else "cycle" if (e.status_code == 400 and "itself" in str(e.detail))
+                else "validation" if e.status_code in (400, 422)
+                else "other"
+            )
+            results.append({
+                "from_path": item.from_path,
+                "ok": False,
+                "error": {"code": code, "message": str(e.detail)},
+            })
+            continue
+        except OSError as e:
+            results.append({
+                "from_path": item.from_path,
+                "ok": False,
+                "error": {"code": "other", "message": f"Move failed: {e}"},
+            })
+            continue
+        results.append({
+            "from_path": item.from_path,
+            "ok": True,
+            "to_path": str(dest.relative_to(LIBRARY_PATH.resolve())),
+        })
+        moved += 1
+
+    return {"moved": moved, "results": results}
+
+
+class DeleteIn(BaseModel):
+    path: str                          # relative path under the chosen root
+    root: str = "library"              # "library" | "downloads"
+    # When False (default), folder deletes are non-recursive: empty folders
+    # succeed, non-empty folders return 409 with the contents count so the
+    # client can show a "delete N items inside?" confirmation. Files ignore
+    # this flag (a file delete is always a single-target unlink).
+    recursive: bool = False
+
+
+@app.post("/api/delete")
+def delete_path(body: DeleteIn):
+    """Delete a file or folder under the chosen root.
+
+    Semantics:
+      • file       → unlink. `recursive` ignored.
+      • empty dir  → rmdir. Succeeds whether `recursive` is true or false.
+      • non-empty dir + recursive=True  → shutil.rmtree.
+      • non-empty dir + recursive=False → 409 with the contents count so
+        the client can re-prompt the user before re-issuing with
+        `recursive=true`. No silent recursive deletes.
+
+    Refuses to delete the root itself defensively (`""` or `.`) — that
+    would wipe LIBRARY_PATH or DOWNLOAD_PATH out from under us.
+    """
     root_path = root_for(body.root)
-    target = validate_under_root(body.subdir, root_path)
+    rel = (body.path or "").strip().strip("/")
+    if not rel or rel in (".", ".."):
+        raise HTTPException(400, "Refusing to delete the root directory.")
+
+    target = validate_under_root(rel, root_path)
     if not target.exists():
-        raise HTTPException(404, "Folder does not exist.")
+        raise HTTPException(404, "Path does not exist.")
+
+    if target.is_file():
+        try:
+            target.unlink()
+        except OSError as e:
+            raise HTTPException(500, f"Delete failed: {e}")
+        return {"deleted": True, "kind": "file", "path": rel}
+
     if not target.is_dir():
-        raise HTTPException(400, "Path is not a folder.")
+        raise HTTPException(400, "Path is neither a file nor a folder.")
+
+    # Empty-folder fast path — rmdir succeeds only when the dir has no
+    # children, which is exactly what we want.
     try:
-        # Popen (not run) — we don't wait for the GUI process to exit.
-        subprocess.Popen([OS_EXPLORER_CMD, str(target)])
+        target.rmdir()
+        return {"deleted": True, "kind": "folder_empty", "path": rel}
+    except OSError:
+        # Non-empty. Either the caller is opting into recursive delete
+        # (proceed) or they aren't (return the contents count so the UI
+        # can prompt before recursing).
+        pass
+
+    if not body.recursive:
+        try:
+            count = sum(1 for _ in target.rglob("*"))
+        except OSError:
+            count = -1  # best effort — non-zero is enough to drive the prompt
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Folder is not empty.",
+                "count": count,
+                "path": rel,
+            },
+        )
+
+    try:
+        shutil.rmtree(target)
     except OSError as e:
-        raise HTTPException(500, f"Couldn't open file manager: {e}")
-    return {"opened": True}
+        raise HTTPException(500, f"Recursive delete failed: {e}")
+    return {"deleted": True, "kind": "folder_recursive", "path": rel}
+
+
+class RenamePathIn(BaseModel):
+    path: str                          # current relative path (file OR folder)
+    new_name: str                      # new last-segment name; same parent
+    root: str = "library"              # "library" | "downloads"
+
+
+@app.post("/api/rename-path")
+def rename_path(body: RenamePathIn):
+    """Rename a file or folder in place (same parent directory).
+
+    Different from `/api/rename`:
+      • `/api/rename` is file-only and exists to combine the filename
+        change with an optional ID3/FLAC/MP4 metadata embed. It enforces
+        the metadata-compatible-format gate and rejects folders.
+      • This endpoint handles the general case: any file (regardless of
+        extension) or any folder. No metadata embed.
+
+    The Library explorer's right-click Rename + F2 shortcut drive this.
+    """
+    root_path = root_for(body.root)
+    rel = (body.path or "").strip().strip("/")
+    if not rel or rel in (".", ".."):
+        raise HTTPException(400, "Refusing to rename the root directory.")
+
+    src = validate_under_root(rel, root_path)
+    if not src.exists():
+        raise HTTPException(404, "Path does not exist.")
+
+    new_name = body.new_name.strip()
+    if not new_name or "/" in new_name or "\\" in new_name:
+        raise HTTPException(400, "Names can't contain `/` or `\\`.")
+    if new_name in (".", ".."):
+        raise HTTPException(400, "Invalid name.")
+    if new_name.startswith("."):
+        raise HTTPException(400, "Names can't start with a dot.")
+
+    name_bytes = len(new_name.encode("utf-8"))
+    if name_bytes > 255:
+        raise HTTPException(
+            422,
+            f"Name too long: {name_bytes} bytes (max 255).",
+        )
+
+    if new_name == src.name:
+        # No-op rename — short-circuit so we don't bounce a 409 off
+        # ourselves via dest.exists() below.
+        return {
+            "renamed": False,
+            "old_name": src.name,
+            "new_name": src.name,
+            "path": rel,
+            "root": body.root,
+            "kind": "folder" if src.is_dir() else "file",
+        }
+
+    parent_rel = src.parent.relative_to(root_path.resolve())
+    dest_rel = (
+        f"{parent_rel}/{new_name}"
+        if str(parent_rel) not in ("", ".")
+        else new_name
+    )
+    dest = validate_under_root(dest_rel, root_path)
+    if dest.exists():
+        kind = "folder" if dest.is_dir() else "file"
+        raise HTTPException(
+            409,
+            f"A {kind} with that name already exists.",
+        )
+
+    try:
+        src.rename(dest)
+    except OSError as e:
+        if e.errno == 36:  # ENAMETOOLONG
+            raise HTTPException(422, "Name too long for the filesystem.")
+        raise HTTPException(500, f"Rename failed: {e}")
+
+    return {
+        "renamed": True,
+        "old_name": src.name,
+        "new_name": dest.name,
+        "path": str(dest.relative_to(root_path.resolve())),
+        "root": body.root,
+        "kind": "folder" if dest.is_dir() else "file",
+    }
 
 
 # ── Rename ────────────────────────────────────────────────────────────────────

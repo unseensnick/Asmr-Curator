@@ -1,18 +1,17 @@
 import {
     AlertTriangle,
-    Check,
     ChevronDown,
-    FolderPlus,
+    FolderOpen,
     ListChecks,
     Loader2,
     RefreshCw,
     Repeat,
-    X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import ConversionPanel from "@/components/ConversionPanel";
 import FileBrowserItem from "@/components/FileBrowserItem";
+import LibraryExplorerSheet from "@/components/LibraryExplorerSheet";
 import SelectedFilePanel from "@/components/SelectedFilePanel";
 import { Button } from "@/components/ui/button";
 import {
@@ -97,16 +96,14 @@ export default function FileBrowser({
     // switch, and after a successful move. Drives the badge on the
     // Downloads tab so the user notices forgotten downloads at a glance.
     const [downloadsCount, setDownloadsCount] = useState<number | null>(null);
-    // New folder affordance (Library tab only). When open, shows an inline
-    // input row above the file list; submits to /api/mkdir at the library
-    // root (or under the current subdir if the picker later threads one).
-    const [newFolderOpen, setNewFolderOpen] = useState(false);
-    const [newFolderName, setNewFolderName] = useState("");
-    const [newFolderBusy, setNewFolderBusy] = useState(false);
-    const [newFolderHint, setNewFolderHint] = useState<{
-        kind: "success" | "error";
-        text: string;
-    } | null>(null);
+    // Library explorer (right-side Sheet) — folder-tree navigation across
+    // LIBRARY_PATH, including a "+ New folder" affordance scoped to the
+    // currently-navigated subdir. Folder creation lives exclusively in the
+    // explorer Sheet now; the FileBrowser used to carry its own inline
+    // "+ New folder" button at LIBRARY_PATH root, but that was a less-
+    // capable duplicate (couldn't target a subdir) and reading two slightly
+    // different folder-creation affordances in one panel was confusing.
+    const [explorerOpen, setExplorerOpen] = useState(false);
 
     // Conversion preferences, persist across sessions.
     const [convertFormat, setConvertFormat] = useState<ConvertFormat>(() => {
@@ -249,35 +246,7 @@ export default function FileBrowser({
         setRoot(next);
         setSelected(null);
         setBatchSelected(new Set());
-        setNewFolderOpen(false);
-        setNewFolderHint(null);
         loadFiles(query, searchMode, next);
-    }
-
-    // ── New folder (Library tab) ─────────────────────────────────────────
-
-    async function handleMkdir() {
-        const name = newFolderName.trim();
-        if (!name) return;
-        setNewFolderBusy(true);
-        setNewFolderHint(null);
-        try {
-            await apiPost(API.mkdir, { subdir: name });
-            setNewFolderHint({
-                kind: "success",
-                text: `Created “${name}”.`,
-            });
-            setNewFolderName("");
-            setNewFolderOpen(false);
-            // The flat search doesn't show empty folders, so the file list
-            // won't change visually — but reload anyway in case the user
-            // already moved something here.
-            loadFiles(query, searchMode, root);
-        } catch (e) {
-            setNewFolderHint({ kind: "error", text: getErrorMessage(e) });
-        } finally {
-            setNewFolderBusy(false);
-        }
     }
 
     // ── Batch convert ─────────────────────────────────────────────────────
@@ -439,39 +408,8 @@ export default function FileBrowser({
                             onRefresh={() =>
                                 loadFiles(query, searchMode, root)
                             }
-                            showNewFolder={root === "library"}
-                            newFolderOpen={newFolderOpen}
-                            onToggleNewFolder={() => {
-                                setNewFolderOpen((v) => !v);
-                                setNewFolderHint(null);
-                                setNewFolderName("");
-                            }}
+                            onOpenExplorer={() => setExplorerOpen(true)}
                         />
-
-                        {root === "library" && newFolderOpen && (
-                            <NewFolderInput
-                                value={newFolderName}
-                                busy={newFolderBusy}
-                                onChange={setNewFolderName}
-                                onSubmit={handleMkdir}
-                                onCancel={() => {
-                                    setNewFolderOpen(false);
-                                    setNewFolderName("");
-                                    setNewFolderHint(null);
-                                }}
-                            />
-                        )}
-                        {newFolderHint && (
-                            <p
-                                className={
-                                    newFolderHint.kind === "success"
-                                        ? "text-xs text-success"
-                                        : "text-xs text-destructive"
-                                }
-                            >
-                                {newFolderHint.text}
-                            </p>
-                        )}
 
                         <div className="grid grid-cols-1 lg:grid-cols-[3fr_4fr] gap-4 items-start">
                             <FileList
@@ -554,6 +492,26 @@ export default function FileBrowser({
                     </div>
                 </CollapsibleContent>
             </div>
+
+            <LibraryExplorerSheet
+                open={explorerOpen}
+                onOpenChange={setExplorerOpen}
+                onSelectFile={(file, pickedRoot) => {
+                    // Drop the user onto the tab matching the root they
+                    // picked from so the existing work-area flows take
+                    // over. Mirrors the Patreon-bridge handoff.
+                    if (root !== pickedRoot) {
+                        setRoot(pickedRoot);
+                        setBatchSelected(new Set());
+                        loadFiles(query, searchMode, pickedRoot);
+                    }
+                    setSelected(file);
+                    rootRef.current?.scrollIntoView({
+                        behavior: "smooth",
+                        block: "start",
+                    });
+                }}
+            />
         </Collapsible>
     );
 }
@@ -584,10 +542,11 @@ interface SearchRowProps {
     batchMode: boolean;
     onToggleBatchMode: () => void;
     onRefresh: () => void;
-    /** Library tab only; the Downloads tab doesn't curate folder structure. */
-    showNewFolder: boolean;
-    newFolderOpen: boolean;
-    onToggleNewFolder: () => void;
+    /** Opens the LibraryExplorerSheet for folder-tree navigation. The
+     *  sheet has its own root selector (Library / Downloads), so it
+     *  doesn't take its cue from the active tab; the user picks where
+     *  to browse from inside it. */
+    onOpenExplorer: () => void;
 }
 
 function SearchRow({
@@ -599,9 +558,7 @@ function SearchRow({
     batchMode,
     onToggleBatchMode,
     onRefresh,
-    showNewFolder,
-    newFolderOpen,
-    onToggleNewFolder,
+    onOpenExplorer,
 }: SearchRowProps) {
     return (
         <div className="flex flex-wrap gap-2 items-center">
@@ -641,20 +598,17 @@ function SearchRow({
                 )}
             </ToggleGroup>
 
-            {showNewFolder && (
-                <Button
-                    size="sm"
-                    variant={newFolderOpen ? "default" : "outline"}
-                    onClick={onToggleNewFolder}
-                    className="shrink-0 gap-1.5"
-                    title="Create a new folder in the library"
-                    aria-label="Create a new folder"
-                    aria-pressed={newFolderOpen}
-                >
-                    <FolderPlus size={14} aria-hidden />
-                    <span className="hidden sm:inline">New folder</span>
-                </Button>
-            )}
+            <Button
+                size="sm"
+                variant="outline"
+                onClick={onOpenExplorer}
+                className="shrink-0 gap-1.5"
+                title="Browse the library folder tree, create folders, delete entries"
+                aria-label="Browse library"
+            >
+                <FolderOpen size={14} aria-hidden />
+                <span className="hidden sm:inline">Browse</span>
+            </Button>
             <Button
                 size="sm"
                 variant={batchMode ? "default" : "outline"}
@@ -680,70 +634,6 @@ function SearchRow({
                     aria-hidden
                     className={loading ? "animate-spin" : ""}
                 />
-            </Button>
-        </div>
-    );
-}
-
-interface NewFolderInputProps {
-    value: string;
-    busy: boolean;
-    onChange: (v: string) => void;
-    onSubmit: () => void;
-    onCancel: () => void;
-}
-
-function NewFolderInput({
-    value,
-    busy,
-    onChange,
-    onSubmit,
-    onCancel,
-}: NewFolderInputProps) {
-    return (
-        <div className="flex gap-2 items-center bg-muted/40 border border-border rounded-md px-3 py-2">
-            <FolderPlus
-                size={14}
-                aria-hidden
-                className="text-muted-foreground shrink-0"
-            />
-            <Input
-                autoFocus
-                value={value}
-                onChange={(e) => onChange(e.target.value)}
-                onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                        e.preventDefault();
-                        onSubmit();
-                    } else if (e.key === "Escape") {
-                        e.preventDefault();
-                        onCancel();
-                    }
-                }}
-                placeholder="New folder name"
-                disabled={busy}
-                aria-label="New folder name"
-                className="flex-1 h-8 font-mono text-sm"
-            />
-            <Button
-                size="sm"
-                variant="outline"
-                onClick={onSubmit}
-                disabled={busy || !value.trim()}
-                className="shrink-0"
-                aria-label="Create folder"
-            >
-                <Check size={14} aria-hidden />
-            </Button>
-            <Button
-                size="sm"
-                variant="ghost"
-                onClick={onCancel}
-                disabled={busy}
-                className="shrink-0"
-                aria-label="Cancel new folder"
-            >
-                <X size={14} aria-hidden />
             </Button>
         </div>
     );

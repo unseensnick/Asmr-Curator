@@ -14,7 +14,6 @@ paths:
   - `/api/files*`, `/api/rename`, `/api/convert` validate against the `root` field of the request (`library` → `LIBRARY_PATH`, `downloads` → `DOWNLOAD_PATH`).
   - `/api/patreon/*` ingest endpoints always validate against `DOWNLOAD_PATH`.
   - `/api/mkdir` and `/api/move`'s destination always validate against `LIBRARY_PATH` (the curated archive is the only writable target for new structure); `/api/move`'s source uses the `from_root` field.
-  - `/api/system/explore` validates against the request's `root`.
   - Use `validate_under_root` / `validate_under_library` / `validate_under_download` in `backend/main.py` — never roll a hand check.
 - Sanitise output to prevent XSS in the React UI. Never dangerouslySetInnerHTML user-supplied strings.
 - Never log secrets, tokens, or absolute filesystem paths containing PII.
