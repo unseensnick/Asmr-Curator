@@ -66,22 +66,6 @@
       .status { font-size: 12px; margin-top: 12px; min-height: 16px; color: var(--muted); }
       .status.ok { color: #22c55e; }
       .status.err { color: #ef4444; }
-      .toggle {
-        display: flex;
-        align-items: flex-start;
-        gap: 10px;
-        margin: 20px 0 0;
-        cursor: pointer;
-        user-select: none;
-      }
-      .toggle input[type="checkbox"] {
-        margin: 3px 0 0;
-        flex-shrink: 0;
-        accent-color: var(--accent-strong);
-      }
-      .toggle-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-      .toggle-title { font-size: 13px; font-weight: 500; }
-      .toggle-desc { font-size: 11px; color: var(--muted); line-height: 1.5; }
     </style>
   </head>
   <body>
@@ -90,8 +74,8 @@
     <label for="backend-url">Backend URL</label>
     <input id="backend-url" type="text" spellcheck="false" placeholder="http://localhost:8000" />
     <p class="hint">
-      The base URL where the ASMR Workbench backend is running. The extension
-      posts captured cookies and audio URLs here.
+      The base URL of the ASMR Workbench backend. The extension posts your
+      Patreon and Google session cookies here when you click Sync.
     </p>
 
     <div class="row">
@@ -99,19 +83,6 @@
       <button id="test" class="secondary">Test connection</button>
     </div>
     <p id="status" class="status"></p>
-
-    <label class="toggle" for="auto-ingest">
-      <input id="auto-ingest" type="checkbox" />
-      <span class="toggle-text">
-        <span class="toggle-title">Auto-download captures when post is detected</span>
-        <span class="toggle-desc">
-          When a captured audio URL can be matched back to a Patreon post (via the
-          parent tab or a recent in-post link click), download it to the backend
-          immediately without opening this popup. Captures that can't be auto-resolved
-          still wait in the popup for a manual <em>Download</em> click.
-        </span>
-      </span>
-    </label>
 
     <script src="lib/storage.js"></script>
     <script src="options.js"></script>
