@@ -5,7 +5,7 @@
 (function () {
   const browserApi = window.browser || window.chrome;
 
-  const els = {
+  const uiElements = {
     syncBtn: document.getElementById("sync-cookie"),
     cookieStatus: document.getElementById("cookie-status"),
     optionsLink: document.getElementById("options-link"),
@@ -23,33 +23,33 @@
       return;
     }
     if (!res || !res.ok || !res.hasUpdate) return;
-    els.updateBannerVersion.textContent = `v${res.latest}`;
-    els.updateBannerMeta.textContent = `installed v${res.installed}`;
-    els.updateBannerLink.href =
+    uiElements.updateBannerVersion.textContent = `v${res.latest}`;
+    uiElements.updateBannerMeta.textContent = `installed v${res.installed}`;
+    uiElements.updateBannerLink.href =
       "https://github.com/unseensnick/Asmr-Curator/releases/latest";
-    els.updateBanner.classList.add("show");
+    uiElements.updateBanner.classList.add("show");
   }
 
   function setStatus(text, kind) {
-    els.cookieStatus.textContent = text;
-    els.cookieStatus.classList.remove("ok", "err");
-    if (kind) els.cookieStatus.classList.add(kind);
+    uiElements.cookieStatus.textContent = text;
+    uiElements.cookieStatus.classList.remove("ok", "err");
+    if (kind) uiElements.cookieStatus.classList.add(kind);
   }
 
   async function onSyncCookie() {
-    els.syncBtn.disabled = true;
+    uiElements.syncBtn.disabled = true;
     setStatus("Syncing Patreon + Google cookies…");
     let res;
     try {
       res = await browserApi.runtime.sendMessage({ type: "SYNC_COOKIE" });
     } catch (err) {
       setStatus(`Failed: ${err.message || err}`, "err");
-      els.syncBtn.disabled = false;
+      uiElements.syncBtn.disabled = false;
       return;
     }
     if (!res) {
       setStatus("Failed: no response from background", "err");
-      els.syncBtn.disabled = false;
+      uiElements.syncBtn.disabled = false;
       return;
     }
     // Surface each half — a partial success (Patreon ok, Google not logged
@@ -63,11 +63,11 @@
       (res.ok ? "Synced " : "Partial sync — ") + parts.join(" · "),
       res.ok ? "ok" : "err",
     );
-    els.syncBtn.disabled = false;
+    uiElements.syncBtn.disabled = false;
   }
 
-  els.syncBtn.addEventListener("click", onSyncCookie);
-  els.optionsLink.addEventListener("click", (e) => {
+  uiElements.syncBtn.addEventListener("click", onSyncCookie);
+  uiElements.optionsLink.addEventListener("click", (e) => {
     e.preventDefault();
     browserApi.runtime.openOptionsPage();
   });
