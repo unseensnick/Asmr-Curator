@@ -16,7 +16,7 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ### Additions
 
-- **Toolbar icon.** Extension now ships with the ASMR Curator brand mark (`extension/icons/icon.svg`, the same SVG the web app uses as its favicon) instead of falling back to the browser's default puzzle-piece glyph.
+- **Toolbar icon.** Ships with the ASMR Curator brand mark (the same SVG the web app uses as its favicon) instead of the browser's default puzzle-piece glyph.
 
 ## [0.1.1]
 
