@@ -22,7 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { API, apiGet, apiPost, type FileRoot } from "@/lib/api";
+import { API, apiGet, apiPost, buildQueryString, type FileRoot } from "@/lib/api";
 import { FORMAT_EXT, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
 import type {
     ConvertFormat,
@@ -140,12 +140,13 @@ export default function FileBrowser({
         setLoading(true);
         setError("");
         try {
-            const params = new URLSearchParams();
-            if (q.trim()) params.set("q", q.trim());
-            params.set("search_in", mode);
-            params.set("root", rt);
             const data = await apiGet<SearchResponse>(
-                `${API.search}?${params.toString()}`,
+                API.search +
+                    buildQueryString({
+                        q: q.trim(),
+                        search_in: mode,
+                        root: rt,
+                    }),
             );
             setFiles(data.files);
         } catch (e) {
@@ -167,7 +168,7 @@ export default function FileBrowser({
     async function refreshDownloadsCount() {
         try {
             const data = await apiGet<SearchResponse>(
-                `${API.search}?root=downloads`,
+                API.search + buildQueryString({ root: "downloads" }),
             );
             setDownloadsCount(data.files.length);
         } catch {

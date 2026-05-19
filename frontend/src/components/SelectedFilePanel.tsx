@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { API, apiGet, apiPost, type FileRoot } from "@/lib/api";
+import { API, apiGet, apiPost, buildQueryString, type FileRoot } from "@/lib/api";
 import {
     FORMAT_EXT,
     METADATA_COMPATIBLE_EXTS,
@@ -415,10 +415,8 @@ function MoveToLibrarySection({
     async function loadSubdir(s: string) {
         setLoading(true);
         try {
-            const params = new URLSearchParams({ root: "library" });
-            if (s) params.set("subdir", s);
             const data = await apiGet<ListedDirResponse>(
-                `${API.files}?${params.toString()}`,
+                API.files + buildQueryString({ root: "library", subdir: s }),
             );
             setEntries(
                 data.entries

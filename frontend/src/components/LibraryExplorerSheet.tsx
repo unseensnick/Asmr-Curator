@@ -48,7 +48,7 @@ import {
     SheetDescription,
     SheetTitle,
 } from "@/components/ui/sheet";
-import { API, apiGet, apiPost, type FileRoot } from "@/lib/api";
+import { API, apiGet, apiPost, buildQueryString, type FileRoot } from "@/lib/api";
 import { METADATA_COMPATIBLE_EXTS, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
 import type { FileEntry, ListedDirResponse } from "@/lib/types";
 import { getErrorMessage } from "@/lib/utils";
@@ -325,10 +325,8 @@ export default function LibraryExplorerSheet({
         setLoading(true);
         setError("");
         try {
-            const params = new URLSearchParams({ root: r });
-            if (s) params.set("subdir", s);
             const data = await apiGet<ListedDirResponse>(
-                `${API.files}?${params.toString()}`,
+                API.files + buildQueryString({ root: r, subdir: s }),
             );
             setEntries(data.entries);
         } catch (e) {
@@ -370,14 +368,14 @@ export default function LibraryExplorerSheet({
         let stale = false;
         const timer = setTimeout(async () => {
             try {
-                const params = new URLSearchParams({
-                    root,
-                    q,
-                    search_in: "both",
-                });
-                if (subdir) params.set("subdir", subdir);
                 const data = await apiGet<SearchResponse>(
-                    `${API.search}?${params.toString()}`,
+                    API.search +
+                        buildQueryString({
+                            root,
+                            q,
+                            search_in: "both",
+                            subdir,
+                        }),
                 );
                 if (stale) return;
                 setSearchResults(data.files);
@@ -1030,12 +1028,8 @@ export default function LibraryExplorerSheet({
             return;
         }
         try {
-            const params = new URLSearchParams({
-                root,
-                subdir: entry.path,
-            });
             const data = await apiGet<ListedDirResponse>(
-                `${API.files}?${params.toString()}`,
+                API.files + buildQueryString({ root, subdir: entry.path }),
             );
             setDeleteCandidate({ entry, contentsCount: data.entries.length });
         } catch {

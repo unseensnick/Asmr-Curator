@@ -106,6 +106,23 @@ async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
+// Build a `?key=val&key2=val2` suffix from a flat object, skipping
+// undefined / null / empty-string entries so callers don't have to
+// branch on every optional parameter before stringifying. Returns
+// `""` (empty string) when no entries survive — safe to concatenate
+// directly with the base path.
+export function buildQueryString(
+  params: Record<string, string | number | undefined | null>,
+): string {
+  const usp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === "") continue;
+    usp.set(k, String(v));
+  }
+  const s = usp.toString();
+  return s ? `?${s}` : "";
+}
+
 export { apiGet, apiPost, apiDelete, apiPut, apiPatch };
 
 // ── Patreon helpers ──────────────────────────────────────────────────────────

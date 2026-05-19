@@ -35,6 +35,8 @@ paths:
 - **`backend/main.py`** — all FastAPI routes; no separate router files.
 - **`backend/database.py`** — SQLite schema, seeding (`DEFAULT_VOCABULARY`, `DEFAULT_SUPPRESSED`), all CRUD helpers. No ORM. Stores the Patreon session cookie under `PATREON_COOKIE_KEY`.
 - **`backend/patreon_fetch.py`** — subprocess wrapper around `patreon-dl`; reads cookie from the DB.
+- **`backend/drive_fetch.py`** — Playwright-driven Drive scrape behind `/api/patreon/ingest-drive-link`. Loads the Drive viewer with the synced Google cookie, intercepts the playback URL, streams the audio. Serialises per-account via a semaphore — Google's mid-stream cookie rotation can't be raced.
+- **`backend/audio_utils.py`** — pure helpers shared between the FastAPI handlers and `drive_fetch.py`: URL cleaning, filename derivation, audio-stream preference. Lives separately so the Playwright module imports it without a circular dependency back into FastAPI.
 - **`frontend/src/App.tsx`** — root layout, dark mode, global state (dict, extracted tags, selected file), orchestrates all panels. No state library.
 - **`frontend/src/lib/parser.ts`** — all LLM response parsing: title/tag extraction, pipe vs. parenthetical splitting, alias normalisation. **Client-side only.**
 - **`frontend/src/lib/api.ts`** — thin `fetch` wrapper (GET/POST/PUT/PATCH/DELETE); all API calls go through here.
