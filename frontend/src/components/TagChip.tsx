@@ -1,4 +1,21 @@
-import { Check, GripVertical, X } from "lucide-react";
+import { Check, GripVertical, Plus, X } from "lucide-react";
+import { useMemo, useState } from "react";
+
+import {
+    ContextMenu,
+    ContextMenuContent,
+    ContextMenuItem,
+    ContextMenuLabel,
+    ContextMenuSeparator,
+    ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import { Input } from "@/components/ui/input";
+import {
+    Popover,
+    PopoverAnchor,
+    PopoverContent,
+} from "@/components/ui/popover";
+import type { VocabEntry } from "@/lib/types";
 
 interface TagChipProps {
     label: string;
@@ -17,6 +34,19 @@ interface TagChipProps {
     /** Tag is not in the current dictionary. Renders with a faint warm-amber
      *  tint so the user can spot "review me" tags during composition. */
     novel?: boolean;
+
+    /** Full vocabulary list, used by the right-click "Add as alias of…"
+     *  picker to filter canonicals as the user types. Required when
+     *  `novel` is true; otherwise unused. */
+    vocabulary?: VocabEntry[];
+
+    /** Add this chip's label to the dictionary as a new canonical entry.
+     *  Wired to the right-click "Add to dictionary as new tag" item. */
+    onPromoteToCanonical?: (text: string) => Promise<void>;
+
+    /** Add this chip's label as an alias of an existing canonical entry.
+     *  Wired to the right-click "Add as alias of…" submenu's picker. */
+    onPromoteToAlias?: (text: string, canonical: VocabEntry) => Promise<void>;
 }
 
 /**
@@ -28,10 +58,10 @@ interface TagChipProps {
  *   - Canonical (default): chip with handle + clickable mono label + remove.
  *   - Novel (`novel=true`): same shape with `bg-warning/10` warm-amber tint
  *     to mark "not in your dictionary yet" without nagging — the color is
- *     the signal, plus a tooltip explains it for non-visual users. The
- *     test pane already uses Matched/Novel/Suppressed pills; this is the
- *     same idea quieter, suited to a composing surface rather than a
- *     grading surface.
+ *     the signal, plus a tooltip explains it for non-visual users. A
+ *     right-click context menu offers "Add to dictionary as new tag"
+ *     (creates a canonical) or "Add as alias of…" (picks an existing
+ *     canonical via a searchable popover).
  *   - Edit: inline `<input>` autosizes to character count, with save +
  *     cancel buttons. Enter saves, Esc cancels, blur saves.
  *
@@ -52,7 +82,17 @@ export default function TagChip({
     onSaveEdit,
     onCancelEdit,
     novel = false,
+    vocabulary = [],
+    onPromoteToCanonical,
+    onPromoteToAlias,
 }: TagChipProps) {
+    // Alias-picker popover state. Opens via the right-click menu's
+    // "Add as alias of…" item; the menu auto-closes on select, so we
+    // defer the open by one frame to avoid Radix focus-scope churn
+    // (same pattern LibraryExplorerSheet uses for menu → dialog).
+    const [aliasPickerOpen, setAliasPickerOpen] = useState(false);
+    const [promoting, setPromoting] = useState(false);
+
     if (editing) {
         return (
             <div className="inline-flex items-center gap-1.5 bg-card border border-primary/40 ring-2 ring-primary/15 rounded-md px-2.5 py-1.5">
@@ -101,13 +141,40 @@ export default function TagChip({
         }
     }
 
+    async function handleAddCanonical() {
+        if (!onPromoteToCanonical || promoting) return;
+        setPromoting(true);
+        try {
+            await onPromoteToCanonical(label);
+        } catch {
+            // Caller (App) surfaces errors via the dictionary modal /
+            // toast surface in the future; for now a failed promote
+            // just leaves the chip as-is so the user can retry.
+        } finally {
+            setPromoting(false);
+        }
+    }
+
+    async function handlePickAlias(canonical: VocabEntry) {
+        if (!onPromoteToAlias || promoting) return;
+        setAliasPickerOpen(false);
+        setPromoting(true);
+        try {
+            await onPromoteToAlias(label, canonical);
+        } catch {
+            // See handleAddCanonical — silent fail leaves the chip novel.
+        } finally {
+            setPromoting(false);
+        }
+    }
+
     const baseClasses =
         "group/chip inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 cursor-grab select-none active:cursor-grabbing transition-colors border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40";
     const chromeClasses = novel
         ? "bg-warning/10 border-warning/30 hover:border-warning/50"
         : "bg-card border-border hover:border-muted-foreground/40";
 
-    return (
+    const chipBody = (
         <div
             role="button"
             tabIndex={0}
@@ -119,7 +186,7 @@ export default function TagChip({
             onKeyDown={handleKeyDown}
             title={
                 novel
-                    ? "Not in your dictionary yet. Click to edit."
+                    ? "Not in your dictionary yet. Click to edit, right-click to add."
                     : "Click to edit"
             }
             aria-label={`Edit tag ${label}`}
@@ -145,6 +212,143 @@ export default function TagChip({
             >
                 <X size={14} aria-hidden />
             </button>
+        </div>
+    );
+
+    // Non-novel chips: no right-click menu, no alias picker — the X button
+    // and click-to-edit cover everything a canonical chip needs.
+    if (!novel) {
+        return chipBody;
+    }
+
+    return (
+        <Popover open={aliasPickerOpen} onOpenChange={setAliasPickerOpen}>
+            <ContextMenu>
+                <ContextMenuTrigger asChild>
+                    <PopoverAnchor asChild>{chipBody}</PopoverAnchor>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                    <ContextMenuLabel>Add to dictionary</ContextMenuLabel>
+                    <ContextMenuItem
+                        disabled={!onPromoteToCanonical || promoting}
+                        onSelect={() => {
+                            // rAF: let the menu close + restore focus before the
+                            // network call (matches the LibraryExplorerSheet
+                            // pattern for menu → action handoffs).
+                            requestAnimationFrame(() => {
+                                void handleAddCanonical();
+                            });
+                        }}
+                    >
+                        <Plus aria-hidden />
+                        As new canonical tag
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem
+                        disabled={
+                            !onPromoteToAlias ||
+                            promoting ||
+                            vocabulary.length === 0
+                        }
+                        onSelect={() => {
+                            requestAnimationFrame(() =>
+                                setAliasPickerOpen(true),
+                            );
+                        }}
+                    >
+                        <Plus aria-hidden />
+                        As alias of…
+                    </ContextMenuItem>
+                </ContextMenuContent>
+            </ContextMenu>
+            <PopoverContent side="bottom" align="start" className="w-72 p-2">
+                <AliasPicker
+                    label={label}
+                    vocabulary={vocabulary}
+                    onPick={handlePickAlias}
+                />
+            </PopoverContent>
+        </Popover>
+    );
+}
+
+interface AliasPickerProps {
+    /** The novel tag text being promoted — shown in the picker header so
+     *  the user can confirm they're about to attach the right text. */
+    label: string;
+    vocabulary: VocabEntry[];
+    onPick: (canonical: VocabEntry) => void;
+}
+
+/**
+ * Search-and-pick canonical for the "Add as alias of…" flow. Lives in
+ * TagChip.tsx because it's only ever rendered by a chip, but kept as its
+ * own function so the picker's filter logic stays focused.
+ */
+function AliasPicker({ label, vocabulary, onPick }: AliasPickerProps) {
+    const [query, setQuery] = useState("");
+
+    const matches = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        const list = q
+            ? vocabulary.filter(
+                  (v) =>
+                      v.canonical.toLowerCase().includes(q) ||
+                      v.aliases.some((a) => a.toLowerCase().includes(q)),
+              )
+            : vocabulary;
+        // Cap at 30 matches — the picker is a quick-add affordance, not a
+        // browse surface. The Dictionary modal exists for full editing.
+        return list.slice(0, 30);
+    }, [query, vocabulary]);
+
+    return (
+        <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1 px-1">
+                <p className="text-xs text-muted-foreground">
+                    Add{" "}
+                    <span className="font-mono text-foreground">{label}</span>{" "}
+                    as an alias of:
+                </p>
+            </div>
+            <Input
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search canonicals"
+                className="h-8 font-mono text-xs"
+                aria-label="Search canonical tags"
+            />
+            <div
+                role="listbox"
+                aria-label="Existing canonical tags"
+                className="flex flex-col gap-0.5 max-h-60 overflow-y-auto"
+            >
+                {matches.length === 0 ? (
+                    <p className="px-2 py-3 text-xs text-muted-foreground italic text-center">
+                        No matching canonicals.
+                    </p>
+                ) : (
+                    matches.map((entry) => (
+                        <button
+                            key={entry.id}
+                            type="button"
+                            role="option"
+                            onClick={() => onPick(entry)}
+                            className="flex flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:outline-none transition-colors"
+                        >
+                            <span className="font-mono text-foreground">
+                                {entry.canonical}
+                            </span>
+                            {entry.aliases.length > 0 && (
+                                <span className="font-mono text-[10px] text-muted-foreground truncate max-w-full">
+                                    {entry.aliases.join(", ")}
+                                </span>
+                            )}
+                        </button>
+                    ))
+                )}
+            </div>
         </div>
     );
 }
