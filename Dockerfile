@@ -21,10 +21,21 @@ WORKDIR /app
 
 # Node + npm runtime (apt-shipped — Node 20 LTS on current Debian); ffmpeg used
 # by /api/convert and by patreon-dl for streamed-video downloads.
+#
+# python3-gyp is needed because Debian's `apt install nodejs` doesn't expose
+# libc to npm's env, so `prebuild-install` can't match better-sqlite3's hosted
+# prebuilds (target=20.19.2 runtime=node arch=x64 libc= platform=linux — note
+# the empty libc field) and falls back to source compile. Debian's node-gyp
+# imports the `gyp` Python module from a separate `python3-gyp` package; if
+# we don't install it the compile dies with `ModuleNotFoundError: No module
+# named 'gyp'`. 1.1.1 sidestepped this by installing patreon-dl from a vendored
+# .tgz that bundled the prebuilt .node, but 2.x installs from the npm registry
+# which only ships source. ~10 MB image cost.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     nodejs \
     npm \
+    python3-gyp \
     && rm -rf /var/lib/apt/lists/*
 
 # patreon-dl from upstream npm. 3.9.0 ships the parser fix that closed issues
