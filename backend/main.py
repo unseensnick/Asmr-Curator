@@ -103,6 +103,13 @@ def root():
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL    = os.environ.get("OLLAMA_MODEL", "qwen2.5vl:7b")
 
+# Subprocess + HTTP timeouts. Named so callers don't sprinkle magic numbers,
+# and so the values are findable when tuning a slow encode / large download.
+FFMPEG_SUBPROCESS_TIMEOUT_S = 300                                       # /api/convert ffmpeg cap
+EXTERNAL_AUDIO_HTTPX_TIMEOUTS = httpx.Timeout(                          # /api/patreon/ingest-external-audio
+    connect=15.0, read=300.0, write=60.0, pool=15.0,
+)
+
 # Read the version from pyproject.toml so the frontend status bar can show it.
 def _read_version() -> str:
     try:
@@ -1094,7 +1101,9 @@ def convert_file(body: ConvertIn):
     cmd = ["ffmpeg", "-i", str(src), "-vn"] + codec_flags + [str(dest)]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=FFMPEG_SUBPROCESS_TIMEOUT_S,
+        )
     except FileNotFoundError:
         raise HTTPException(500, "ffmpeg not found — make sure it is installed")
     except subprocess.TimeoutExpired:
@@ -1418,9 +1427,8 @@ async def ingest_external_audio(body: IngestExternalAudioIn):
     dest_dir = _ingest_dest_dir(post_id, body.artist, body.title)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    timeout = httpx.Timeout(connect=15.0, read=300.0, write=60.0, pool=15.0)
     try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=EXTERNAL_AUDIO_HTTPX_TIMEOUTS, follow_redirects=True) as client:
             async with client.stream("GET", cleaned_url) as response:
                 if response.status_code >= 400:
                     raise HTTPException(
