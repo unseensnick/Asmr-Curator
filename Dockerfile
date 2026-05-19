@@ -19,23 +19,27 @@ FROM python:3.14-slim
 
 WORKDIR /app
 
-# Node + npm runtime (apt-shipped — Node 20 LTS on current Debian); ffmpeg used
-# by /api/convert and by patreon-dl for streamed-video downloads.
-#
-# python3-gyp is needed because Debian's `apt install nodejs` doesn't expose
-# libc to npm's env, so `prebuild-install` can't match better-sqlite3's hosted
-# prebuilds (target=20.19.2 runtime=node arch=x64 libc= platform=linux — note
-# the empty libc field) and falls back to source compile. Debian's node-gyp
-# imports the `gyp` Python module from a separate `python3-gyp` package; if
-# we don't install it the compile dies with `ModuleNotFoundError: No module
-# named 'gyp'`. 1.1.1 sidestepped this by installing patreon-dl from a vendored
-# .tgz that bundled the prebuilt .node, but 2.x installs from the npm registry
-# which only ships source. ~10 MB image cost.
+# ffmpeg for /api/convert + patreon-dl's streamed-video downloads. Node 20 LTS
+# comes from nodesource, not Debian apt — Debian Trixie's `nodejs` package
+# ships a broken split with node-gyp (the gyp Python module lives in a
+# separate apt package that doesn't exist in Trixie), so `npm install` of
+# anything with native bindings dies on the source-compile fallback. Nodesource
+# bundles upstream npm + node-gyp with its own gyp source, so `npm install -g
+# patreon-dl@3.9.0` builds better-sqlite3 cleanly. The build dies one of two
+# ways without this: prebuild-install can't match the hosted binary because
+# Debian's npm leaves `libc=` empty, then source-compile fails with
+# `ModuleNotFoundError: No module named 'gyp'`.
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
     ffmpeg \
-    nodejs \
-    npm \
-    python3-gyp \
+    gnupg \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+       | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
+       > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # patreon-dl from upstream npm. 3.9.0 ships the parser fix that closed issues
