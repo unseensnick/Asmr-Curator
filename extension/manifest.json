@@ -13,6 +13,12 @@
     "http://*/*",
     "https://*/*"
   ],
+  "icons": {
+    "16": "icons/icon.svg",
+    "32": "icons/icon.svg",
+    "48": "icons/icon.svg",
+    "128": "icons/icon.svg"
+  },
   "background": {
     "service_worker": "background.js",
     "scripts": [
@@ -29,7 +35,11 @@
   ],
   "action": {
     "default_title": "ASMR Workbench Companion",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon.svg",
+      "32": "icons/icon.svg"
+    }
   },
   "options_ui": {
     "page": "options.html",
