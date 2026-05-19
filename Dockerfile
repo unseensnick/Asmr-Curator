@@ -9,45 +9,37 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-# ── Stage 2: Production image ──────────────────────────────────────────────────
-# patreon-dl installs IN this stage (not a separate node:25-slim builder stage)
-# so its better-sqlite3 native binary is compiled against the exact Node version
-# that'll run it at runtime. Previously the split builder copied a Node-25-compiled
-# .node into a Node-20 (Debian apt) runtime and crashed on every fetch with
-# `NODE_MODULE_VERSION 141 vs 115` (hotfixed in 1.1.1).
+# ── Stage 2: Install patreon-dl ────────────────────────────────────────────────
+# Must be Node 20 LTS — Stage 3's runtime is Node 20 (Debian apt), and
+# better-sqlite3's native .node binary is compiled here against this stage's
+# Node ABI. Mismatching the two stages was the 1.1.0 bug
+# (NODE_MODULE_VERSION 141 vs 115). Using the official node:20 image instead
+# of `apt install nodejs` on python:3.14-slim avoids the entire Debian-Trixie
+# nodejs/node-gyp mess: node:20 ships upstream npm + node-gyp + prebuilt
+# better-sqlite3 binaries that match its own Node, so `npm install` just works.
+FROM node:20-slim AS patreon-dl
+ARG PATREON_DL_VERSION=3.9.0
+RUN npm install -g --omit=dev patreon-dl@${PATREON_DL_VERSION}
+
+# ── Stage 3: Production image ──────────────────────────────────────────────────
 FROM python:3.14-slim
 
 WORKDIR /app
 
-# ffmpeg for /api/convert + patreon-dl's streamed-video downloads. Node 20 LTS
-# comes from nodesource, not Debian apt — Debian Trixie's `nodejs` package
-# ships a broken split with node-gyp (the gyp Python module lives in a
-# separate apt package that doesn't exist in Trixie), so `npm install` of
-# anything with native bindings dies on the source-compile fallback. Nodesource
-# bundles upstream npm + node-gyp with its own gyp source, so `npm install -g
-# patreon-dl@3.9.0` builds better-sqlite3 cleanly. The build dies one of two
-# ways without this: prebuild-install can't match the hosted binary because
-# Debian's npm leaves `libc=` empty, then source-compile fails with
-# `ModuleNotFoundError: No module named 'gyp'`.
+# Node 20 runtime + ffmpeg (used by /api/convert and patreon-dl's streamed
+# downloads). Debian Trixie ships Node 20.x as `nodejs` — apt install is
+# sufficient at the runtime stage because we copy patreon-dl's already-built
+# node_modules from Stage 2; nothing is compiled here.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
     ffmpeg \
-    gnupg \
-    && mkdir -p /etc/apt/keyrings \
-    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-       | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
-       > /etc/apt/sources.list.d/nodesource.list \
-    && apt-get update && apt-get install -y --no-install-recommends nodejs \
+    nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# patreon-dl from upstream npm. 3.9.0 ships the parser fix that closed issues
-# #134 / #135; pre-3.9.0 we shipped a locally-patched tarball from
-# vendor/patreon-dl/ (see git history if a future regression makes that
-# pattern necessary again).
-ARG PATREON_DL_VERSION=3.9.0
-RUN npm install -g --omit=dev patreon-dl@${PATREON_DL_VERSION}
+# patreon-dl: binary stub + its node_modules tree (with better-sqlite3's
+# prebuilt .node already in place from Stage 2).
+COPY --from=patreon-dl /usr/local/lib/node_modules/patreon-dl /usr/local/lib/node_modules/patreon-dl
+RUN ln -s /usr/local/lib/node_modules/patreon-dl/bin/patreon-dl.js /usr/local/bin/patreon-dl \
+    && chmod +x /usr/local/lib/node_modules/patreon-dl/bin/patreon-dl.js
 
 COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
