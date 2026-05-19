@@ -134,11 +134,6 @@ export default function SelectedFilePanel({
         () => localStorage.getItem("linkArtists") !== "false",
     );
 
-    const extractedArtistRef = useRef(extractedArtist);
-    useEffect(() => {
-        extractedArtistRef.current = extractedArtist;
-    }, [extractedArtist]);
-
     // Pending state-reset timers (rename + convert "done" badges). Tracked
     // in refs so we can cancel them on unmount and avoid React's
     // "setState on unmounted component" warning.
@@ -162,14 +157,17 @@ export default function SelectedFilePanel({
         setMetaTitle(outputPipe);
     }, [outputPipe]);
 
-    // Pre-populate artist when a new file is selected (so switching files
-    // refills the artist box from the latest extract).
-    // ESLint's react-hooks/set-state-in-effect doesn't fire here because the
-    // call is guarded by a conditional.
+    // Pre-populate artist when a new file is selected OR a fresh extract
+    // lands (Patreon / Screenshot). Mirrors the TagsEditor's
+    // "from <artist>" caption — both are driven by the same
+    // `extractedArtist` state, so the rename form's artist field stays in
+    // sync with what the user sees above. Previously this only fired on
+    // file change, so an extract running AFTER the file was selected
+    // didn't update the artist box even though the "from <artist>"
+    // caption did.
     useEffect(() => {
-        if (extractedArtistRef.current)
-            setMetaArtist(extractedArtistRef.current);
-    }, [selected.path]);
+        if (extractedArtist) setMetaArtist(extractedArtist);
+    }, [selected.path, extractedArtist]);
 
     useEffect(() => {
         localStorage.setItem("linkArtists", String(linkArtists));
