@@ -7,6 +7,10 @@ import { getErrorMessage } from "@/lib/utils";
 
 interface ExternalLinksHintProps {
     postId: string;
+    /** Creator handle / full name. Passed to the backend so the ingested
+     * file lands at `<creator>/<post_id> - <title>/` to match patreon-dl. */
+    artist?: string;
+    title?: string;
     links: ExternalLink[];
 }
 
@@ -29,7 +33,7 @@ type RowState =
  *
  * Per-row state is local (one URL succeeds or fails independently of others).
  */
-export default function ExternalLinksHint({ postId, links }: ExternalLinksHintProps) {
+export default function ExternalLinksHint({ postId, artist, title, links }: ExternalLinksHintProps) {
     if (!links.length) return null;
     const n = links.length;
     return (
@@ -40,7 +44,13 @@ export default function ExternalLinksHint({ postId, links }: ExternalLinksHintPr
             </summary>
             <ul className="mt-2 pl-4 flex flex-col gap-2.5">
                 {links.map((link) => (
-                    <ExternalLinkRow key={link.url} postId={postId} link={link} />
+                    <ExternalLinkRow
+                        key={link.url}
+                        postId={postId}
+                        artist={artist}
+                        title={title}
+                        link={link}
+                    />
                 ))}
             </ul>
         </details>
@@ -105,10 +115,12 @@ function stageLabel(event: IngestDriveLinkEvent): string {
 
 interface ExternalLinkRowProps {
     postId: string;
+    artist?: string;
+    title?: string;
     link: ExternalLink;
 }
 
-function ExternalLinkRow({ postId, link }: ExternalLinkRowProps) {
+function ExternalLinkRow({ postId, artist, title, link }: ExternalLinkRowProps) {
     const { url: href, text } = link;
     const [state, setState] = useState<RowState>({ kind: "idle" });
     // AbortController lets us cancel an in-flight stream if the component
@@ -130,7 +142,12 @@ function ExternalLinkRow({ postId, link }: ExternalLinkRowProps) {
                     // Live-update the row label on every event.
                     setState({ kind: "running", progress: event });
                 },
-                { signal: controller.signal, filename: text || undefined },
+                {
+                    signal: controller.signal,
+                    filename: text || undefined,
+                    artist,
+                    title,
+                },
             );
             setState({ kind: "done", audioPath: res.audio_path, size: res.size });
         } catch (err) {
