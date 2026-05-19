@@ -11,6 +11,10 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
+### Fixes
+
+- **`docker compose up --build` no longer chokes on Windows hosts.** A `.dockerignore` now excludes `backend/.venv/`, `frontend/node_modules/`, `.git/`, `data/`, and other host-only directories from the build context. The Linux venv's `lib64` symlink was breaking Docker's file-walker on Windows; the change also drops build-context transfer from ~72 MB to a few MB and speeds up builds noticeably on every host.
+
 ## [2.0.2]
 
 ### Other

@@ -1,0 +1,71 @@
+# Files / directories sent in the Docker build context but never needed inside
+# the image. Keeps context transfer small (~few MB instead of ~72 MB+),
+# prevents host-only state from leaking into layers, and dodges Windows
+# symlink-traversal errors when reading the Linux venv.
+
+# ── Dev environments ──────────────────────────────────────────────────────────
+# Image builds its own venv via Stage 2's `pip install -r requirements.txt`;
+# host venv's `lib64` is a symlink Windows can't read.
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.pytest_cache/
+backend/.python-version
+backend/uv.lock
+frontend/node_modules/
+frontend/dist/
+frontend/components.json
+
+# ── Host-only state ───────────────────────────────────────────────────────────
+data/                  # SQLite db (bind-mounted at runtime)
+.env                   # secrets — never bake into an image layer
+.env.local
+.env.*.local
+.impeccable/           # frontend design scratchpad
+
+# ── Tooling / metadata not needed at runtime ──────────────────────────────────
+.git/
+.github/
+.gitignore
+.gitattributes
+**/.gitignore
+.devcontainer/
+.claude/
+.agents/
+.vscode/
+.idea/
+skills-lock.json
+
+# ── Build / release artefacts that the image doesn't need to contain ─────────
+Dockerfile             # used to build the image, not bundled in it
+docker-compose.yml
+docker-compose.dev.yml
+dev.sh
+dev.bat
+
+# ── Browser extension ─────────────────────────────────────────────────────────
+# Shipped separately by .github/workflows/release-extension.yml as a zip
+# release asset; the server image has no reason to carry it.
+extension/
+
+# ── Docs not used at runtime ──────────────────────────────────────────────────
+# (CHANGELOG.md and backend/pyproject.toml are kept — the release workflow
+#  reads CHANGELOG.md; pyproject lives near the package for pytest config.)
+CLAUDE.md
+CLAUDE.local.md*
+DESIGN.md
+PRODUCT.md
+README.md
+
+# ── Tests + editor detritus ───────────────────────────────────────────────────
+backend/tests/
+frontend/src/lib/__tests__/
+*.swp
+.DS_Store
+*.log
+
+# ── Scratch files from the release-prep history rewrite ───────────────────────
+.git-msgs/
+.commit-msg-*.txt
+.rebase-todo
+.reword.sh
