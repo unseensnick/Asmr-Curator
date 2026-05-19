@@ -359,3 +359,28 @@ The **File to Rename** section lets you:
 3. Choose a separator — dash (filesystem-safe) or pipe (for metadata)
 4. Preview the new filename with byte-length indicator (255-byte limit enforced)
 5. Click **Rename File** to apply the change on the server
+
+## License and responsible use
+
+ASMR Curator is released under the [MIT License](LICENSE). The notes below are plain-English context for the legal text; they aren't additional terms.
+
+**Personal use only.** This is a librarian for audio you have legitimate access to — Patreon posts you subscribe to, Drive files shared with your Google account, your own released catalogue. It is not a scraper for content you have not paid for or been granted access to.
+
+**You are responsible for the terms of service of any platform you connect.** Patreon and Google both restrict automated access in their ToS. The tool uses your own session cookies (the same access level as your logged-in browser), but automation of any kind sits in a grey area on those platforms. Whether that's acceptable in your jurisdiction and for your account is your call, not the tool's.
+
+**Don't redistribute copyrighted content.** Personal-use downloads of content you've paid for are generally fair use; sharing those files publicly is infringement. The tool helps you organise *your own* library; what you do with the files after that is on you.
+
+**No warranty.** This is a homelab tool maintained by one person in their spare time. It may break. It may have bugs. It will not page anyone if it does. Run it because it's useful to you, not because anyone promises it will keep working. The full legal disclaimer from the MIT license:
+
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+## Third-party licenses
+
+ASMR Curator bundles or invokes several third-party tools in the Docker image:
+
+- **patreon-dl** ([MIT](https://github.com/patrickkfkan/patreon-dl/blob/master/LICENSE)) — Patreon scraping CLI, invoked as a subprocess.
+- **mutagen** ([GPL-2.0](https://github.com/quodlibet/mutagen/blob/main/COPYING)) — Python audio-metadata library, imported by the backend for ID3/FLAC/MP4 writing. Because the Docker image bundles mutagen alongside this project's code, the combined Docker distribution is subject to GPL-2.0. The source for the combined work is this public repository.
+- **ffmpeg** ([LGPL-2.1+ / GPL-2.0+](https://ffmpeg.org/legal.html), depending on build) — audio conversion, invoked as a subprocess.
+- **Playwright + Chromium** ([Apache-2.0](https://github.com/microsoft/playwright/blob/main/LICENSE)) — headless browser for Drive scraping.
+
+This project's own source code is MIT-licensed; the third-party components retain their original licenses, and the combined Docker image complies with the most restrictive applicable license (GPL-2.0, due to mutagen).
