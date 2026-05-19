@@ -14,6 +14,12 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
+## [0.1.1]
+
+### Fixes
+
+- **Backend URL can now point at any LAN host**, not just `localhost` / `127.0.0.1`. Previously a backend on a remote box (Unraid, separate homelab, reverse-proxied hostname) would fail with `NetworkError when attempting to fetch resource` because the manifest's `host_permissions` were locked to loopback. Broadened to `http://*/*` + `https://*/*` so any user-configured backend URL is reachable.
+
 ## [0.1.0]
 
 First packaged release.
