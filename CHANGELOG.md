@@ -11,6 +11,8 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
+## [2.0.0]
+
 ### Fixes
 
 - **Cold-load dictionary failure is no longer silent.** A backend hiccup at boot used to leave the app sitting with an empty vocabulary and no signal anything was wrong — tags wouldn't match canonical forms, and the user assumed the whole tool was broken. A warning banner now surfaces under the header with a Retry button when the initial `/api/dictionary` fetch fails.
