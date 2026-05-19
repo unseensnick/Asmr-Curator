@@ -54,32 +54,6 @@ jobs:
             echo "END_OF_FILE"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Bump extension manifest version
-        shell: bash
-        run: |
-          # Keep extension/manifest.json's version field in lockstep with the
-          # project release. Chrome Web Store and AMO both refuse uploads that
-          # don't bump the version, so each release ships a freshly-versioned
-          # zip. The bump is ephemeral — it lives in the workflow's checkout
-          # only, never committed back to the repo.
-          jq --arg v "${{ github.event.inputs.version }}" \
-             '.version = $v' extension/manifest.json > extension/manifest.json.tmp
-          mv extension/manifest.json.tmp extension/manifest.json
-          echo "Extension manifest version:"
-          jq -r '.version' extension/manifest.json
-
-      - name: Build extension zip
-        id: extension
-        shell: bash
-        run: |
-          # Chrome Web Store + AMO expect manifest.json at the zip root, so
-          # cd into extension/ first instead of zipping the parent directory.
-          ZIP_NAME="asmr-curator-companion-v${{ github.event.inputs.version }}.zip"
-          (cd extension && zip -r "../$ZIP_NAME" . -x "*.DS_Store" -x ".git/*")
-          ls -lh "$ZIP_NAME"
-          echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
-          echo "zip_path=$GITHUB_WORKSPACE/$ZIP_NAME" >> "$GITHUB_OUTPUT"
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -126,9 +100,7 @@ jobs:
 
             ### Browser extension
 
-            Download `${{ steps.extension.outputs.zip_name }}` from the Assets section below and load it as an unpacked extension via `chrome://extensions` (Chrome / Edge) or `about:debugging` (Firefox 121+). See [`extension/README.md`](https://github.com/${{ github.repository }}/blob/v${{ github.event.inputs.version }}/extension/README.md) for the install walkthrough.
-          files: |
-            ${{ steps.extension.outputs.zip_path }}
+            Run the [Release Extension](https://github.com/${{ github.repository }}/actions/workflows/release-extension.yml) workflow (extension version + `v${{ github.event.inputs.version }}` as the release tag) to attach the companion zip here. The extension is versioned independently — see `extension/CHANGELOG.md`. The two workflows are independent: a failure in one doesn't block the other.
           draft: true
           prerelease: false
         env:
