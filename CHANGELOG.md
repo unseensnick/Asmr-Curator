@@ -15,7 +15,7 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 - **Each release now ships a browser-extension zip as a downloadable asset** (`asmr-curator-companion-v<version>.zip`), built alongside the Docker image by the `Release` workflow with `extension/manifest.json` auto-bumped to match the release version.
 
-## [2.0.0]
+## [2.0.1]
 
 ### Fixes
 
