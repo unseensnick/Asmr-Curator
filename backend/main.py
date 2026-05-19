@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
@@ -37,15 +38,17 @@ log = logging.getLogger("asmr_workbench")
 # of large posts visible in logs before they OOM the server.
 MAX_IMAGE_B64_BYTES = 32 * 1024 * 1024
 
-app = FastAPI(title="ASMR Curator API")
-
-
-@app.on_event("shutdown")
-async def _shutdown_drive_browser() -> None:
-    """Close the shared Chromium kept alive across Drive scrapes so we don't
-    leak a child process on server stop. Safe to call when nothing's been
-    launched yet (drive_fetch tracks the state internally)."""
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Startup work goes here; there isn't any yet.
+    yield
+    # Shutdown: close the shared Chromium kept alive across Drive scrapes
+    # so we don't leak a child process on server stop. Safe to call when
+    # nothing's been launched yet (drive_fetch tracks the state).
     await drive_fetch.close_shared_browser()
+
+
+app = FastAPI(title="ASMR Curator API", lifespan=lifespan)
 
 
 # Resolve frontend dist path — built output from `cd frontend && npm run build`
@@ -680,57 +683,96 @@ class MoveBatchIn(BaseModel):
     to_subdir: str               # one destination subdir under LIBRARY_PATH
 
 
+def _map_move_error_code(exc: HTTPException) -> str:
+    """Translate an HTTPException raised by `_plan_move` into a stable
+    error.code string the client branches on. Decoupled from the
+    user-facing detail message so future copy tweaks don't change the
+    code contract."""
+    if exc.status_code == 409:
+        return "collision"
+    if exc.status_code == 404:
+        return "not_found"
+    if exc.status_code == 400 and "itself" in str(exc.detail):
+        return "cycle"
+    if exc.status_code in (400, 422):
+        return "validation"
+    return "other"
+
+
 @app.post("/api/move/batch")
-def move_batch(body: MoveBatchIn):
+async def move_batch(body: MoveBatchIn):
     """Move many files / folders into a single LIBRARY_PATH destination.
 
-    Partial-success-friendly: never aborts the batch on the first error.
-    Each item gets its own `{ ok, to_path?, error? }` slot in the
-    `results` list so the client can refresh the listing and surface a
-    "moved N of M" banner with per-item failure reasons.
+    Returns `text/event-stream` with one `data:` frame per item plus a
+    final `complete` frame whose payload matches the old JSON response
+    shape (`{ moved, results }`). Streaming has two payoffs over the
+    previous synchronous-JSON design:
 
-    Reuses `_plan_move` for validation so the rules match `/api/move`
-    exactly (existence, cycle, collision, 255-byte name cap).
+      1. Each `shutil.move` runs in `asyncio.to_thread`, so a slow
+         cross-mount copy doesn't hold the FastAPI threadpool slot
+         for the entire batch.
+      2. The client sees per-item progress ("Moving 3 / 5…") instead
+         of a multi-minute spinner with no feedback. Matches the
+         existing `/api/patreon/ingest-drive-link` SSE pattern.
+
+    Partial-success-friendly: any single item's failure becomes an
+    `item` frame with `ok: false` + an error code, and the loop
+    continues to the next.
     """
-    if not body.items:
-        return {"moved": 0, "results": []}
+    items = list(body.items)
 
-    results: list[dict] = []
-    moved = 0
-    for item in body.items:
-        try:
-            src, dest = _plan_move(item.from_path, body.from_root, body.to_subdir, item.new_name)
-            shutil.move(str(src), str(dest))
-        except HTTPException as e:
-            # Map status code to a stable error.code the client can branch on.
-            code = (
-                "collision" if e.status_code == 409
-                else "not_found" if e.status_code == 404
-                else "cycle" if (e.status_code == 400 and "itself" in str(e.detail))
-                else "validation" if e.status_code in (400, 422)
-                else "other"
+    async def gen():
+        results: list[dict] = []
+        moved = 0
+        total = len(items)
+        yield f"data: {json.dumps({'event': 'started', 'total': total})}\n\n"
+        for i, item in enumerate(items):
+            entry: dict
+            try:
+                src, dest = _plan_move(
+                    item.from_path,
+                    body.from_root,
+                    body.to_subdir,
+                    item.new_name,
+                )
+                # Run the actual filesystem move off the event loop so
+                # the SSE generator stays responsive while a multi-
+                # gigabyte cross-mount copy is in flight.
+                await asyncio.to_thread(shutil.move, str(src), str(dest))
+                entry = {
+                    "from_path": item.from_path,
+                    "ok": True,
+                    "to_path": str(dest.relative_to(LIBRARY_PATH.resolve())),
+                }
+                moved += 1
+            except HTTPException as e:
+                entry = {
+                    "from_path": item.from_path,
+                    "ok": False,
+                    "error": {
+                        "code": _map_move_error_code(e),
+                        "message": str(e.detail),
+                    },
+                }
+            except OSError as e:
+                entry = {
+                    "from_path": item.from_path,
+                    "ok": False,
+                    "error": {"code": "other", "message": f"Move failed: {e}"},
+                }
+            results.append(entry)
+            yield (
+                "data: "
+                + json.dumps({"event": "item", "index": i, "total": total, **entry})
+                + "\n\n"
             )
-            results.append({
-                "from_path": item.from_path,
-                "ok": False,
-                "error": {"code": code, "message": str(e.detail)},
-            })
-            continue
-        except OSError as e:
-            results.append({
-                "from_path": item.from_path,
-                "ok": False,
-                "error": {"code": "other", "message": f"Move failed: {e}"},
-            })
-            continue
-        results.append({
-            "from_path": item.from_path,
-            "ok": True,
-            "to_path": str(dest.relative_to(LIBRARY_PATH.resolve())),
-        })
-        moved += 1
+        yield (
+            "data: "
+            + json.dumps({"event": "complete", "moved": moved, "results": results})
+            + "\n\n"
+        )
 
-    return {"moved": moved, "results": results}
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 class DeleteIn(BaseModel):

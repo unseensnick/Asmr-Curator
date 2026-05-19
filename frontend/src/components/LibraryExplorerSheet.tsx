@@ -1,10 +1,12 @@
 import {
+    BookMarked,
     Check,
     ChevronRight,
     ClipboardPaste,
     File,
     Folder,
     FolderPlus,
+    Inbox,
     Loader2,
     Music2,
     PenLine,
@@ -15,12 +17,15 @@ import {
     X,
 } from "lucide-react";
 import {
+    memo,
     useCallback,
     useEffect,
     useMemo,
     useRef,
     useState,
+    type ComponentType,
     type MouseEvent as ReactMouseEvent,
+    type ReactNode,
 } from "react";
 
 import {
@@ -48,7 +53,14 @@ import {
     SheetDescription,
     SheetTitle,
 } from "@/components/ui/sheet";
-import { API, apiGet, apiPost, buildQueryString, type FileRoot } from "@/lib/api";
+import {
+    API,
+    apiGet,
+    apiPost,
+    buildQueryString,
+    moveBatchStream,
+    type FileRoot,
+} from "@/lib/api";
 import { METADATA_COMPATIBLE_EXTS, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
 import type { FileEntry, ListedDirResponse } from "@/lib/types";
 import { getErrorMessage } from "@/lib/utils";
@@ -63,32 +75,11 @@ interface LibraryExplorerSheetProps {
     onSelectFile: (file: FileEntry, root: FileRoot) => void;
 }
 
-// Synthetic top-level rows. The explorer opens to a "Locations" view
-// that shows Library and Downloads side by side; drilling into either
-// scopes the rest of navigation to that root. Their paths are sentinels
-// that handleEntryClick matches on — they aren't real filesystem paths
-// and never reach the backend.
-const ROOT_CARD_LIBRARY = "__locations:library";
-const ROOT_CARD_DOWNLOADS = "__locations:downloads";
 // Path sentinel used by the DeleteCandidate state to route through a
 // bulk-delete code path in confirmDelete (loops /api/delete per item)
 // without inventing a parallel dialog component for what's a small
 // branch on the same prompt.
 const BULK_DELETE_SENTINEL = "__bulk:delete";
-const LOCATION_ENTRIES: Entry[] = [
-    {
-        name: "Library",
-        type: "dir",
-        ext: null,
-        path: ROOT_CARD_LIBRARY,
-    },
-    {
-        name: "Downloads",
-        type: "dir",
-        ext: null,
-        path: ROOT_CARD_DOWNLOADS,
-    },
-];
 
 function rootLabel(root: FileRoot): string {
     return root === "library" ? "Library" : "Downloads";
@@ -120,16 +111,22 @@ interface DeleteCandidate {
      *  >0 = has contents (drives recursive delete + the "N items inside"
      *  copy in the AlertDialog). Always 0 for file candidates. */
     contentsCount: number;
+    /** Bulk-delete only: the first few selected entry names + the total
+     *  selection size. Surfaced in the AlertDialog so the user can
+     *  sanity-check what's about to be removed before confirming —
+     *  drag-select can grab one extra row by accident otherwise. */
+    bulkPreview?: { names: string[]; total: number };
 }
 
 /**
  * Right-side Sheet that lets the user navigate both filesystem roots
- * (LIBRARY_PATH and DOWNLOAD_PATH) folder-by-folder. Opens to a
- * "Locations" top level showing Library and Downloads as two synthetic
- * folder cards; drilling into either scopes the rest of navigation to
- * that root. Per-root affordances:
+ * (LIBRARY_PATH and DOWNLOAD_PATH) folder-by-folder. A persistent left
+ * rail shows Library + Downloads as two root buttons, so switching
+ * roots is always one click away — no top-level "walk in / walk out"
+ * indirection. Per-root affordances:
  *
- *   • Library — full CRUD: rename, delete, new folder, recursive search.
+ *   • Library — full CRUD: rename, delete, new folder, recursive search,
+ *     OS-style multi-select with cut/paste.
  *   • Downloads — read + rename + delete + recursive search. No new
  *     folder (the backend's `/api/mkdir` is library-only by design;
  *     downloads is transient ingest staging, not a curated tree).
@@ -150,12 +147,13 @@ export default function LibraryExplorerSheet({
     onOpenChange,
     onSelectFile,
 }: LibraryExplorerSheetProps) {
-    // `null` = top-level Locations view (Library and Downloads side by
-    // side). A FileRoot value scopes the rest of navigation to that root.
-    // Both `root` and `subdir` are preserved across opens — the user
-    // typically files batches into the same destination, and re-walking
-    // from the top each time is death-by-clicks.
-    const [root, setRoot] = useState<FileRoot | null>(null);
+    // Active filesystem root. Always one of "library" / "downloads" —
+    // the left rail makes both visible at all times, so there's no
+    // "top-level Locations" state to fall back to. Both `root` and
+    // `subdir` are preserved across opens — the user typically files
+    // batches into the same destination, and re-walking from scratch
+    // each time is death-by-clicks.
+    const [root, setRoot] = useState<FileRoot>("library");
     const [subdir, setSubdir] = useState("");
     const [entries, setEntries] = useState<Entry[] | null>(null);
     const [loading, setLoading] = useState(false);
@@ -238,7 +236,7 @@ export default function LibraryExplorerSheet({
     const renamePathRef = useRef<string | null>(null);
     const menuTargetRef = useRef<Entry | null>(null);
     const newFolderOpenRef = useRef(false);
-    const rootRef = useRef<FileRoot | null>(null);
+    const rootRef = useRef<FileRoot>("library");
     const selectedPathsRef = useRef<Set<string>>(new Set());
     const anchorPathRef = useRef<string | null>(null);
     const cutPathsRef = useRef<Set<string> | null>(null);
@@ -289,6 +287,10 @@ export default function LibraryExplorerSheet({
     const dragAdditiveRef = useRef(false);
     const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
     const autoScrollRafRef = useRef<number | null>(null);
+    // Holds the active drag's `onUp` so the close / unmount paths can
+    // force-tear the window listeners + RAF if the Sheet goes away
+    // before the user releases the mouse.
+    const dragCleanupRef = useRef<(() => void) | null>(null);
 
     const resolveMenuTarget = useCallback((e: ReactMouseEvent) => {
         const row = (e.target as HTMLElement | null)?.closest?.(
@@ -337,23 +339,38 @@ export default function LibraryExplorerSheet({
         }
     }, []);
 
-    // Lazy first load + reload on subdir/root change while open. Skipped
-    // at top level — the Locations view renders synthetic cards instead
-    // of hitting the backend.
+    // Lazy first load + reload on subdir/root change while open.
+    //
+    // NOTE(unseensnick): `loadSubdir` does a synchronous setLoading(true)
+    // before kicking off the fetch — the rule flags this as
+    // set-state-in-effect, but it's the standard data-fetching pattern
+    // recommended in the React docs. The synchronous flag is what shows
+    // the spinner before the network response arrives; moving it into
+    // `.then` (the only fix the rule would accept) would lose the
+    // pre-fetch spinner. Re-evaluate if React lands a stable
+    // `useEvent` / data-loader story.
+
     useEffect(() => {
-        if (!open || root === null) return;
+        if (!open) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- see NOTE above
         loadSubdir(subdir, root);
     }, [open, root, subdir, loadSubdir]);
 
-    // Recursive search effect. Empty filter, or top-level Locations view
-    // → folder-listing / synthetic-cards mode (searchResults stays null
-    // and the filter at top level just narrows the two cards client-side).
-    // Non-empty filter inside a chosen root → debounce 200ms, then GET
-    // /api/files/search scoped to the current subdir so the user finds
-    // matches buried deeper without losing their place. The `stale`
-    // token discards results from a superseded request.
+    // Recursive search effect. Empty filter → folder-listing mode
+    // (searchResults stays null). Non-empty filter → debounce 200ms,
+    // then GET /api/files/search scoped to the current subdir so the
+    // user finds matches buried deeper without losing their place. The
+    // `stale` token discards results from a superseded request.
+    //
+    // NOTE(unseensnick): the early-clear branches set searchResults +
+    // searchBusy synchronously when filter goes empty or sheet closes.
+    // `react-hooks/set-state-in-effect` flags it, but the alternative
+    // (carrying the previous results forward visually until the next
+    // user action) is worse UX. Standard debounced-search pattern.
+
     useEffect(() => {
-        if (!open || root === null) {
+        if (!open) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- see NOTE above
             setSearchResults(null);
             setSearchBusy(false);
             return;
@@ -370,12 +387,12 @@ export default function LibraryExplorerSheet({
             try {
                 const data = await apiGet<SearchResponse>(
                     API.search +
-                        buildQueryString({
-                            root,
-                            q,
-                            search_in: "both",
-                            subdir,
-                        }),
+                    buildQueryString({
+                        root,
+                        q,
+                        search_in: "both",
+                        subdir,
+                    }),
                 );
                 if (stale) return;
                 setSearchResults(data.files);
@@ -396,11 +413,17 @@ export default function LibraryExplorerSheet({
     // On close, dismiss any in-flight inline UI (so reopening doesn't
     // resurface a half-typed new-folder name, a stale filter, or an
     // unactioned delete prompt) but PRESERVE `subdir` so the user lands
-    // back where they were working. Filing a batch of 10+ posts into the
-    // same subfolder is the common case; resetting to root each time was
-    // death-by-clicks.
-    useEffect(() => {
-        if (!open) {
+    // back where they were working. Filing a batch of 10+ posts into
+    // the same subfolder is the common case; resetting to root each
+    // time was death-by-clicks.
+    //
+    // Wrapping `onOpenChange` (instead of a useEffect on `open`) puts
+    // the synchronous setState in a callback rather than an effect
+    // body — satisfies `react-hooks/set-state-in-effect` and the
+    // effect would have run on every open-toggle anyway, this is
+    // just the same logic at the cleaner timing.
+    function handleOpenChange(next: boolean) {
+        if (!next) {
             setNewFolderOpen(false);
             setNewFolderName("");
             setError("");
@@ -419,28 +442,34 @@ export default function LibraryExplorerSheet({
             setCutPaths(null);
             setCutOrigin(null);
             setMoveNotice(null);
+            // Drag-select may still be live if the Sheet closed before
+            // the user released the mouse. Tear it down so the window
+            // listeners and auto-scroll RAF don't dangle.
+            dragCleanupRef.current?.();
         }
-    }, [open]);
+        onOpenChange(next);
+    }
 
-    // Selection is contextual to the current view (root + subdir). When
-    // the user navigates, the previously-selected rows aren't on screen
-    // anymore — keeping them in `selectedPaths` would leak ghost state
-    // into Cut, Delete, and the count badge. cutPaths is the opposite:
-    // it's the clipboard, it persists across navigation by design.
+    // Component-unmount safety net for the drag-select listeners — covers
+    // the cases where the parent unmounts the Sheet without first toggling
+    // `open` to false (hot reload, route change).
     useEffect(() => {
-        setSelectedPaths(new Set());
-        setAnchorPath(null);
-    }, [root, subdir]);
+        return () => {
+            dragCleanupRef.current?.();
+        };
+    }, []);
 
-    // Defensive a11y cleanup. Radix can leave `aria-hidden="true"` on
-    // SheetContent when nested portals (ContextMenu, AlertDialog) close
-    // out of sequence with the Sheet's focus scope — the SheetContent
-    // ends up flagged hidden while still containing the focused element,
-    // which the browser warns about as an a11y violation. After every
-    // transient overlay state change (paste, delete, rename, menu open),
-    // sweep open SheetContent nodes and clear any aria-hidden left
-    // behind. setTimeout(0) lets Radix's own cleanup attempt first; we
-    // only step in if it didn't finish.
+
+    // NOTE(unseensnick): defensive workaround for a Radix focus-scope
+    // race. When nested portals (ContextMenu / AlertDialog) close out
+    // of sequence with the parent Sheet, SheetContent ends up flagged
+    // `aria-hidden="true"` while still containing the focused element
+    // — the browser warns about it as an a11y violation. This effect
+    // sweeps open SheetContent nodes after every transient overlay
+    // state change and clears any stuck attribute. setTimeout(0) lets
+    // Radix's own cleanup attempt first; we only step in if it didn't
+    // finish. Re-evaluate on the next radix-ui upgrade and drop if the
+    // upstream behaviour is fixed.
     useEffect(() => {
         if (!open) return;
         const id = window.setTimeout(() => {
@@ -491,12 +520,6 @@ export default function LibraryExplorerSheet({
                 tag === "INPUT" ||
                 tag === "TEXTAREA" ||
                 target?.isContentEditable === true;
-
-            // F2 / Del / N are no-ops at top-level Locations — there's
-            // no folder to rename or create there, and the synthetic
-            // root cards aren't deletable. Cut/paste are also no-ops
-            // outside library.
-            if (rootRef.current === null) return;
 
             // Ctrl/Cmd+X — stage selection for move. Library only.
             if (
@@ -570,8 +593,8 @@ export default function LibraryExplorerSheet({
                 const fromAnchor =
                     anchorPathRef.current && selectedPathsRef.current.size === 1
                         ? list.find(
-                              (en) => en.path === anchorPathRef.current,
-                          ) ?? null
+                            (en) => en.path === anchorPathRef.current,
+                        ) ?? null
                         : null;
                 const ent =
                     fromAnchor ?? hoverRef.current ?? menuTargetRef.current;
@@ -628,23 +651,52 @@ export default function LibraryExplorerSheet({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open]);
 
+    /** Navigation always invalidates the previous view's local
+     *  state: the selection anchor, the right-click menu target,
+     *  and the multi-select set. Inlining the resets at every
+     *  navigation site keeps them off React's set-state-in-effect
+     *  radar — the rule (correctly) calls out reset-on-prop-change
+     *  effects as a smell, and the React docs recommend handling
+     *  the reset where it's caused instead. */
+    function clearViewState() {
+        setSelectedPaths(new Set());
+        setAnchorPath(null);
+        setMenuTarget(null);
+    }
+
+    function switchRoot(next: FileRoot) {
+        if (next === root) return;
+        // Subdir and filter are contextual to the previous root's tree;
+        // the cut clipboard is the explicit exception — it persists by
+        // design so the user can cut in one root and paste in another.
+        setRoot(next);
+        setSubdir("");
+        setFilter("");
+        setNewFolderOpen(false);
+        setMoveNotice(null);
+        clearViewState();
+    }
+
     function drillInto(name: string) {
         const next = subdir ? `${subdir}/${name}` : name;
         setSubdir(next);
         setNewFolderOpen(false);
         setFilter("");
+        clearViewState();
     }
 
     function popTo(idx: number) {
         if (idx < 0) {
             setSubdir("");
             setFilter("");
+            clearViewState();
             return;
         }
         const segments = subdir.split("/");
         setSubdir(segments.slice(0, idx + 1).join("/"));
         setNewFolderOpen(false);
         setFilter("");
+        clearViewState();
     }
 
     async function handleMkdir() {
@@ -672,26 +724,10 @@ export default function LibraryExplorerSheet({
 
     function handleActivate(entry: Entry) {
         // Top-level Locations cards: jump into the chosen root. Clears
-        // any leftover subdir / filter so the user lands at that root's
-        // top (root switch is rare enough that preserving subdir across
-        // roots is more confusing than helpful — folders won't match).
-        if (entry.path === ROOT_CARD_LIBRARY) {
-            setRoot("library");
-            setSubdir("");
-            setFilter("");
-            return;
-        }
-        if (entry.path === ROOT_CARD_DOWNLOADS) {
-            setRoot("downloads");
-            setSubdir("");
-            setFilter("");
-            return;
-        }
         if (entry.type === "dir") {
             drillInto(entry.name);
             return;
         }
-        if (!root) return; // unreachable: files only appear inside a chosen root
         // File row: hand off to the parent FileBrowser. The Sheet closes
         // and the file is selected in the main work area, on the matching
         // tab (library or downloads).
@@ -708,7 +744,7 @@ export default function LibraryExplorerSheet({
             },
             root,
         );
-        onOpenChange(false);
+        handleOpenChange(false);
     }
 
     function handleSelect(
@@ -747,16 +783,12 @@ export default function LibraryExplorerSheet({
         // `event.detail` is 1 on a single click, 2 on the second of a
         // double-click. Routing double-clicks to activate (drill / open)
         // and single-clicks to select gives the OS-style multi-select
-        // model the user expects in Library.
+        // model the user expects in Library. Downloads keeps single-
+        // click = activate (no selection model there — intentional
+        // asymmetry: Library is where the user organises, Downloads
+        // is transient ingest staging).
         const isDouble = e.detail >= 2;
-        const isSyntheticRootCard =
-            entry.path === ROOT_CARD_LIBRARY ||
-            entry.path === ROOT_CARD_DOWNLOADS;
-        // Downloads + the top-level Locations cards keep single-click =
-        // activate (no selection model there — the asymmetry is
-        // intentional: Library is where the user organises, Downloads
-        // is transient).
-        if (isDouble || root !== "library" || isSyntheticRootCard) {
+        if (isDouble || root !== "library") {
             handleActivate(entry);
             return;
         }
@@ -815,21 +847,24 @@ export default function LibraryExplorerSheet({
             return;
         }
         setMoveBusy(true);
+        setMoveNotice(
+            `Moving 0 / ${cut.size} ${cut.size === 1 ? "item" : "items"}…`,
+        );
         try {
-            const body = {
-                items: Array.from(cut).map((from_path) => ({ from_path })),
-                from_root: origin.root,
-                to_subdir: destSubdir,
-            };
-            const data = await apiPost<{
-                moved: number;
-                results: Array<{
-                    from_path: string;
-                    ok: boolean;
-                    to_path?: string;
-                    error?: { code: string; message: string };
-                }>;
-            }>(API.moveBatch, body);
+            const data = await moveBatchStream(
+                {
+                    items: Array.from(cut).map((from_path) => ({ from_path })),
+                    from_root: origin.root,
+                    to_subdir: destSubdir,
+                },
+                (event) => {
+                    if (event.event === "item") {
+                        setMoveNotice(
+                            `Moving ${event.index + 1} / ${event.total}…`,
+                        );
+                    }
+                },
+            );
             const total = data.results.length;
             const fails = data.results.filter((r) => !r.ok);
             if (fails.length === 0) {
@@ -975,9 +1010,11 @@ export default function LibraryExplorerSheet({
             stopAutoScroll();
             window.removeEventListener("mousemove", onMove);
             window.removeEventListener("mouseup", onUp);
+            dragCleanupRef.current = null;
         };
         window.addEventListener("mousemove", onMove);
         window.addEventListener("mouseup", onUp);
+        dragCleanupRef.current = onUp;
     }
 
     async function deleteSelection() {
@@ -986,7 +1023,7 @@ export default function LibraryExplorerSheet({
         // explicitly multi-selected, so a single "Delete N items?"
         // confirmation is the right granularity.
         const sel = Array.from(selectedPathsRef.current);
-        if (!sel.length || rootRef.current === null) return;
+        if (!sel.length) return;
         const visibleList = visibleRef.current ?? [];
         const entries = sel
             .map((p) => visibleList.find((en) => en.path === p))
@@ -1006,6 +1043,7 @@ export default function LibraryExplorerSheet({
         ]
             .filter(Boolean)
             .join(" and ");
+        const BULK_PREVIEW_LIMIT = 5;
         setDeleteCandidate({
             entry: {
                 name: summary,
@@ -1014,11 +1052,14 @@ export default function LibraryExplorerSheet({
                 path: BULK_DELETE_SENTINEL,
             },
             contentsCount: folderCount > 0 ? -2 : 0, // -2 = bulk sentinel
+            bulkPreview: {
+                names: entries.slice(0, BULK_PREVIEW_LIMIT).map((en) => en.name),
+                total: entries.length,
+            },
         });
     }
 
     async function requestDelete(entry: Entry) {
-        if (!root) return; // synthetic root cards aren't deletable
         // Files go straight to confirm; folders preflight a listing so the
         // dialog copy can be precise ("empty" vs "N items inside"). The
         // preflight failure-mode is benign — fall back to a recursive
@@ -1049,7 +1090,6 @@ export default function LibraryExplorerSheet({
     }
 
     async function commitRename(entry: Entry) {
-        if (!root) return;
         const next = renameValue.trim();
         if (!next || next === entry.name) {
             cancelRename();
@@ -1073,7 +1113,7 @@ export default function LibraryExplorerSheet({
     }
 
     async function confirmDelete() {
-        if (!deleteCandidate || !root) return;
+        if (!deleteCandidate) return;
         setDeleteBusy(true);
         try {
             const { entry, contentsCount } = deleteCandidate;
@@ -1131,26 +1171,15 @@ export default function LibraryExplorerSheet({
 
     const breadcrumbs = subdir ? subdir.split("/") : [];
     const isSearching = filter.trim().length > 0;
-    const atTopLevel = root === null;
 
-    // Three render modes:
-    //   1. Top-level Locations (`root === null`) → two synthetic cards,
-    //      client-side filtered by the search input only. No backend.
-    //   2. Recursive search inside a chosen root → flat file results
-    //      with a folder hint relative to the search scope.
-    //   3. Folder listing inside a chosen root → folders first then
-    //      files. The local sort is defensive: the backend already
-    //      returns this order but client sorting keeps it stable
-    //      across re-renders.
+    // Two render modes (the rail handles root selection, so there is no
+    // top-level "no root chosen" case):
+    //   1. Recursive search → flat file results with a folder hint
+    //      relative to the search scope.
+    //   2. Folder listing → folders first then files. Local sort is
+    //      defensive — the backend already returns this order but the
+    //      client sort keeps it stable across re-renders.
     const visible = useMemo<Entry[] | null>(() => {
-        if (atTopLevel) {
-            const q = filter.trim().toLowerCase();
-            return q
-                ? LOCATION_ENTRIES.filter((e) =>
-                      e.name.toLowerCase().includes(q),
-                  )
-                : LOCATION_ENTRIES;
-        }
         if (isSearching) {
             if (!searchResults) return null;
             const prefix = subdir ? subdir + "/" : "";
@@ -1164,8 +1193,8 @@ export default function LibraryExplorerSheet({
                     f.folder === subdir
                         ? ""
                         : prefix && f.folder.startsWith(prefix)
-                          ? f.folder.slice(prefix.length)
-                          : f.folder,
+                            ? f.folder.slice(prefix.length)
+                            : f.folder,
             }));
         }
         if (!entries) return null;
@@ -1173,7 +1202,7 @@ export default function LibraryExplorerSheet({
             if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
             return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
         });
-    }, [atTopLevel, entries, searchResults, isSearching, subdir, filter]);
+    }, [entries, searchResults, isSearching, subdir]);
 
     useEffect(() => {
         visibleRef.current = visible;
@@ -1184,607 +1213,681 @@ export default function LibraryExplorerSheet({
         hoverRef.current = null;
     }, [visible]);
 
-    // Root switch also invalidates the last right-clicked menu target.
-    // Otherwise a synthetic "__locations:library" entry could linger as
-    // a stale F2 anchor after the user picks Open Library from the
-    // top-level menu and then keyboards before hovering anything.
-    useEffect(() => {
-        setMenuTarget(null);
-    }, [root]);
-
     return (
         <>
-        <Sheet open={open} onOpenChange={onOpenChange}>
-            <SheetContent
-                className="w-full sm:max-w-2xl lg:max-w-3xl overflow-hidden"
-                showCloseButton={false}
-                onEscapeKeyDown={(e) => {
-                    // Precedence: rename input → new-folder input →
-                    // cut clipboard → error banner → filter → move
-                    // notice. Each dismisses its own layer before
-                    // letting Escape close the Sheet. The delete-confirm
-                    // AlertDialog runs in its own focus scope and
-                    // handles its Escape separately.
-                    if (renamePath) {
-                        e.preventDefault();
-                        cancelRename();
-                    } else if (newFolderOpen) {
-                        e.preventDefault();
-                        setNewFolderOpen(false);
-                        setNewFolderName("");
-                    } else if (cutPaths) {
-                        e.preventDefault();
-                        clearCut();
-                    } else if (error) {
-                        e.preventDefault();
-                        setError("");
-                    } else if (filter) {
-                        e.preventDefault();
-                        setFilter("");
-                    } else if (moveNotice) {
-                        e.preventDefault();
-                        setMoveNotice(null);
-                    } else if (selectedPaths.size > 0) {
-                        e.preventDefault();
-                        setSelectedPaths(new Set());
-                        setAnchorPath(null);
-                    }
-                }}
-            >
-                <SheetTitle className="sr-only">Browse files</SheetTitle>
-                <SheetDescription className="sr-only">
-                    Navigate the library and downloads folder trees. Pick
-                    Library or Downloads from the Locations view to drill
-                    in. Click a file to open it in the work area; click a
-                    folder to drill in. Right-click anywhere for actions —
-                    a row shows Rename and Delete, and Library also shows
-                    New folder.
-                </SheetDescription>
+            <Sheet open={open} onOpenChange={handleOpenChange}>
+                <SheetContent
+                    className="w-full sm:max-w-2xl lg:max-w-3xl overflow-hidden"
+                    showCloseButton={false}
+                    onEscapeKeyDown={(e) => {
+                        // Precedence: rename input → new-folder input →
+                        // cut clipboard → error banner → filter → move
+                        // notice. Each dismisses its own layer before
+                        // letting Escape close the Sheet. The delete-confirm
+                        // AlertDialog runs in its own focus scope and
+                        // handles its Escape separately.
+                        if (renamePath) {
+                            e.preventDefault();
+                            cancelRename();
+                        } else if (newFolderOpen) {
+                            e.preventDefault();
+                            setNewFolderOpen(false);
+                            setNewFolderName("");
+                        } else if (cutPaths) {
+                            e.preventDefault();
+                            clearCut();
+                        } else if (error) {
+                            e.preventDefault();
+                            setError("");
+                        } else if (filter) {
+                            e.preventDefault();
+                            setFilter("");
+                        } else if (moveNotice) {
+                            e.preventDefault();
+                            setMoveNotice(null);
+                        } else if (selectedPaths.size > 0) {
+                            e.preventDefault();
+                            setSelectedPaths(new Set());
+                            setAnchorPath(null);
+                        }
+                    }}
+                >
+                    <SheetTitle className="sr-only">Browse files</SheetTitle>
+                    <SheetDescription className="sr-only">
+                        Navigate the library and downloads folder trees. The
+                        left rail switches between roots. In Library, click a
+                        file to select, double-click to open, right-click for
+                        actions, F2 to rename, Delete to delete, N for new
+                        folder, Ctrl/Cmd+X then Ctrl/Cmd+V to cut and paste.
+                        In Downloads, click a file to open it in the work
+                        area.
+                    </SheetDescription>
 
-                <ContextMenu>
-                    <ContextMenuTrigger asChild>
-                        <div
-                            className="flex flex-col h-full min-h-0"
-                            onContextMenu={resolveMenuTarget}
-                            onMouseOver={handleBodyMouseOver}
-                            onMouseLeave={handleBodyMouseLeave}
-                        >
-                {/* Header */}
-                <div className="flex items-center gap-3 px-5 py-4 border-b border-border shrink-0">
-                    <span className="text-sm font-medium tracking-wide text-foreground">
-                        Browse files
-                    </span>
-                    {visible && (
-                        <span
-                            className="font-mono text-xs tabular-nums text-muted-foreground/70"
-                            title={
-                                selectedPaths.size > 1
-                                    ? `${selectedPaths.size} selected`
-                                    : `${visible.length} ${visible.length === 1 ? "item" : "items"}`
-                            }
-                        >
-                            {selectedPaths.size > 1
-                                ? `${selectedPaths.size} selected`
-                                : visible.length}
-                            {/* Match-ratio is only meaningful inside a
-                             *  root where `entries` reflects the current
-                             *  folder's total. At top level entries is
-                             *  stale from a previous load — skip the
-                             *  ratio there. Selection mode also skips
-                             *  the ratio (count of selected is the
-                             *  primary metric there). */}
-                            {filter &&
-                            root !== null &&
-                            entries &&
-                            selectedPaths.size <= 1
-                                ? ` / ${entries.length}`
-                                : ""}
+                    {/* Header — spans the full Sheet width above the rail
+                 *  + main split. Lives outside the ContextMenu wrapper
+                 *  so right-click on the title bar uses the browser
+                 *  default (the file menu is content-only). */}
+                    <div className="flex items-center gap-3 px-5 py-4 border-b border-border shrink-0">
+                        <span className="text-sm font-medium tracking-wide text-foreground">
+                            Browse files
                         </span>
-                    )}
-                    <button
-                        type="button"
-                        onClick={() => onOpenChange(false)}
-                        className="ml-auto text-muted-foreground hover:text-foreground transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                        aria-label="Close library browser"
-                        title="Close"
-                    >
-                        <X size={18} aria-hidden />
-                    </button>
-                </div>
-
-                {/* Action row: filter input + New folder + Refresh. Stays
-                 *  one line at every width thanks to flex-1 on the filter. */}
-                <div className="flex items-center gap-2 px-5 py-2.5 border-b border-border shrink-0">
-                    <div className="relative flex-1 min-w-0">
-                        <Search
-                            size={12}
-                            aria-hidden
-                            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/70 pointer-events-none"
-                        />
-                        <Input
-                            value={filter}
-                            onChange={(e) => setFilter(e.target.value)}
-                            placeholder={
-                                root === null
-                                    ? "Filter locations."
-                                    : subdir
-                                      ? `Search inside ${breadcrumbs[breadcrumbs.length - 1]}.`
-                                      : `Search ${rootLabel(root).toLowerCase()}.`
-                            }
-                            aria-label="Search files (recursive)"
-                            className="h-8 pl-7 pr-2 font-mono text-xs"
-                        />
+                        {visible && (
+                            <span
+                                // /80 (not /70) so the small mono numerals
+                                // clear WCAG AA on the cream-tinted light-
+                                // mode surface — the audit flagged /70 as
+                                // borderline at this size.
+                                className="font-mono text-xs tabular-nums text-muted-foreground/80"
+                                title={
+                                    selectedPaths.size > 1
+                                        ? `${selectedPaths.size} selected`
+                                        : `${visible.length} ${visible.length === 1 ? "item" : "items"}`
+                                }
+                            >
+                                {selectedPaths.size > 1
+                                    ? `${selectedPaths.size} selected`
+                                    : visible.length}
+                                {filter && entries && selectedPaths.size <= 1
+                                    ? ` / ${entries.length}`
+                                    : ""}
+                            </span>
+                        )}
+                        <button
+                            type="button"
+                            onClick={() => handleOpenChange(false)}
+                            className="ml-auto text-muted-foreground hover:text-foreground transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                            aria-label="Close library browser"
+                            title="Close"
+                        >
+                            <X size={18} aria-hidden />
+                        </button>
                     </div>
-                    {/* New folder is library-only: /api/mkdir is scoped
+
+                    {/* Body — horizontal split. Left rail = root selector
+                 *  (Library / Downloads), always visible so root
+                 *  switching is one click away. Right column = the
+                 *  active root's content, wrapped in the ContextMenu
+                 *  so right-click anywhere in the file area opens the
+                 *  Sheet's own menu (and right-click on the rail
+                 *  falls through to the browser default). */}
+                    <div className="flex flex-1 min-h-0">
+                        <aside
+                            className="flex flex-col gap-1 w-40 shrink-0 px-3 py-3 border-r border-border bg-muted/15"
+                            aria-label="Filesystem roots"
+                        >
+                            <RailButton
+                                icon={BookMarked}
+                                label="Library"
+                                active={root === "library"}
+                                onClick={() => switchRoot("library")}
+                            />
+                            <RailButton
+                                icon={Inbox}
+                                label="Downloads"
+                                active={root === "downloads"}
+                                onClick={() => switchRoot("downloads")}
+                            />
+                        </aside>
+
+                        <ContextMenu>
+                            <ContextMenuTrigger asChild>
+                                <div
+                                    className="flex flex-col flex-1 min-w-0"
+                                    onContextMenu={resolveMenuTarget}
+                                    onMouseOver={handleBodyMouseOver}
+                                    onMouseLeave={handleBodyMouseLeave}
+                                >
+                                    {/* Action row: filter input + New folder + Refresh. Stays
+                 *  one line at every width thanks to flex-1 on the filter. */}
+                                    <div className="flex items-center gap-2 px-5 py-2.5 border-b border-border shrink-0">
+                                        <div className="relative flex-1 min-w-0">
+                                            <Search
+                                                size={12}
+                                                aria-hidden
+                                                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/70 pointer-events-none"
+                                            />
+                                            <Input
+                                                value={filter}
+                                                onChange={(e) => setFilter(e.target.value)}
+                                                placeholder={
+                                                    subdir
+                                                        ? `Search inside ${breadcrumbs[breadcrumbs.length - 1]}.`
+                                                        : `Search ${rootLabel(root).toLowerCase()}.`
+                                                }
+                                                aria-label="Search files (recursive)"
+                                                className="h-8 pl-7 pr-2 font-mono text-xs"
+                                            />
+                                        </div>
+                                        {/* New folder is library-only: /api/mkdir is scoped
                      *  to LIBRARY_PATH (curating Downloads makes no sense
                      *  — it's transient ingest staging). The button hides
                      *  rather than disables so the toolbar stays uncluttered
                      *  on the views where it isn't an option. */}
-                    {root === "library" && (
-                        <Button
-                            size="sm"
-                            variant={newFolderOpen ? "default" : "outline"}
-                            onClick={() => {
-                                setNewFolderOpen((v) => !v);
-                                setNewFolderName("");
-                            }}
-                            className="gap-1.5 shrink-0"
-                            title="Create a new folder here (N)"
-                            aria-pressed={newFolderOpen}
-                        >
-                            <FolderPlus size={12} aria-hidden />
-                            <span className="hidden sm:inline">New folder</span>
-                        </Button>
-                    )}
-                    {root !== null && (
-                        <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => loadSubdir(subdir, root)}
-                            disabled={loading}
-                            className="shrink-0"
-                            title="Refresh this folder"
-                            aria-label="Refresh"
-                        >
-                            <RefreshCw
-                                size={12}
-                                aria-hidden
-                                className={loading ? "animate-spin" : ""}
-                            />
-                        </Button>
-                    )}
-                </div>
+                                        {root === "library" && (
+                                            <Button
+                                                size="sm"
+                                                variant={newFolderOpen ? "default" : "outline"}
+                                                onClick={() => {
+                                                    setNewFolderOpen((v) => !v);
+                                                    setNewFolderName("");
+                                                }}
+                                                className="gap-1.5 shrink-0"
+                                                title="Create a new folder here (N)"
+                                                aria-pressed={newFolderOpen}
+                                            >
+                                                <FolderPlus size={12} aria-hidden />
+                                                <span className="hidden sm:inline">New folder</span>
+                                            </Button>
+                                        )}
+                                        <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            onClick={() => loadSubdir(subdir, root)}
+                                            disabled={loading}
+                                            className="shrink-0"
+                                            title="Refresh this folder"
+                                            aria-label="Refresh"
+                                        >
+                                            <RefreshCw
+                                                size={12}
+                                                aria-hidden
+                                                className={loading ? "animate-spin" : ""}
+                                            />
+                                        </Button>
+                                    </div>
 
-                {/* Breadcrumb row: own row, wraps freely below at deep
-                 *  nesting without pushing the actions to a second line.
-                 *  Always leads with Locations so the user can jump back
-                 *  to the top regardless of how deep they've drilled. */}
-                <div className="flex items-center gap-1.5 flex-wrap px-5 py-2 border-b border-border shrink-0 text-xs">
-                    <button
-                        type="button"
-                        onClick={() => {
-                            setRoot(null);
-                            setSubdir("");
-                            setFilter("");
-                            setNewFolderOpen(false);
-                        }}
-                        className="font-medium text-muted-foreground hover:text-foreground transition-colors rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                    >
-                        Locations
-                    </button>
-                    {root !== null && (
-                        <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                            <ChevronRight
-                                size={12}
-                                aria-hidden
-                                className="opacity-40"
-                            />
-                            <button
-                                type="button"
-                                onClick={() => popTo(-1)}
-                                className="font-medium text-muted-foreground hover:text-foreground transition-colors rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                            >
-                                {rootLabel(root)}
-                            </button>
-                        </span>
-                    )}
-                    {breadcrumbs.map((seg, i) => (
-                        <span
-                            key={i}
-                            className="inline-flex items-center gap-1.5 text-muted-foreground"
-                        >
-                            <ChevronRight
-                                size={12}
-                                aria-hidden
-                                className="opacity-40"
-                            />
-                            <button
-                                type="button"
-                                onClick={() => popTo(i)}
-                                className="font-medium text-muted-foreground hover:text-foreground transition-colors rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 break-all"
-                            >
-                                {seg}
-                            </button>
-                        </span>
-                    ))}
-                </div>
+                                    {/* Breadcrumb row: leads with the active root (Library
+                 *  or Downloads). The rail handles root *switching*; the
+                 *  breadcrumb root crumb pops to the chosen root's top
+                 *  level (resets subdir to "").  */}
+                                    <div className="flex items-center gap-1.5 flex-wrap px-5 py-2 border-b border-border shrink-0 text-xs">
+                                        <button
+                                            type="button"
+                                            onClick={() => popTo(-1)}
+                                            className="font-medium text-muted-foreground hover:text-foreground transition-colors rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                                        >
+                                            {rootLabel(root)}
+                                        </button>
+                                        {breadcrumbs.map((seg, i) => (
+                                            <span
+                                                key={i}
+                                                className="inline-flex items-center gap-1.5 text-muted-foreground"
+                                            >
+                                                <ChevronRight
+                                                    size={12}
+                                                    aria-hidden
+                                                    className="opacity-40"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => popTo(i)}
+                                                    className="font-medium text-muted-foreground hover:text-foreground transition-colors rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 break-all"
+                                                >
+                                                    {seg}
+                                                </button>
+                                            </span>
+                                        ))}
+                                    </div>
 
-                {/* Paste banner: surfaces when the user has cut a set
-                 *  of items and is navigating to a destination. Quiet
-                 *  styling — informational, not destructive. */}
-                {cutPaths && cutPaths.size > 0 && root === "library" && (
-                    <div className="flex items-center gap-3 bg-muted/40 border-b border-border px-5 py-2 shrink-0 text-xs text-muted-foreground">
-                        <Scissors size={12} aria-hidden className="shrink-0" />
-                        <span className="flex-1">
-                            {cutPaths.size}{" "}
-                            {cutPaths.size === 1 ? "item" : "items"} ready to
-                            move. Press Ctrl/Cmd+V here or right-click for
-                            Paste.
-                        </span>
-                        <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={pasteHere}
-                            disabled={moveBusy}
-                            className="h-6 px-2 text-xs"
-                        >
-                            <ClipboardPaste size={12} aria-hidden />
-                            Paste here
-                        </Button>
-                        <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={clearCut}
-                            disabled={moveBusy}
-                            className="h-6 px-2 text-xs"
-                        >
-                            Cancel
-                        </Button>
+                                    {/* Move/cut banner — a single mode-switching slot that
+                 *  carries three states: a cut clipboard waiting to
+                 *  paste (Scissors + Paste/Cancel buttons), an in-
+                 *  flight paste (spinning Loader + progress message),
+                 *  and a completed paste notice (Check + dismiss X).
+                 *  The previous design had two separate banners that
+                 *  could stack during a paste — collapsing them keeps
+                 *  the chrome's row count predictable. aria-live=polite
+                 *  so SR users hear progress and final results without
+                 *  losing focus. */}
+                                    {(() => {
+                                        const cutCount = cutPaths?.size ?? 0;
+                                        const visible =
+                                            cutCount > 0 || moveBusy || moveNotice !== null;
+                                        if (!visible) return null;
+                                        const showPasteActions = cutCount > 0 && !moveBusy;
+                                        const showDismiss =
+                                            moveNotice !== null && !moveBusy && cutCount === 0;
+                                        const message = moveNotice
+                                            ? moveNotice
+                                            : `${cutCount} ${cutCount === 1 ? "item" : "items"} ready to move. Press Ctrl/Cmd+V or right-click → Paste here.`;
+                                        return (
+                                            <div
+                                                role="status"
+                                                aria-live="polite"
+                                                className="flex items-start gap-3 bg-muted/40 border-b border-border px-5 py-2 shrink-0 text-xs text-muted-foreground"
+                                            >
+                                                <span className="shrink-0 mt-0.5">
+                                                    {moveBusy ? (
+                                                        <Loader2
+                                                            size={12}
+                                                            aria-hidden
+                                                            className="animate-spin"
+                                                        />
+                                                    ) : moveNotice && cutCount === 0 ? (
+                                                        <Check size={12} aria-hidden />
+                                                    ) : (
+                                                        <Scissors size={12} aria-hidden />
+                                                    )}
+                                                </span>
+                                                <span className="flex-1 leading-relaxed">
+                                                    {message}
+                                                </span>
+                                                {showPasteActions && (
+                                                    <>
+                                                        <Button
+                                                            size="sm"
+                                                            variant="ghost"
+                                                            onClick={pasteHere}
+                                                            className="h-6 px-2 text-xs"
+                                                        >
+                                                            <ClipboardPaste
+                                                                size={12}
+                                                                aria-hidden
+                                                            />
+                                                            Paste here
+                                                        </Button>
+                                                        <Button
+                                                            size="sm"
+                                                            variant="ghost"
+                                                            onClick={clearCut}
+                                                            className="h-6 px-2 text-xs"
+                                                        >
+                                                            Cancel
+                                                        </Button>
+                                                    </>
+                                                )}
+                                                {showDismiss && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setMoveNotice(null)}
+                                                        className="text-muted-foreground/70 hover:text-foreground transition-colors -my-0.5"
+                                                        aria-label="Dismiss move notice"
+                                                    >
+                                                        <X size={12} aria-hidden />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {/* Inline new-folder input */}
+                                    {newFolderOpen && (
+                                        <div className="flex gap-2 items-center bg-muted/40 border-b border-border px-5 py-2.5 shrink-0">
+                                            <FolderPlus
+                                                size={14}
+                                                aria-hidden
+                                                className="text-muted-foreground shrink-0"
+                                            />
+                                            <Input
+                                                autoFocus
+                                                value={newFolderName}
+                                                onChange={(e) => setNewFolderName(e.target.value)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === "Enter") {
+                                                        e.preventDefault();
+                                                        handleMkdir();
+                                                    } else if (e.key === "Escape") {
+                                                        e.preventDefault();
+                                                        setNewFolderOpen(false);
+                                                        setNewFolderName("");
+                                                    }
+                                                }}
+                                                placeholder="New folder name"
+                                                disabled={newFolderBusy}
+                                                aria-label="New folder name"
+                                                className="flex-1 h-8 font-mono text-sm"
+                                            />
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={handleMkdir}
+                                                disabled={newFolderBusy || !newFolderName.trim()}
+                                                className="shrink-0"
+                                                aria-label="Create folder"
+                                            >
+                                                <Check size={14} aria-hidden />
+                                            </Button>
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                onClick={() => {
+                                                    setNewFolderOpen(false);
+                                                    setNewFolderName("");
+                                                }}
+                                                disabled={newFolderBusy}
+                                                className="shrink-0"
+                                                aria-label="Cancel new folder"
+                                            >
+                                                <X size={14} aria-hidden />
+                                            </Button>
+                                        </div>
+                                    )}
+
+                                    {/* Error */}
+                                    {error && (
+                                        <p className="px-5 py-2 text-sm text-destructive bg-destructive/10 border-b border-border shrink-0">
+                                            {error}
+                                        </p>
+                                    )}
+
+                                    {/* Mode caption — surfaces the click-semantics asymmetry
+                                     *  between Library (single-click selects, double-click
+                                     *  activates) and Downloads (single-click activates).
+                                     *  Always rendered with the same height while a listing
+                                     *  is mounted, so the entry list doesn't shift up when
+                                     *  the user selects something or cuts a clipboard. The
+                                     *  earlier "fade on first interaction" pattern looked
+                                     *  cleaner but reflowed the list under the cursor on
+                                     *  the very click that triggered it — layout stability
+                                     *  wins. */}
+                                    {visible && visible.length > 0 && (
+                                        <p className="px-5 py-1.5 text-[11px] italic text-muted-foreground/70 border-b border-border shrink-0">
+                                            {root === "library"
+                                                ? "Click to select. Double-click to open. Right-click for more."
+                                                : "Downloads is staging. Click a file to open it."}
+                                        </p>
+                                    )}
+
+                                    {/* Entry list */}
+                                    <div
+                                        ref={scrollContainerRef}
+                                        onMouseDown={handleListMouseDown}
+                                        className="flex-1 min-h-0 overflow-y-auto relative"
+                                        data-explorer-list
+                                        role="listbox"
+                                        aria-multiselectable={root === "library"}
+                                        aria-busy={isSearching ? searchBusy : loading}
+                                        aria-label={`${rootLabel(root)} contents`}
+                                    >
+                                        {(
+                                            // While typing, `isSearching` flips true on the
+                                            // same render the filter changes but `searchBusy`
+                                            // is only set inside the debounce effect that
+                                            // runs after — the `searchResults === null` guard
+                                            // prevents the empty-state from flickering for
+                                            // one frame.
+                                            isSearching
+                                                ? searchBusy || searchResults === null
+                                                : loading
+                                        ) ? (
+                                            <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+                                                <Loader2
+                                                    size={14}
+                                                    aria-hidden
+                                                    className="animate-spin shrink-0"
+                                                />
+                                                {isSearching ? "Searching." : "Loading."}
+                                            </div>
+                                        ) : !visible || visible.length === 0 ? (
+                                            <div className="flex items-center justify-center py-10 text-sm text-muted-foreground italic px-4 text-center leading-relaxed">
+                                                {isSearching
+                                                    ? subdir
+                                                        ? `No matches under ${breadcrumbs[breadcrumbs.length - 1]}.`
+                                                        : `No matches in ${rootLabel(root).toLowerCase()}.`
+                                                    : subdir
+                                                        ? root === "library"
+                                                            ? "Empty folder. Use New folder to add subfolders."
+                                                            : "Empty folder."
+                                                        : root === "library"
+                                                            ? "Nothing filed yet. When you've fetched a post you can move it in here from Downloads."
+                                                            : "No pending downloads."}
+                                            </div>
+                                        ) : (
+                                            <>
+                                                {/* Cut-state SR hint. Rows in the cut clipboard
+                             *  reference this via aria-describedby so screen
+                             *  readers announce "Marked for move" alongside
+                             *  the visual italic + opacity treatment. */}
+                                                <span id="lex-cut-hint" className="sr-only">
+                                                    Marked for move.
+                                                </span>
+                                                {/* Bundle the two pieces of state the row's
+                             *  callbacks branch on but EntryRow doesn't
+                             *  visibly render. Memo's comparator picks
+                             *  this up; drag-select (root + anchor
+                             *  unchanged) lets unaffected rows skip
+                             *  re-renders entirely. */}
+                                                {(() => {
+                                                    const cacheKey = `${root}:${anchorPath ?? ""}`;
+                                                    return visible.map((entry, idx) => {
+                                                        const activateVerb =
+                                                            entry.type === "dir"
+                                                                ? "drill in"
+                                                                : "open";
+                                                        const rowTitle =
+                                                            root === "library"
+                                                                ? `Double-click to ${activateVerb} · F2 to rename · Del to delete`
+                                                                : `Click to ${activateVerb} · F2 to rename · Del to delete`;
+                                                        const isRowRenaming =
+                                                            renamePath === entry.path;
+                                                        return (
+                                                            <MemoEntryRow
+                                                                key={entry.path}
+                                                                entry={entry}
+                                                                isLast={idx === visible.length - 1}
+                                                                isRenaming={isRowRenaming}
+                                                                // Only the renaming row sees
+                                                                // live keystroke updates;
+                                                                // others get a stable empty
+                                                                // string so per-key state
+                                                                // changes don't invalidate
+                                                                // the whole list's memos.
+                                                                renameValue={
+                                                                    isRowRenaming
+                                                                        ? renameValue
+                                                                        : ""
+                                                                }
+                                                                renameBusy={
+                                                                    isRowRenaming && renameBusy
+                                                                }
+                                                                selected={selectedPaths.has(
+                                                                    entry.path,
+                                                                )}
+                                                                cut={
+                                                                    cutPaths?.has(entry.path) ??
+                                                                    false
+                                                                }
+                                                                rowTitle={rowTitle}
+                                                                cacheKey={cacheKey}
+                                                                onRenameChange={setRenameValue}
+                                                                onRenameSubmit={() =>
+                                                                    commitRename(entry)
+                                                                }
+                                                                onRenameCancel={cancelRename}
+                                                                onClick={(e) =>
+                                                                    handleEntryClick(entry, e)
+                                                                }
+                                                            />
+                                                        );
+                                                    });
+                                                })()}
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                            </ContextMenuTrigger>
+                            <ContextMenuContent>
+                                {/* New folder / Cut / Paste are library-only —
+                         *  /api/mkdir is scoped to LIBRARY_PATH and the
+                         *  move endpoint's destination is always library. */}
+                                {root === "library" && (
+                                    <>
+                                        <ContextMenuItem
+                                            onSelect={() => {
+                                                setNewFolderOpen(true);
+                                                setNewFolderName("");
+                                            }}
+                                        >
+                                            <FolderPlus aria-hidden />
+                                            New folder
+                                            <Kbd>N</Kbd>
+                                        </ContextMenuItem>
+                                        {selectedPaths.size > 0 && (
+                                            <ContextMenuItem
+                                                onSelect={() => {
+                                                    requestAnimationFrame(() =>
+                                                        cutSelection(),
+                                                    );
+                                                }}
+                                            >
+                                                <Scissors aria-hidden />
+                                                Cut {selectedPaths.size}{" "}
+                                                {selectedPaths.size === 1
+                                                    ? "item"
+                                                    : "items"}
+                                                <Kbd>Ctrl+X</Kbd>
+                                            </ContextMenuItem>
+                                        )}
+                                        {cutPaths && cutPaths.size > 0 && (
+                                            <ContextMenuItem
+                                                onSelect={() => {
+                                                    requestAnimationFrame(() =>
+                                                        pasteHere(),
+                                                    );
+                                                }}
+                                            >
+                                                <ClipboardPaste aria-hidden />
+                                                Paste {cutPaths.size}{" "}
+                                                {cutPaths.size === 1
+                                                    ? "item"
+                                                    : "items"}{" "}
+                                                here
+                                                <Kbd>Ctrl+V</Kbd>
+                                            </ContextMenuItem>
+                                        )}
+                                    </>
+                                )}
+                                {menuTarget && (() => {
+                                    // When the right-click lands on a row that
+                                    // is part of an active multi-selection, the
+                                    // Delete item acts on the whole selection
+                                    // (matches Windows Explorer / macOS Finder).
+                                    // Rename hides in that case — multi-rename
+                                    // has no clean semantics.
+                                    const isBulkContext =
+                                        selectedPaths.size > 1 &&
+                                        selectedPaths.has(menuTarget.path);
+                                    return (
+                                        <>
+                                            {!isBulkContext && (
+                                                <ContextMenuItem
+                                                    onSelect={() => {
+                                                        // rAF: let the menu close
+                                                        // + restore focus before
+                                                        // swapping the row for
+                                                        // the inline rename input
+                                                        // (which steals focus
+                                                        // itself).
+                                                        const target = menuTarget;
+                                                        requestAnimationFrame(() =>
+                                                            startRename(target),
+                                                        );
+                                                    }}
+                                                >
+                                                    <PenLine aria-hidden />
+                                                    Rename
+                                                    <Kbd>F2</Kbd>
+                                                </ContextMenuItem>
+                                            )}
+                                            <ContextMenuSeparator />
+                                            <ContextMenuItem
+                                                variant="destructive"
+                                                onSelect={() => {
+                                                    // rAF for the same aria-hidden
+                                                    // focus-race reason: let the
+                                                    // ContextMenu release focus
+                                                    // before the AlertDialog mounts.
+                                                    const target = menuTarget;
+                                                    if (isBulkContext) {
+                                                        requestAnimationFrame(() =>
+                                                            deleteSelection(),
+                                                        );
+                                                    } else {
+                                                        requestAnimationFrame(() =>
+                                                            requestDelete(target),
+                                                        );
+                                                    }
+                                                }}
+                                            >
+                                                <Trash2 aria-hidden />
+                                                {isBulkContext
+                                                    ? `Delete ${selectedPaths.size} items`
+                                                    : `Delete ${menuTarget.type === "dir" ? "folder" : "file"}`}
+                                                <Kbd>Del</Kbd>
+                                            </ContextMenuItem>
+                                        </>
+                                    );
+                                })()}
+                            </ContextMenuContent>
+                        </ContextMenu>
                     </div>
-                )}
-
-                {/* Transient move result. Quiet bg-muted, never red — even
-                 *  partial failures are informational not destructive. */}
-                {moveNotice && (
-                    <div className="flex items-start gap-3 bg-muted/30 border-b border-border px-5 py-2 shrink-0 text-xs text-muted-foreground">
-                        <span className="flex-1 leading-relaxed">
-                            {moveNotice}
-                        </span>
-                        <button
-                            type="button"
-                            onClick={() => setMoveNotice(null)}
-                            className="text-muted-foreground/70 hover:text-foreground transition-colors -my-0.5"
-                            aria-label="Dismiss move notice"
-                        >
-                            <X size={12} aria-hidden />
-                        </button>
-                    </div>
-                )}
-
-                {/* Inline new-folder input */}
-                {newFolderOpen && (
-                    <div className="flex gap-2 items-center bg-muted/40 border-b border-border px-5 py-2.5 shrink-0">
-                        <FolderPlus
-                            size={14}
-                            aria-hidden
-                            className="text-muted-foreground shrink-0"
-                        />
-                        <Input
-                            autoFocus
-                            value={newFolderName}
-                            onChange={(e) => setNewFolderName(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                    e.preventDefault();
-                                    handleMkdir();
-                                } else if (e.key === "Escape") {
-                                    e.preventDefault();
-                                    setNewFolderOpen(false);
-                                    setNewFolderName("");
-                                }
-                            }}
-                            placeholder="New folder name"
-                            disabled={newFolderBusy}
-                            aria-label="New folder name"
-                            className="flex-1 h-8 font-mono text-sm"
-                        />
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={handleMkdir}
-                            disabled={newFolderBusy || !newFolderName.trim()}
-                            className="shrink-0"
-                            aria-label="Create folder"
-                        >
-                            <Check size={14} aria-hidden />
-                        </Button>
-                        <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                                setNewFolderOpen(false);
-                                setNewFolderName("");
-                            }}
-                            disabled={newFolderBusy}
-                            className="shrink-0"
-                            aria-label="Cancel new folder"
-                        >
-                            <X size={14} aria-hidden />
-                        </Button>
-                    </div>
-                )}
-
-                {/* Error */}
-                {error && (
-                    <p className="px-5 py-2 text-sm text-destructive bg-destructive/10 border-b border-border shrink-0">
-                        {error}
-                    </p>
-                )}
-
-                {/* Entry list */}
-                <div
-                    ref={scrollContainerRef}
-                    onMouseDown={handleListMouseDown}
-                    className="flex-1 min-h-0 overflow-y-auto relative"
-                    data-explorer-list
-                >
-                    {(
-                        // Top level is never loading (synthetic cards
-                        // render synchronously). Inside a root: while
-                        // typing, `isSearching` flips true on the same
-                        // render the filter changes but `searchBusy` is
-                        // only set inside the debounce effect that runs
-                        // after — the `searchResults === null` guard
-                        // prevents the empty-state from flickering for
-                        // one frame.
-                        atTopLevel
-                            ? false
-                            : isSearching
-                              ? searchBusy || searchResults === null
-                              : loading
-                    ) ? (
-                        <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
-                            <Loader2
-                                size={14}
-                                aria-hidden
-                                className="animate-spin shrink-0"
-                            />
-                            {isSearching ? "Searching." : "Loading."}
-                        </div>
-                    ) : !visible || visible.length === 0 ? (
-                        <div className="flex items-center justify-center py-10 text-sm text-muted-foreground italic px-4 text-center leading-relaxed">
-                            {root === null
-                                ? "No locations match that filter."
-                                : isSearching
-                                  ? subdir
-                                      ? `No matches under ${breadcrumbs[breadcrumbs.length - 1]}.`
-                                      : `No matches in ${rootLabel(root).toLowerCase()}.`
-                                  : subdir
-                                    ? root === "library"
-                                        ? "Empty folder. Use New folder to add subfolders."
-                                        : "Empty folder."
-                                    : root === "library"
-                                      ? "Library is empty. Fetch some posts and use Move to library to file them here."
-                                      : "No pending downloads."}
-                        </div>
-                    ) : (
-                        visible.map((entry, idx) => (
-                            <EntryRow
-                                key={entry.path}
-                                entry={entry}
-                                isLast={idx === visible.length - 1}
-                                isRenaming={renamePath === entry.path}
-                                renameValue={renameValue}
-                                renameBusy={
-                                    renameBusy && renamePath === entry.path
-                                }
-                                selected={selectedPaths.has(entry.path)}
-                                cut={cutPaths?.has(entry.path) ?? false}
-                                onRenameChange={setRenameValue}
-                                onRenameSubmit={() => commitRename(entry)}
-                                onRenameCancel={cancelRename}
-                                onClick={(e) => handleEntryClick(entry, e)}
-                            />
-                        ))
-                    )}
-                </div>
-                {/* Drag-select rectangle overlay — viewport-coords via
+                    {/* Drag-select rectangle overlay — viewport-coords via
                  *  `position: fixed`, pointer-events-none so it never
                  *  intercepts the click that ends the drag. */}
-                {dragRect && (
-                    <div
-                        aria-hidden
-                        className="pointer-events-none fixed z-50 bg-primary/15 border border-primary/40 rounded-sm"
-                        style={{
-                            left: dragRect.left,
-                            top: dragRect.top,
-                            width: dragRect.width,
-                            height: dragRect.height,
-                        }}
-                    />
-                )}
-                        </div>
-                    </ContextMenuTrigger>
-                    <ContextMenuContent>
-                        {/* At top level the right-click menu doubles as
-                         *  an extra way to jump into a root. Inside a
-                         *  root, "New folder" is library-only (mirrors
-                         *  the toolbar button's gating). */}
-                        {atTopLevel ? (
-                            <>
-                                <ContextMenuItem
-                                    onSelect={() => {
-                                        setRoot("library");
-                                        setSubdir("");
-                                        setFilter("");
-                                    }}
-                                >
-                                    <Folder aria-hidden />
-                                    Open Library
-                                </ContextMenuItem>
-                                <ContextMenuItem
-                                    onSelect={() => {
-                                        setRoot("downloads");
-                                        setSubdir("");
-                                        setFilter("");
-                                    }}
-                                >
-                                    <Folder aria-hidden />
-                                    Open Downloads
-                                </ContextMenuItem>
-                            </>
-                        ) : (
-                            root === "library" && (
-                                <>
-                                    <ContextMenuItem
-                                        onSelect={() => {
-                                            setNewFolderOpen(true);
-                                            setNewFolderName("");
-                                        }}
-                                    >
-                                        <FolderPlus aria-hidden />
-                                        New folder
-                                    </ContextMenuItem>
-                                    {selectedPaths.size > 0 && (
-                                        <ContextMenuItem
-                                            onSelect={() => {
-                                                requestAnimationFrame(() =>
-                                                    cutSelection(),
-                                                );
-                                            }}
-                                        >
-                                            <Scissors aria-hidden />
-                                            Cut {selectedPaths.size}{" "}
-                                            {selectedPaths.size === 1
-                                                ? "item"
-                                                : "items"}
-                                        </ContextMenuItem>
-                                    )}
-                                    {cutPaths && cutPaths.size > 0 && (
-                                        <ContextMenuItem
-                                            onSelect={() => {
-                                                requestAnimationFrame(() =>
-                                                    pasteHere(),
-                                                );
-                                            }}
-                                        >
-                                            <ClipboardPaste aria-hidden />
-                                            Paste {cutPaths.size}{" "}
-                                            {cutPaths.size === 1
-                                                ? "item"
-                                                : "items"}{" "}
-                                            here
-                                        </ContextMenuItem>
-                                    )}
-                                </>
-                            )
-                        )}
-                        {root !== null && menuTarget && (() => {
-                            // When the right-click lands on a row that
-                            // is part of an active multi-selection, the
-                            // Delete item acts on the whole selection
-                            // (matches Windows Explorer / macOS Finder).
-                            // Rename hides in that case — multi-rename
-                            // has no clean semantics.
-                            const isBulkContext =
-                                selectedPaths.size > 1 &&
-                                selectedPaths.has(menuTarget.path);
-                            return (
-                                <>
-                                    {!isBulkContext && (
-                                        <ContextMenuItem
-                                            onSelect={() => {
-                                                // rAF: let the menu close
-                                                // + restore focus before
-                                                // swapping the row for
-                                                // the inline rename input
-                                                // (which steals focus
-                                                // itself).
-                                                const target = menuTarget;
-                                                requestAnimationFrame(() =>
-                                                    startRename(target),
-                                                );
-                                            }}
-                                        >
-                                            <PenLine aria-hidden />
-                                            Rename
-                                        </ContextMenuItem>
-                                    )}
-                                    <ContextMenuSeparator />
-                                    <ContextMenuItem
-                                        variant="destructive"
-                                        onSelect={() => {
-                                            // rAF for the same aria-hidden
-                                            // focus-race reason: let the
-                                            // ContextMenu release focus
-                                            // before the AlertDialog mounts.
-                                            const target = menuTarget;
-                                            if (isBulkContext) {
-                                                requestAnimationFrame(() =>
-                                                    deleteSelection(),
-                                                );
-                                            } else {
-                                                requestAnimationFrame(() =>
-                                                    requestDelete(target),
-                                                );
-                                            }
-                                        }}
-                                    >
-                                        <Trash2 aria-hidden />
-                                        {isBulkContext
-                                            ? `Delete ${selectedPaths.size} items`
-                                            : `Delete ${menuTarget.type === "dir" ? "folder" : "file"}`}
-                                    </ContextMenuItem>
-                                </>
-                            );
-                        })()}
-                    </ContextMenuContent>
-                </ContextMenu>
-            </SheetContent>
-        </Sheet>
+                    {dragRect && (
+                        <div
+                            aria-hidden
+                            className="pointer-events-none fixed z-50 bg-primary/15 border border-primary/40 rounded-sm"
+                            style={{
+                                left: dragRect.left,
+                                top: dragRect.top,
+                                width: dragRect.width,
+                                height: dragRect.height,
+                            }}
+                        />
+                    )}
+                </SheetContent>
+            </Sheet>
 
-        {/* Sibling to the Sheet, not a child. Nesting an AlertDialog
+            {/* Sibling to the Sheet, not a child. Nesting an AlertDialog
          *  inside the Sheet's Radix Root makes the focus manager apply
          *  aria-hidden to SheetContent while it still holds focus —
          *  hoisting the dialog out of the Sheet's React subtree lets
          *  Radix treat them as independent dialog stacks. */}
-        <AlertDialog
-            open={deleteCandidate !== null}
-            onOpenChange={(v) => {
-                if (!v && !deleteBusy) setDeleteCandidate(null);
-            }}
-        >
-            <AlertDialogContent>
-                <AlertDialogHeader>
-                    <AlertDialogTitle>
-                        {deleteCandidate?.entry.path === BULK_DELETE_SENTINEL
-                            ? `Delete ${deleteCandidate.entry.name}?`
-                            : deleteCandidate?.entry.type === "file"
-                              ? "Delete this file?"
-                              : deleteCandidate?.contentsCount === 0
-                                ? "Delete this empty folder?"
-                                : "Delete this folder and everything inside?"}
-                    </AlertDialogTitle>
-                    <AlertDialogDescription>
-                        {deleteCandidate && (
-                            <DeleteCandidateSummary candidate={deleteCandidate} />
-                        )}
-                    </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                    <AlertDialogCancel disabled={deleteBusy}>
-                        Cancel
-                    </AlertDialogCancel>
-                    <AlertDialogAction
-                        onClick={confirmDelete}
-                        disabled={deleteBusy}
-                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                    >
-                        {deleteBusy ? "Deleting…" : "Delete"}
-                    </AlertDialogAction>
-                </AlertDialogFooter>
-            </AlertDialogContent>
-        </AlertDialog>
+            <AlertDialog
+                open={deleteCandidate !== null}
+                onOpenChange={(v) => {
+                    if (!v && !deleteBusy) setDeleteCandidate(null);
+                }}
+            >
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>
+                            {deleteCandidate?.entry.path === BULK_DELETE_SENTINEL
+                                ? `Delete ${deleteCandidate.entry.name}?`
+                                : deleteCandidate?.entry.type === "file"
+                                    ? "Delete this file?"
+                                    : deleteCandidate?.contentsCount === 0
+                                        ? "Delete this empty folder?"
+                                        : "Delete this folder and everything inside?"}
+                        </AlertDialogTitle>
+                        {/* asChild so the description can host a list for the
+                     *  bulk-delete preview without invalid <p>-wrapped-<ul>
+                     *  HTML (Radix's Description renders as <p> by default). */}
+                        <AlertDialogDescription asChild>
+                            <div>
+                                {deleteCandidate && (
+                                    <DeleteCandidateSummary
+                                        candidate={deleteCandidate}
+                                    />
+                                )}
+                            </div>
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={deleteBusy}>
+                            Cancel
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={confirmDelete}
+                            disabled={deleteBusy}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        >
+                            {deleteBusy ? "Deleting…" : "Delete"}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </>
     );
 }
@@ -1794,16 +1897,35 @@ function DeleteCandidateSummary({
 }: {
     candidate: DeleteCandidate;
 }) {
-    const { entry, contentsCount } = candidate;
+    const { entry, contentsCount, bulkPreview } = candidate;
     if (entry.path === BULK_DELETE_SENTINEL) {
+        const overflow = bulkPreview
+            ? bulkPreview.total - bulkPreview.names.length
+            : 0;
         return (
             <>
-                The selected items (
-                <span className="font-mono text-foreground break-all">
-                    {entry.name}
+                <span className="block mb-2">
+                    The selected items (
+                    <span className="font-mono text-foreground">
+                        {entry.name}
+                    </span>
+                    ) will be removed. Folders include everything inside.
+                    This can&apos;t be undone.
                 </span>
-                ) will be removed. Folders include everything inside. This
-                can&apos;t be undone.
+                {bulkPreview && bulkPreview.names.length > 0 && (
+                    <ul className="font-mono text-xs text-foreground/80 space-y-0.5 pl-4 list-disc">
+                        {bulkPreview.names.map((n) => (
+                            <li key={n} className="break-all">
+                                {n}
+                            </li>
+                        ))}
+                        {overflow > 0 && (
+                            <li className="list-none italic text-muted-foreground/80">
+                                and {overflow} more.
+                            </li>
+                        )}
+                    </ul>
+                )}
             </>
         );
     }
@@ -1849,10 +1971,49 @@ interface EntryRowProps {
     renameBusy: boolean;
     selected: boolean;
     cut: boolean;
+    /** Desktop hover hint — composed by the parent so it can differ
+     *  per root (single-click vs double-click activation). */
+    rowTitle: string;
+    /** Memo cache-busting key. The parent encodes `root` + `anchorPath`
+     *  here so React.memo's custom comparator can detect when the
+     *  closures captured inside `onClick` / `onRenameSubmit` would
+     *  otherwise go stale (e.g., root switched library→downloads,
+     *  shift-click anchor moved). Not rendered. */
+    cacheKey: string;
     onRenameChange: (v: string) => void;
     onRenameSubmit: () => void;
     onRenameCancel: () => void;
     onClick: (e: ReactMouseEvent) => void;
+}
+
+// Custom shallow comparator. React.memo's default would never skip a
+// re-render because the parent passes inline arrow functions for
+// onClick / onRenameSubmit / onRenameCancel — their identity changes
+// every parent render. By comparing value props only (plus the bundled
+// cacheKey for root + anchorPath), drag-select stops rebuilding every
+// row's JSX on every mousemove. Callback closures stay valid because
+// `cacheKey` invalidates all rows whenever the state those closures
+// branch on (root, anchor) actually changes.
+function entryRowPropsEqual(
+    prev: EntryRowProps,
+    next: EntryRowProps,
+): boolean {
+    return (
+        prev.entry.path === next.entry.path &&
+        prev.entry.name === next.entry.name &&
+        prev.entry.type === next.entry.type &&
+        prev.entry.ext === next.entry.ext &&
+        prev.entry.needs_conversion === next.entry.needs_conversion &&
+        prev.entry.folderHint === next.entry.folderHint &&
+        prev.isLast === next.isLast &&
+        prev.isRenaming === next.isRenaming &&
+        prev.renameValue === next.renameValue &&
+        prev.renameBusy === next.renameBusy &&
+        prev.selected === next.selected &&
+        prev.cut === next.cut &&
+        prev.rowTitle === next.rowTitle &&
+        prev.cacheKey === next.cacheKey
+    );
 }
 
 function EntryRow({
@@ -1863,6 +2024,10 @@ function EntryRow({
     renameBusy,
     selected,
     cut,
+    rowTitle,
+    // cacheKey is consumed only by the memo comparator (see
+    // entryRowPropsEqual). The row itself doesn't render with it.
+    cacheKey: _cacheKey,
     onRenameChange,
     onRenameSubmit,
     onRenameCancel,
@@ -1944,6 +2109,10 @@ function EntryRow({
     return (
         <button
             type="button"
+            role="option"
+            aria-selected={selected}
+            aria-describedby={cut ? "lex-cut-hint" : undefined}
+            title={rowTitle}
             data-entry-path={entry.path}
             data-selected={selected || undefined}
             data-cut={cut || undefined}
@@ -1987,6 +2156,55 @@ function EntryRow({
                     {extLabel}
                 </span>
             ) : null}
+        </button>
+    );
+}
+
+/** Memoised wrapper around EntryRow. Used at the entry-list call site
+ *  in place of EntryRow directly. The custom comparator
+ *  (`entryRowPropsEqual`) ignores callback prop identity — the parent
+ *  passes inline arrow functions so default React.memo would never
+ *  skip — and bundles root + anchorPath into a `cacheKey` so stale
+ *  closures get invalidated when the callbacks' branching state
+ *  actually changes. */
+const MemoEntryRow = memo(EntryRow, entryRowPropsEqual);
+
+/** Small `<kbd>`-styled hint for context-menu shortcut labels.
+ *  `ml-auto` so it floats right of the menu item label, matching the
+ *  Finder / VS Code pattern. */
+function Kbd({ children }: { children: ReactNode }) {
+    return (
+        <span className="ml-auto font-mono text-[10px] tracking-wide text-muted-foreground/80">
+            {children}
+        </span>
+    );
+}
+
+function RailButton({
+    icon: Icon,
+    label,
+    active,
+    onClick,
+}: {
+    icon: ComponentType<{ size?: number; "aria-hidden"?: boolean }>;
+    label: string;
+    active: boolean;
+    onClick: () => void;
+}) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            aria-pressed={active}
+            className={
+                "flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 " +
+                (active
+                    ? "bg-primary/15 text-primary ring-1 ring-primary/30 ring-inset"
+                    : "text-muted-foreground hover:bg-muted/40 hover:text-foreground")
+            }
+        >
+            <Icon size={16} aria-hidden />
+            <span>{label}</span>
         </button>
     );
 }

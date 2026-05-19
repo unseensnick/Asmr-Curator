@@ -9,6 +9,13 @@ dependencies = [
     "uvicorn[standard]==0.32.1",
     "python-multipart==0.0.12",
     "playwright==1.59.0",
+    # Pinned to match backend/requirements.txt — pyproject.toml drives
+    # `uv sync` in the devcontainer; requirements.txt drives the Docker
+    # build. Both must list the same direct deps or one path silently
+    # misses imports (httpx is in main.py for external-audio streaming
+    # + the SSE response client; mutagen writes ID3/FLAC/MP4 tags).
+    "httpx==0.27.2",
+    "mutagen==1.47.0",
 ]
 
 [dependency-groups]
