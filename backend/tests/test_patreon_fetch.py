@@ -10,10 +10,13 @@ from pathlib import Path
 from backend.patreon_fetch import (
     EXTERNAL_HOST_ALLOWLIST,
     ExternalLink,
+    FetchedPost,
     _anchor_text,
     _extract_external_links,
     _find_cached_creator_posts,
     _find_cached_post,
+    _flatten_audio,
+    _flatten_dest_parts,
     _is_allowlisted_host,
     _post_id_from_url,
     _vanity_from_url,
@@ -356,19 +359,38 @@ class TestFindCachedPost:
 
     def test_finds_audio_in_flattened_download_path(self, tmp_path: Path):
         # _flatten_audio moves audio from patreon-dl's tree into
-        # <DOWNLOAD_PATH>/<post_id>/ on a previous fetch. The cached-post
-        # lookup must find audio there, not just under the post_info dir.
-        # tmp_path plays the DOWNLOAD_PATH role here (the production caller
-        # passes DOWNLOAD_PATH / ".patreon-dl" as `output_dir`).
+        # <DOWNLOAD_PATH>/<creator>/<post_id> - <title>/ on a previous
+        # fetch. The cached-post lookup must find audio there, not just
+        # under the post_info dir. tmp_path plays the DOWNLOAD_PATH role
+        # here (the production caller passes DOWNLOAD_PATH / ".patreon-dl"
+        # as `output_dir`).
         output_dir = tmp_path / ".patreon-dl"
         post_dir = output_dir / "Patreon" / "creator" / "posts" / "12345"
-        _write_sidecar(post_dir, "12345")
+        _write_sidecar(post_dir, "12345", title="Cached Post", artist="Solar Girl")
 
-        # Simulate flattened audio at <DOWNLOAD_PATH>/<post_id>/song.mp3
-        # (output_dir.parent IS the DOWNLOAD_PATH).
-        flat_dir = tmp_path / "12345"
-        flat_dir.mkdir()
+        # Simulate the current flatten layout at
+        # <DOWNLOAD_PATH>/<creator>/<post_id> - <title>/song.mp3.
+        flat_dir = tmp_path / "Solar Girl" / "12345 - Cached Post"
+        flat_dir.mkdir(parents=True)
         audio_file = flat_dir / "song.mp3"
+        audio_file.write_bytes(b"fake audio")
+
+        found = _find_cached_post(output_dir, "12345")
+        assert found is not None
+        assert found.audio_path == str(audio_file)
+
+    def test_finds_audio_in_legacy_flat_layout(self, tmp_path: Path):
+        # Back-compat: posts downloaded before the layout change live at
+        # the old flat <DOWNLOAD_PATH>/<post_id>/<file> location. The
+        # cached-sidecar fast path falls back to the legacy layout after
+        # checking the new one, so re-fetches still resolve them.
+        output_dir = tmp_path / ".patreon-dl"
+        post_dir = output_dir / "Patreon" / "creator" / "posts" / "12345"
+        _write_sidecar(post_dir, "12345", title="Old Post", artist="Solar Girl")
+
+        legacy_dir = tmp_path / "12345"
+        legacy_dir.mkdir()
+        audio_file = legacy_dir / "song.mp3"
         audio_file.write_bytes(b"fake audio")
 
         found = _find_cached_post(output_dir, "12345")
@@ -392,6 +414,105 @@ class TestFindCachedPost:
 
         # No matching sidecar → None, not an exception.
         assert _find_cached_post(output_dir, "12345") is None
+
+
+# ── _flatten_audio ─────────────────────────────────────────────────────────
+
+
+def _build_patreon_dl_audio(patreon_root: Path, post_id: str, filename: str) -> Path:
+    """Helper: lay down a patreon-dl-shaped audio file and return its path."""
+    audio_dir = patreon_root / "Patreon" / "creator" / "posts" / post_id / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = audio_dir / filename
+    audio_path.write_bytes(b"fake audio")
+    return audio_path
+
+
+class TestFlattenAudio:
+    def test_uses_creator_postid_title_layout(self, tmp_path: Path):
+        # tmp_path plays the DOWNLOAD_PATH role; patreon_root is
+        # DOWNLOAD_PATH/.patreon-dl.
+        patreon_root = tmp_path / ".patreon-dl"
+        audio_path = _build_patreon_dl_audio(patreon_root, "12345", "song.mp3")
+        post = FetchedPost(
+            post_id="12345",
+            title="Cached Post",
+            tags=[],
+            artist="Solar Girl",
+            post_dir=str(audio_path.parent.parent),
+            audio_path=str(audio_path),
+        )
+
+        _flatten_audio([post], patreon_root)
+
+        expected = tmp_path / "Solar Girl" / "12345 - Cached Post" / "song.mp3"
+        assert expected.is_file()
+        assert post.audio_path == str(expected)
+
+    def test_sanitises_creator_and_title(self, tmp_path: Path):
+        # Slashes in creator or title would escape the destination; control
+        # chars and Windows-illegal characters need substitution too.
+        patreon_root = tmp_path / ".patreon-dl"
+        audio_path = _build_patreon_dl_audio(patreon_root, "67890", "song.mp3")
+        post = FetchedPost(
+            post_id="67890",
+            title="Has: Bad?Chars*",
+            tags=[],
+            artist="John / Jane",
+            post_dir=str(audio_path.parent.parent),
+            audio_path=str(audio_path),
+        )
+
+        _flatten_audio([post], patreon_root)
+
+        # safe_filename_component substitutes `/\:*?"<>|` and control chars
+        # with `_`. The post-id stays raw (it's already alphanumeric).
+        expected_creator, expected_folder = _flatten_dest_parts(
+            "67890", "John / Jane", "Has: Bad?Chars*"
+        )
+        # Sanity-check the dest_parts helper produced safe segments.
+        assert "/" not in expected_creator
+        assert "/" not in expected_folder
+        assert ":" not in expected_folder
+
+        expected_path = tmp_path / expected_creator / expected_folder / "song.mp3"
+        assert expected_path.is_file()
+        assert post.audio_path == str(expected_path)
+
+    def test_falls_back_to_unknown_creator_when_artist_empty(self, tmp_path: Path):
+        patreon_root = tmp_path / ".patreon-dl"
+        audio_path = _build_patreon_dl_audio(patreon_root, "11111", "song.mp3")
+        post = FetchedPost(
+            post_id="11111",
+            title="Has Title",
+            tags=[],
+            artist="",
+            post_dir=str(audio_path.parent.parent),
+            audio_path=str(audio_path),
+        )
+
+        _flatten_audio([post], patreon_root)
+
+        expected = tmp_path / "Unknown creator" / "11111 - Has Title" / "song.mp3"
+        assert expected.is_file()
+
+    def test_drops_title_suffix_when_title_empty(self, tmp_path: Path):
+        # Empty title → folder is just <post_id>, no trailing ` - `.
+        patreon_root = tmp_path / ".patreon-dl"
+        audio_path = _build_patreon_dl_audio(patreon_root, "22222", "song.mp3")
+        post = FetchedPost(
+            post_id="22222",
+            title="",
+            tags=[],
+            artist="Solar Girl",
+            post_dir=str(audio_path.parent.parent),
+            audio_path=str(audio_path),
+        )
+
+        _flatten_audio([post], patreon_root)
+
+        expected = tmp_path / "Solar Girl" / "22222" / "song.mp3"
+        assert expected.is_file()
 
 
 # ── _vanity_from_url ───────────────────────────────────────────────────────
