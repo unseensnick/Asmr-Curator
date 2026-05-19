@@ -487,24 +487,18 @@ export default function FileBrowser({
                                     loadFiles(query, searchMode, root);
                                     refreshDownloadsCount();
                                 }}
-                                onMovedToLibrary={(toPath, name) => {
-                                    // After a successful move, switch to
-                                    // the Library tab and select the moved
-                                    // file so the user sees the new
-                                    // location without hunting.
-                                    handleRootChange("library");
-                                    setSelected({
-                                        name,
-                                        ext:
-                                            "." + name.split(".").pop()!,
-                                        path: toPath,
-                                        folder:
-                                            toPath
-                                                .split("/")
-                                                .slice(0, -1)
-                                                .join("/") ?? "",
-                                    });
-                                    refreshDownloadsCount();
+                                onMovedToLibrary={() => {
+                                    // User stays on whichever tab they
+                                    // were on — when batching multiple
+                                    // files out of Downloads, auto-
+                                    // switching to Library every time
+                                    // forced the user to re-switch back
+                                    // for each file. onListReload (one
+                                    // prop above) already refreshes the
+                                    // current list + the Downloads
+                                    // badge, so the moved file just
+                                    // vanishes from where it was.
+                                    setSelected(null);
                                 }}
                                 onError={setError}
                             />
