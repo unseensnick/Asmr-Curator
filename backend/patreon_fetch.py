@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
+from backend.audio_utils import safe_filename_component
+
 PATREON_DL_BIN = os.environ.get("PATREON_DL_BIN", "patreon-dl")
 # Hard cap so a runaway creator-wide download can't hang the API forever.
 DEFAULT_TIMEOUT_SECONDS = 60 * 30
@@ -551,10 +553,12 @@ def _iter_cached_posts(output_dir: Path):
     resolution + flatten-fallback; only the match predicate differs.
 
     Skips sidecars that fail to parse (corrupt JSON or unexpected shape).
-    Audio path falls back to `<DOWNLOAD_PATH>/<post_id>/` when none remains
-    under the patreon-dl post folder — `_flatten_audio` from a prior fetch
-    moved it there. `output_dir.parent` IS DOWNLOAD_PATH because output_dir
-    is `DOWNLOAD_PATH/.patreon-dl/`.
+    Audio path falls back to the flattened destination produced by a prior
+    run of `_flatten_audio` — first the current
+    `<DOWNLOAD_PATH>/<creator>/<post_id> - <title>/` layout, then the
+    legacy `<DOWNLOAD_PATH>/<post_id>/` layout, so posts downloaded before
+    the layout change still resolve. `output_dir.parent` IS DOWNLOAD_PATH
+    because output_dir is `DOWNLOAD_PATH/.patreon-dl/`.
 
     Not shared with `_collect_posts` because that walker filters by sidecar
     mtime (newer than the current fetch's start time) and explicitly does
@@ -573,12 +577,18 @@ def _iter_cached_posts(output_dir: Path):
         post_dir = api_file.parent.parent
         audio_path = _find_first_audio(post_dir)
         if audio_path is None:
-            flattened_dir = output_dir.parent / post_id
-            if flattened_dir.is_dir():
-                for entry in sorted(flattened_dir.iterdir()):
+            creator, folder_name = _flatten_dest_parts(post_id, artist, title)
+            new_dir = output_dir.parent / creator / folder_name
+            legacy_dir = output_dir.parent / post_id
+            for candidate in (new_dir, legacy_dir):
+                if not candidate.is_dir():
+                    continue
+                for entry in sorted(candidate.iterdir()):
                     if entry.is_file() and entry.suffix.lower() in AUDIO_EXTS:
                         audio_path = entry
                         break
+                if audio_path is not None:
+                    break
         post = FetchedPost(
             post_id=post_id,
             title=title,
@@ -971,25 +981,47 @@ def _find_first_audio(post_dir: Path) -> Optional[Path]:
 # `stop.on = previouslyDownloaded` on re-fetches.
 
 
+def _flatten_dest_parts(post_id: str, artist: str, title: str) -> tuple[str, str]:
+    """Return (creator_segment, post_folder_segment) for the flattened
+    `DOWNLOAD_PATH/<creator>/<post_id> - <title>/` layout.
+
+    Both segments are sanitised via `safe_filename_component` (strips
+    directory separators + control chars, caps UTF-8 byte length). An
+    empty / fully-sanitised-away `artist` falls back to "Unknown
+    creator"; an empty title drops the ` - <title>` suffix and leaves
+    just `<post_id>` so the folder always has at least one identifier.
+    Shared between `_flatten_audio` (which writes) and
+    `_iter_cached_posts` (which reads), so the two stay in lockstep.
+    """
+    creator = safe_filename_component(artist) or "Unknown creator"
+    title_part = safe_filename_component(title)
+    folder_name = f"{post_id} - {title_part}" if title_part else post_id
+    return creator, folder_name
+
+
 def _flatten_audio(
     posts: list[FetchedPost], patreon_root: Path,
 ) -> list[FetchedPost]:
-    """Move each post's audio out of patreon-dl's tree into a per-post folder
-    directly under DOWNLOAD_PATH.
+    """Move each post's audio out of patreon-dl's tree into a per-creator,
+    per-post folder under DOWNLOAD_PATH.
 
     Layout after flatten:
       DOWNLOAD_PATH/
-        .patreon-dl/                                 ← patreon_root; untouched
-          .patreon-dl/db.sqlite                      ← status DB; untouched
+        .patreon-dl/                                          ← patreon_root; untouched
+          .patreon-dl/db.sqlite                               ← status DB; untouched
           Patreon/<creator>/posts/<post_id>/
-            info/post-api.json                       ← sidecar; untouched
-            audio/                                   ← now empty; rmdir'd
-        <post_id>/<original_filename>.ext            ← moved audio (new)
+            info/post-api.json                                ← sidecar; untouched
+            audio/                                            ← now empty; rmdir'd
+        <creator>/<post_id> - <title>/<original_filename>.ext ← moved audio (new)
 
     `patreon_root` is the directory we passed to `patreon-dl --out-dir`
-    (`DOWNLOAD_PATH/.patreon-dl/`). The flat destination lives one level above
-    it. `_rmdir_chain` removes the (now-empty) `audio/` subdirectory but
-    stops at the first non-empty parent — `info/` keeps the post folder.
+    (`DOWNLOAD_PATH/.patreon-dl/`). The flat destination lives one level
+    above it. Folder names go through `safe_filename_component` so any
+    slashes / control chars / overlong UTF-8 in creator or title don't
+    escape the destination root. `_rmdir_chain` removes the (now-empty)
+    `audio/` subdirectory but stops at the first non-empty parent —
+    `info/` keeps the post folder so the sidecar stays available for the
+    cached-sidecar fast path on re-fetches.
     """
     library_path = patreon_root.parent
     for post in posts:
@@ -998,7 +1030,8 @@ def _flatten_audio(
         src = Path(post.audio_path)
         if not src.is_file():
             continue
-        dest_dir = library_path / post.post_id
+        creator, folder_name = _flatten_dest_parts(post.post_id, post.artist, post.title)
+        dest_dir = library_path / creator / folder_name
         try:
             dest_dir.mkdir(parents=True, exist_ok=True)
         except OSError:
