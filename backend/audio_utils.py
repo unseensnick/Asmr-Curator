@@ -97,6 +97,26 @@ def safe_filename_component(value: str) -> str:
     return cleaned or ""
 
 
+def flatten_dest_parts(post_id: str, artist: str, title: str) -> tuple[str, str]:
+    """Return (creator_segment, post_folder_segment) for the flattened
+    `DOWNLOAD_PATH/<creator>/<post_id> - <title>/` layout.
+
+    Both segments are sanitised via `safe_filename_component`, which
+    substitutes `/\:*?"<>|` and control chars with `_` (so an artist of
+    `///` becomes `___`, still a valid scoped folder name). An empty
+    `artist` falls back to "Unknown creator"; an empty title drops the
+    ` - <title>` suffix and leaves just `<post_id>`, so the folder always
+    has at least one identifier. Shared between the patreon-dl flatten
+    step (which writes), the cached-sidecar reader, and the Drive +
+    external-audio ingest endpoints, so all writers land in the same
+    shape.
+    """
+    creator = safe_filename_component(artist) or "Unknown creator"
+    title_part = safe_filename_component(title)
+    folder_name = f"{post_id} - {title_part}" if title_part else post_id
+    return creator, folder_name
+
+
 def filename_from_content_disposition(header: Optional[str]) -> Optional[str]:
     if not header:
         return None
