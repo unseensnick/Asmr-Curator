@@ -1,4 +1,5 @@
 import { AlertTriangle, File, Music2 } from "lucide-react";
+
 import { Checkbox } from "@/components/ui/checkbox";
 import {
     METADATA_COMPATIBLE_EXTS,
@@ -18,12 +19,14 @@ interface FileBrowserItemProps {
 /**
  * One row in the file list. Renders the appropriate icon for the file's
  * format (warning for needs-conversion, music note for metadata-compatible,
- * generic file otherwise), the filename, optional folder path, a
- * "convert" badge for incompatible formats, and a leading checkbox when
- * batch mode is on.
+ * generic file otherwise), the filename in mono (it IS the data), an
+ * optional folder path in mono below, a "convert" warning hint for
+ * incompatible formats, and a leading checkbox in batch mode.
  *
- * Selection state and batch-toggle live in the parent (`FileBrowser`);
- * this component just renders and dispatches clicks.
+ * Selection / batch-toggle state lives in the parent (`FileBrowser`); this
+ * component just renders and dispatches clicks. Selected state uses a
+ * full-row warm tint (`bg-accent/40`), NOT the older `border-l` stripe
+ * (banned).
  */
 export default function FileBrowserItem({
     file,
@@ -37,16 +40,12 @@ export default function FileBrowserItem({
         !!file.needs_conversion || NEEDS_CONVERSION_EXTS.has(file.ext);
 
     const highlight = batchMode ? isBatchSelected : isSelected;
+    const rowClass = highlight
+        ? "flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-border last:border-b-0 transition-colors bg-accent/40 text-foreground"
+        : "flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-border last:border-b-0 transition-colors hover:bg-muted/60";
 
     return (
-        <div
-            onClick={onClick}
-            className={`flex items-center gap-2.5 px-3 py-2 cursor-pointer border-b border-border last:border-b-0 transition-colors ${
-                highlight
-                    ? "bg-primary/10 border-l-2 border-l-primary"
-                    : "hover:bg-card"
-            }`}
-        >
+        <div onClick={onClick} className={rowClass}>
             {batchMode && (
                 <Checkbox
                     checked={isBatchSelected}
@@ -57,18 +56,18 @@ export default function FileBrowserItem({
             )}
             <FileIcon ext={file.ext} />
             <div className="flex-1 min-w-0">
-                <div className="text-xs text-foreground truncate">
+                <div className="font-mono text-sm text-foreground truncate">
                     {file.name}
                 </div>
                 {file.folder && (
-                    <div className="text-[10px] text-muted-foreground truncate">
+                    <div className="font-mono text-xs text-muted-foreground truncate">
                         {file.folder}
                     </div>
                 )}
             </div>
             {fileNeedsConversion && (
-                <span className="text-[9px] text-warning border border-warning/40 rounded px-1.5 py-0.5 shrink-0">
-                    convert
+                <span className="text-xs text-warning shrink-0">
+                    Convert
                 </span>
             )}
         </div>
@@ -78,9 +77,25 @@ export default function FileBrowserItem({
 function FileIcon({ ext }: { ext: string }) {
     if (NEEDS_CONVERSION_EXTS.has(ext))
         return (
-            <AlertTriangle size={18} className="text-warning shrink-0" />
+            <AlertTriangle
+                size={18}
+                aria-hidden
+                className="text-warning shrink-0"
+            />
         );
     if (METADATA_COMPATIBLE_EXTS.has(ext))
-        return <Music2 size={18} className="text-success shrink-0" />;
-    return <File size={18} className="text-muted-foreground shrink-0" />;
+        return (
+            <Music2
+                size={18}
+                aria-hidden
+                className="text-success shrink-0"
+            />
+        );
+    return (
+        <File
+            size={18}
+            aria-hidden
+            className="text-muted-foreground shrink-0"
+        />
+    );
 }

@@ -43,3 +43,10 @@ node_modules/
 *.db
 *.sqlite3
 .gitkeep
+CLAUDE.local.md
+
+# Local agent-tool scratch (impeccable critique snapshots, etc.)
+# `design.json` is intentionally tracked (live-panel handoff); everything
+# else under .impeccable/ is per-developer scratch.
+.impeccable/*
+!.impeccable/design.json

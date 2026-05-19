@@ -1,4 +1,6 @@
 import { type ComponentProps } from "react";
+import { Loader2 } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 
 interface AsyncButtonProps extends ComponentProps<typeof Button> {
@@ -39,10 +41,5 @@ export default function AsyncButton({
 }
 
 function Spinner() {
-    return (
-        <span
-            aria-hidden
-            className="size-3.5 border-2 border-current/30 border-t-current rounded-full animate-spin shrink-0"
-        />
-    );
+    return <Loader2 size={14} aria-hidden className="animate-spin shrink-0" />;
 }

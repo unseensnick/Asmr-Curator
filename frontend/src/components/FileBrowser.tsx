@@ -1,19 +1,28 @@
-import { ChevronDown, ChevronRight, ListChecks, RefreshCw, Repeat } from "lucide-react";
+import {
+    AlertTriangle,
+    ChevronDown,
+    FolderOpen,
+    ListChecks,
+    Loader2,
+    RefreshCw,
+    Repeat,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+
 import ConversionPanel from "@/components/ConversionPanel";
 import FileBrowserItem from "@/components/FileBrowserItem";
+import LibraryExplorerSheet from "@/components/LibraryExplorerSheet";
 import SelectedFilePanel from "@/components/SelectedFilePanel";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import {
     Collapsible,
     CollapsibleContent,
     CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { apiGet, apiPost, API } from "@/lib/api";
+import { API, apiGet, apiPost, buildQueryString, type FileRoot } from "@/lib/api";
 import { FORMAT_EXT, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
 import type {
     ConvertFormat,
@@ -27,6 +36,14 @@ interface FileBrowserProps {
     outputDash: string;
     outputPipe: string;
     extractedArtist: string;
+    defaultOpen?: boolean;
+    /** Triggered by the Patreon panel's post-Apply bridge link. When set,
+     *  the FileBrowser opens, switches to the Downloads tab, selects the
+     *  named file (synthesising the entry from the bridge payload), and
+     *  scrolls itself into view. The parent should clear it via
+     *  `onBridgeConsumed` once the request has been handled. */
+    bridgeRequest?: { path: string; filename: string } | null;
+    onBridgeConsumed?: () => void;
 }
 
 interface SearchResponse {
@@ -46,29 +63,49 @@ interface BatchProgress {
 }
 
 /**
- * File browser shell: server-backed search across `AUDIO_ROOT`, a
- * filterable list (filename / folder / both), batch convert mode, and
- * a single-file work area below the list.
+ * File library shell. Two tabs: Library (browses LIBRARY_PATH, the user's
+ * curated archive) and Downloads (browses DOWNLOAD_PATH, the ingest staging
+ * tree). Each tab runs a server-backed flat search; the work area on the
+ * right is shared (a SelectedFilePanel handles rename, convert, and the
+ * optional Move-to-library step regardless of which tab the file came
+ * from). Deferred-fetch until first expand so the walk doesn't tie up a
+ * worker on page load.
  *
- * Per-row rendering lives in `FileBrowserItem`; the selected-file
- * rename/convert UI lives in `SelectedFilePanel`. Conversion preferences
- * (format/quality/delete-original) live here so the batch panel and the
- * single-file panel share them.
+ * `defaultOpen` drives the initial collapsed/expanded state.
+ *
+ * Two-column layout on lg+ viewports: the searchable file list left, the
+ * work area right. Stacks on smaller viewports.
  */
 export default function FileBrowser({
     outputDash,
     outputPipe,
     extractedArtist,
+    defaultOpen = false,
+    bridgeRequest = null,
+    onBridgeConsumed,
 }: FileBrowserProps) {
+    const [root, setRoot] = useState<FileRoot>("library");
     const [files, setFiles] = useState<FileEntry[]>([]);
     const [query, setQuery] = useState("");
     const [searchMode, setSearchMode] = useState<SearchMode>("filename");
     const [selected, setSelected] = useState<FileEntry | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
-    const [open, setOpen] = useState(false);
+    const [open, setOpen] = useState(defaultOpen);
+    // Files pending move from DOWNLOAD_PATH — refreshed on open, on tab
+    // switch, and after a successful move. Drives the badge on the
+    // Downloads tab so the user notices forgotten downloads at a glance.
+    const [downloadsCount, setDownloadsCount] = useState<number | null>(null);
+    // Library explorer (right-side Sheet) — folder-tree navigation across
+    // LIBRARY_PATH, including a "+ New folder" affordance scoped to the
+    // currently-navigated subdir. Folder creation lives exclusively in the
+    // explorer Sheet now; the FileBrowser used to carry its own inline
+    // "+ New folder" button at LIBRARY_PATH root, but that was a less-
+    // capable duplicate (couldn't target a subdir) and reading two slightly
+    // different folder-creation affordances in one panel was confusing.
+    const [explorerOpen, setExplorerOpen] = useState(false);
 
-    // Conversion preferences — persist across sessions via localStorage.
+    // Conversion preferences, persist across sessions.
     const [convertFormat, setConvertFormat] = useState<ConvertFormat>(() => {
         const stored = localStorage.getItem("convertFormat") as ConvertFormat;
         return stored && stored in FORMAT_EXT ? stored : "mp3";
@@ -88,8 +125,8 @@ export default function FileBrowser({
     );
 
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const rootRef = useRef<HTMLDivElement | null>(null);
 
-    // Persist preferences
     useEffect(() => {
         localStorage.setItem("convertFormat", convertFormat);
     }, [convertFormat]);
@@ -97,24 +134,26 @@ export default function FileBrowser({
         localStorage.setItem("convertQuality", convertQuality);
     }, [convertQuality]);
 
-    // ── Load files ────────────────────────────────────────────────────────────
+    // ── Load files ────────────────────────────────────────────────────────
 
-    async function loadFiles(q: string, mode: SearchMode) {
+    async function loadFiles(q: string, mode: SearchMode, rt: FileRoot) {
         setLoading(true);
         setError("");
         try {
-            const params = new URLSearchParams();
-            if (q.trim()) params.set("q", q.trim());
-            params.set("search_in", mode);
             const data = await apiGet<SearchResponse>(
-                `${API.search}?${params.toString()}`,
+                API.search +
+                    buildQueryString({
+                        q: q.trim(),
+                        search_in: mode,
+                        root: rt,
+                    }),
             );
             setFiles(data.files);
         } catch (e) {
+            const envName = rt === "library" ? "LIBRARY_PATH" : "DOWNLOAD_PATH";
             setError(
-                "Could not load files: " +
-                    getErrorMessage(e) +
-                    " — check AUDIO_ROOT in devcontainer.json",
+                `Couldn't reach the ${rt}. Check that ${envName} is set and points to a valid folder. ` +
+                    getErrorMessage(e),
             );
             setFiles([]);
         } finally {
@@ -122,30 +161,106 @@ export default function FileBrowser({
         }
     }
 
-    // Mount-only initial load. eslint-plugin-react-hooks v6+ flags any
-    // sync setState in an effect; the recommended alternatives (TanStack
-    // Query, React 19 `use()`) are bigger refactors than this project
-    // warrants.
+    // Background refresh of the Downloads count so the badge stays accurate
+    // without forcing the user onto that tab. Fires on open, on root
+    // change, and after any move (parent calls refreshDownloadsCount via
+    // the SelectedFilePanel's onListReload callback).
+    async function refreshDownloadsCount() {
+        try {
+            const data = await apiGet<SearchResponse>(
+                API.search + buildQueryString({ root: "downloads" }),
+            );
+            setDownloadsCount(data.files.length);
+        } catch {
+            // Non-fatal — badge just won't appear. The main loadFiles call
+            // surfaces any real error.
+            setDownloadsCount(null);
+        }
+    }
+
+    // Deferred initial fetch: walking either tree ties up a sync FastAPI
+    // worker thread; don't do it until the user opens the panel.
+    const loadedOnceRef = useRef(false);
     useEffect(() => {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        loadFiles("", "filename");
-    }, []);
+        if (!open || loadedOnceRef.current) return;
+        loadedOnceRef.current = true;
+        loadFiles("", "filename", root);
+        refreshDownloadsCount();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-on-open by design
+    }, [open]);
 
     function handleQueryChange(val: string) {
         setQuery(val);
         if (debounceRef.current) clearTimeout(debounceRef.current);
         debounceRef.current = setTimeout(
-            () => loadFiles(val, searchMode),
+            () => loadFiles(val, searchMode, root),
             300,
         );
     }
 
     function handleModeChange(mode: SearchMode) {
         setSearchMode(mode);
-        loadFiles(query, mode);
+        loadFiles(query, mode, root);
     }
 
-    // ── Batch convert ────────────────────────────────────────────────────────
+    // Consume bridge requests from PatreonPanel: open the panel, switch
+    // to Downloads, synthesise a FileEntry so SelectedFilePanel can
+    // drive rename + move without waiting for the (just-completed)
+    // search to include the file, scroll into view, then clear.
+    //
+    // NOTE(unseensnick): this is the canonical "event-from-parent"
+    // pattern that React's `useEvent` was designed for, but useEvent
+    // hasn't shipped stable. The rule (correctly) flags the multiple
+    // synchronous setState calls as set-state-in-effect; the proper
+    // fixes are useImperativeHandle (bigger refactor) or just calling
+    // a method through a ref instead of round-tripping through a
+    // prop. For now the prop-driven effect stays disabled. Re-evaluate
+    // when useEvent stabilises.
+    useEffect(() => {
+        if (!bridgeRequest) return;
+        const { path, filename } = bridgeRequest;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- see NOTE above
+        setOpen(true);
+        if (root !== "downloads") {
+            setRoot("downloads");
+            setBatchSelected(new Set());
+            loadFiles(query, searchMode, "downloads");
+        }
+        const ext = (() => {
+            const m = filename.match(/(\.[^.]+)$/);
+            return m ? m[1].toLowerCase() : "";
+        })();
+        const folder = path.includes("/")
+            ? path.slice(0, path.lastIndexOf("/"))
+            : "";
+        setSelected({
+            name: filename,
+            ext,
+            path,
+            folder,
+            needs_conversion: NEEDS_CONVERSION_EXTS.has(ext),
+        });
+        // Wait a tick so the panel has had a chance to expand before we
+        // measure. requestAnimationFrame is enough; no need for setTimeout.
+        requestAnimationFrame(() => {
+            rootRef.current?.scrollIntoView({
+                behavior: "smooth",
+                block: "start",
+            });
+        });
+        onBridgeConsumed?.();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- responds only to bridge changes
+    }, [bridgeRequest]);
+
+    function handleRootChange(next: FileRoot) {
+        if (next === root) return;
+        setRoot(next);
+        setSelected(null);
+        setBatchSelected(new Set());
+        loadFiles(query, searchMode, next);
+    }
+
+    // ── Batch convert ─────────────────────────────────────────────────────
 
     function selectAllConvertible() {
         const paths = files
@@ -167,9 +282,12 @@ export default function FileBrowser({
     }
 
     async function handleBatchConvert() {
-        const filesToConvert = files.filter((f) => batchSelected.has(f.path));
+        const filesToConvert = files.filter((f) =>
+            batchSelected.has(f.path),
+        );
         if (!filesToConvert.length) return;
-        const quality = convertFormat === "flac" ? "lossless" : convertQuality;
+        const quality =
+            convertFormat === "flac" ? "lossless" : convertQuality;
         const results: BatchProgress["results"] = [];
         setBatchProgress({
             current: 0,
@@ -190,6 +308,7 @@ export default function FileBrowser({
                     path: file.path,
                     output_format: convertFormat,
                     quality,
+                    root,
                     delete_original: deleteOriginal,
                 });
                 results.push({ name: file.name, ok: true });
@@ -208,276 +327,596 @@ export default function FileBrowser({
             results: [...results],
         });
         setBatchSelected(new Set());
-        await loadFiles(query, searchMode);
+        await loadFiles(query, searchMode, root);
     }
 
-    // ── Render ───────────────────────────────────────────────────────────────
+    function toggleBatchMode() {
+        setBatchMode((v) => !v);
+        setBatchSelected(new Set());
+        setBatchProgress(null);
+    }
+
+    // ── Render ────────────────────────────────────────────────────────────
 
     return (
-        <Collapsible open={open} onOpenChange={setOpen} asChild>
-            <Card className="rounded-xl border border-border shadow-none ring-0 p-5 gap-0">
-                {/* Card title — doubles as the collapsible trigger */}
+        <Collapsible open={open} onOpenChange={setOpen}>
+            <div
+                ref={rootRef}
+                className="bg-card border border-border rounded-xl p-6 sm:p-7 flex flex-col gap-5"
+            >
                 <CollapsibleTrigger asChild>
                     <button
                         type="button"
-                        className="flex items-center gap-2 text-[10px] font-bold tracking-[0.14em] uppercase text-muted-foreground -mx-1 px-1 py-1 rounded-md hover:bg-secondary/50 transition-colors w-full text-left"
+                        className="group/trigger flex items-center gap-2.5 w-full text-left rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                     >
-                        {open ? (
-                            <ChevronDown size={11} className="shrink-0" />
-                        ) : (
-                            <ChevronRight size={11} className="shrink-0" />
-                        )}
-                        <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />
-                        File to Rename
-                        {!loading && (
-                            <span className="opacity-60 text-[9px] tracking-[0.08em] tabular-nums">
-                                — {files.length} file{files.length !== 1 ? "s" : ""} indexed
+                        <ChevronDown
+                            size={16}
+                            aria-hidden
+                            className="text-muted-foreground transition-transform motion-safe:duration-200 motion-safe:ease-out group-data-[state=closed]/trigger:-rotate-90"
+                        />
+                        <span className="text-sm font-medium tracking-wide text-muted-foreground">
+                            File library
+                        </span>
+                        {!loading && files.length > 0 && (
+                            <span className="font-mono text-xs tabular-nums text-muted-foreground/80">
+                                {files.length.toLocaleString()}
                             </span>
                         )}
-                        <span className="ml-auto opacity-50 text-[9px] tracking-[0.08em]">
-                            {open ? "click to collapse" : "click to expand"}
-                        </span>
+                        {downloadsCount !== null && downloadsCount > 0 && (
+                            <span
+                                className="ml-auto font-mono text-xs tabular-nums text-muted-foreground/80"
+                                title={`${downloadsCount} file${downloadsCount === 1 ? "" : "s"} waiting in Downloads`}
+                            >
+                                {downloadsCount} pending
+                            </span>
+                        )}
                     </button>
                 </CollapsibleTrigger>
 
-                <CollapsibleContent className="data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in data-[state=closed]:fade-out overflow-hidden">
-                    <div className="mt-4">
+                <CollapsibleContent className="overflow-hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0">
+                    <div className="flex flex-col gap-4">
+                        {error && <ErrorBanner message={error} />}
 
-            {/* Error banner */}
-            {error && (
-                <Alert
-                    variant="destructive"
-                    className="mb-3 py-2 text-[11px]"
-                >
-                    <AlertDescription>{error}</AlertDescription>
-                </Alert>
-            )}
-
-            {/* Search row */}
-            <div className="flex gap-2 items-center mb-3">
-                <Input
-                    value={query}
-                    onChange={(e) => handleQueryChange(e.target.value)}
-                    placeholder="Search… (leave empty to show all)"
-                    className="flex-1 min-w-0"
-                />
-
-                <ToggleGroup
-                    type="single"
-                    value={searchMode}
-                    onValueChange={(v) =>
-                        v && handleModeChange(v as SearchMode)
-                    }
-                    className="shrink-0 border border-input rounded-3xl overflow-hidden gap-0"
-                >
-                    {(["filename", "folder", "both"] as SearchMode[]).map(
-                        (mode) => (
-                            <ToggleGroupItem
-                                key={mode}
-                                value={mode}
-                                title={
-                                    mode === "filename"
-                                        ? "Search filenames"
-                                        : mode === "folder"
-                                          ? "Search folder names"
-                                          : "Search both"
-                                }
-                                className="text-[10px] tracking-[0.06em] px-2.5 py-1.5 h-auto rounded-none! border-r border-input last:border-r-0 bg-secondary text-muted-foreground hover:bg-primary/10 hover:text-foreground data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+                        <Tabs
+                            value={root}
+                            onValueChange={(v) =>
+                                handleRootChange(v as FileRoot)
+                            }
+                        >
+                            <TabsList
+                                variant="line"
+                                className="h-auto p-0 gap-0 bg-transparent justify-start rounded-none border-b border-border w-full"
                             >
-                                {mode === "filename" ? "file" : mode}
-                            </ToggleGroupItem>
-                        ),
-                    )}
-                </ToggleGroup>
+                                <TabsTrigger
+                                    value="library"
+                                    className="px-4 py-2.5 text-xs font-medium tracking-[0.04em] whitespace-nowrap rounded-none"
+                                >
+                                    Library
+                                </TabsTrigger>
+                                <TabsTrigger
+                                    value="downloads"
+                                    className="px-4 py-2.5 text-xs font-medium tracking-[0.04em] whitespace-nowrap rounded-none"
+                                >
+                                    Downloads
+                                    {downloadsCount !== null &&
+                                        downloadsCount > 0 && (
+                                            <span className="ml-1.5 font-mono tabular-nums text-muted-foreground/80">
+                                                · {downloadsCount}
+                                            </span>
+                                        )}
+                                </TabsTrigger>
+                            </TabsList>
+                        </Tabs>
 
-                {!loading && files.length > 0 && (
-                    <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
-                        {files.length} file{files.length !== 1 ? "s" : ""}
-                    </span>
-                )}
-
-                <Button
-                    size="sm"
-                    variant={batchMode ? "default" : "ghost"}
-                    onClick={() => {
-                        setBatchMode((v) => !v);
-                        setBatchSelected(new Set());
-                        setBatchProgress(null);
-                    }}
-                    className="shrink-0 px-2.5"
-                    title="Batch convert mode"
-                >
-                    <ListChecks size={14} />
-                </Button>
-                <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => loadFiles(query, searchMode)}
-                    className="shrink-0 px-2.5"
-                    title="Refresh"
-                >
-                    <RefreshCw
-                        size={14}
-                        className={loading ? "animate-spin" : ""}
-                    />
-                </Button>
-            </div>
-
-            {/* File list */}
-            <div className="bg-secondary border border-input rounded-md overflow-y-auto max-h-50">
-                {loading ? (
-                    <div className="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground">
-                        <span className="w-3.5 h-3.5 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin shrink-0" />
-                        Scanning all folders…
-                    </div>
-                ) : files.length === 0 ? (
-                    <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
-                        No matching files
-                    </div>
-                ) : (
-                    files.map((file) => (
-                        <FileBrowserItem
-                            key={file.path}
-                            file={file}
-                            isSelected={selected?.path === file.path}
+                        <SearchRow
+                            query={query}
+                            onQueryChange={handleQueryChange}
+                            searchMode={searchMode}
+                            onSearchModeChange={handleModeChange}
+                            loading={loading}
                             batchMode={batchMode}
-                            isBatchSelected={batchSelected.has(file.path)}
-                            onClick={() => {
-                                if (batchMode) toggleBatch(file.path);
-                                else
+                            onToggleBatchMode={toggleBatchMode}
+                            onRefresh={() =>
+                                loadFiles(query, searchMode, root)
+                            }
+                            onOpenExplorer={() => setExplorerOpen(true)}
+                        />
+
+                        <div className="grid grid-cols-1 lg:grid-cols-[3fr_4fr] gap-4 items-start">
+                            <FileList
+                                files={files}
+                                loading={loading}
+                                selected={selected}
+                                batchMode={batchMode}
+                                batchSelected={batchSelected}
+                                emptyText={
+                                    root === "library"
+                                        ? query
+                                            ? "No matching files."
+                                            : "Library is empty. Fetch some posts and use Move to library to file them here."
+                                        : query
+                                          ? "No matching downloads."
+                                          : "No pending downloads."
+                                }
+                                onSelect={(file) =>
                                     setSelected(
                                         selected?.path === file.path
                                             ? null
                                             : file,
-                                    );
-                            }}
-                            onBatchToggle={() => toggleBatch(file.path)}
-                        />
-                    ))
-                )}
-            </div>
-
-            {/* Batch convert panel */}
-            {batchMode && (
-                <div className="mt-3 border border-border rounded-lg p-3 bg-secondary/50">
-                    <div className="flex items-center justify-between mb-3">
-                        <span className="text-[11px] font-medium text-foreground">
-                            {batchSelected.size} file
-                            {batchSelected.size !== 1 ? "s" : ""} selected
-                        </span>
-                        <div className="flex items-center gap-3">
-                            <button
-                                onClick={selectAllConvertible}
-                                className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-                            >
-                                Select convertible
-                            </button>
-                            {batchSelected.size > 0 && (
-                                <button
-                                    onClick={() => setBatchSelected(new Set())}
-                                    className="text-[10px] text-muted-foreground hover:text-destructive transition-colors"
-                                >
-                                    Clear
-                                </button>
-                            )}
+                                    )
+                                }
+                                onBatchToggle={toggleBatch}
+                            />
+                            <WorkArea
+                                root={root}
+                                batchMode={batchMode}
+                                batchSelected={batchSelected}
+                                batchProgress={batchProgress}
+                                convertFormat={convertFormat}
+                                convertQuality={convertQuality}
+                                deleteOriginal={deleteOriginal}
+                                onConvertFormatChange={setConvertFormat}
+                                onConvertQualityChange={setConvertQuality}
+                                onDeleteOriginalChange={setDeleteOriginal}
+                                onSelectAllConvertible={
+                                    selectAllConvertible
+                                }
+                                onClearBatch={() =>
+                                    setBatchSelected(new Set())
+                                }
+                                onBatchConvert={handleBatchConvert}
+                                onClearBatchResults={() =>
+                                    setBatchProgress(null)
+                                }
+                                selected={selected}
+                                outputDash={outputDash}
+                                outputPipe={outputPipe}
+                                extractedArtist={extractedArtist}
+                                onDeselect={() => setSelected(null)}
+                                onSelectedChange={setSelected}
+                                onListReload={() => {
+                                    loadFiles(query, searchMode, root);
+                                    refreshDownloadsCount();
+                                }}
+                                onMovedToLibrary={(toPath, name) => {
+                                    // After a successful move, switch to
+                                    // the Library tab and select the moved
+                                    // file so the user sees the new
+                                    // location without hunting.
+                                    handleRootChange("library");
+                                    setSelected({
+                                        name,
+                                        ext:
+                                            "." + name.split(".").pop()!,
+                                        path: toPath,
+                                        folder:
+                                            toPath
+                                                .split("/")
+                                                .slice(0, -1)
+                                                .join("/") ?? "",
+                                    });
+                                    refreshDownloadsCount();
+                                }}
+                                onError={setError}
+                            />
                         </div>
                     </div>
+                </CollapsibleContent>
+            </div>
 
-                    <ConversionPanel
-                        formats={["mp3", "flac", "ogg"]}
-                        format={convertFormat}
-                        quality={convertQuality}
-                        deleteOriginal={deleteOriginal}
-                        onFormatChange={setConvertFormat}
-                        onQualityChange={setConvertQuality}
-                        onDeleteChange={setDeleteOriginal}
-                        checkboxId="delete-original-batch"
-                    />
+            <LibraryExplorerSheet
+                open={explorerOpen}
+                onOpenChange={setExplorerOpen}
+                onSelectFile={(file, pickedRoot) => {
+                    // Drop the user onto the tab matching the root they
+                    // picked from so the existing work-area flows take
+                    // over. Mirrors the Patreon-bridge handoff.
+                    if (root !== pickedRoot) {
+                        setRoot(pickedRoot);
+                        setBatchSelected(new Set());
+                        loadFiles(query, searchMode, pickedRoot);
+                    }
+                    setSelected(file);
+                    rootRef.current?.scrollIntoView({
+                        behavior: "smooth",
+                        block: "start",
+                    });
+                }}
+            />
+        </Collapsible>
+    );
+}
 
-                    {batchProgress && (
-                        <div className="mb-3">
-                            {batchProgress.currentFile ? (
-                                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                                    <span className="w-3 h-3 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin shrink-0" />
-                                    {batchProgress.current}/
-                                    {batchProgress.total} —{" "}
-                                    {batchProgress.currentFile}
-                                </div>
-                            ) : (
-                                <div className="text-[10px] text-success">
-                                    Done —{" "}
-                                    {
-                                        batchProgress.results.filter(
-                                            (r) => r.ok,
-                                        ).length
-                                    }{" "}
-                                    converted
-                                    {batchProgress.results.filter(
-                                        (r) => !r.ok,
-                                    ).length > 0 &&
-                                        `, ${batchProgress.results.filter((r) => !r.ok).length} failed`}
-                                </div>
-                            )}
-                            {batchProgress.results
-                                .filter((r) => !r.ok)
-                                .map((r, i) => (
-                                    <div
-                                        key={i}
-                                        className="text-[10px] text-destructive mt-1 truncate"
-                                    >
-                                        ✗ {r.name}: {r.error}
-                                    </div>
-                                ))}
-                        </div>
-                    )}
+// ─────────────────────────────────────────────────────────────────────────
+// Sub-views, kept inline because they have no value outside this file.
+// ─────────────────────────────────────────────────────────────────────────
 
-                    <Button
-                        className="w-full gap-2"
-                        disabled={
-                            batchSelected.size === 0 ||
-                            (batchProgress !== null &&
-                                !!batchProgress.currentFile)
-                        }
-                        onClick={handleBatchConvert}
-                    >
-                        <Repeat size={16} />
-                        Convert {batchSelected.size} file
-                        {batchSelected.size !== 1 ? "s" : ""}
-                    </Button>
+function ErrorBanner({ message }: { message: string }) {
+    return (
+        <div className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 border border-destructive/25 rounded-md px-3 py-2.5 leading-relaxed">
+            <AlertTriangle
+                size={16}
+                aria-hidden
+                className="shrink-0 mt-0.5"
+            />
+            <span>{message}</span>
+        </div>
+    );
+}
 
-                    {batchProgress && !batchProgress.currentFile && (
-                        <button
-                            onClick={() => setBatchProgress(null)}
-                            className="w-full mt-2 text-[10px] text-muted-foreground hover:text-foreground transition-colors text-center"
+interface SearchRowProps {
+    query: string;
+    onQueryChange: (v: string) => void;
+    searchMode: SearchMode;
+    onSearchModeChange: (m: SearchMode) => void;
+    loading: boolean;
+    batchMode: boolean;
+    onToggleBatchMode: () => void;
+    onRefresh: () => void;
+    /** Opens the LibraryExplorerSheet for folder-tree navigation. The
+     *  sheet has its own root selector (Library / Downloads), so it
+     *  doesn't take its cue from the active tab; the user picks where
+     *  to browse from inside it. */
+    onOpenExplorer: () => void;
+}
+
+function SearchRow({
+    query,
+    onQueryChange,
+    searchMode,
+    onSearchModeChange,
+    loading,
+    batchMode,
+    onToggleBatchMode,
+    onRefresh,
+    onOpenExplorer,
+}: SearchRowProps) {
+    return (
+        <div className="flex flex-wrap gap-2 items-center">
+            <Input
+                value={query}
+                onChange={(e) => onQueryChange(e.target.value)}
+                placeholder="Search your library."
+                aria-label="Search the file library"
+                className="flex-1 min-w-0 font-mono text-sm"
+            />
+
+            <ToggleGroup
+                type="single"
+                value={searchMode}
+                onValueChange={(v) =>
+                    v && onSearchModeChange(v as SearchMode)
+                }
+                className="shrink-0 border border-border rounded-md overflow-hidden gap-0"
+            >
+                {(["filename", "folder", "both"] as SearchMode[]).map(
+                    (mode) => (
+                        <ToggleGroupItem
+                            key={mode}
+                            value={mode}
+                            title={
+                                mode === "filename"
+                                    ? "Search filenames"
+                                    : mode === "folder"
+                                      ? "Search folder names"
+                                      : "Search both"
+                            }
+                            className="text-sm px-3 py-1.5 h-auto rounded-none! border-r border-border last:border-r-0 bg-background text-muted-foreground hover:text-foreground data-[state=on]:bg-accent data-[state=on]:text-accent-foreground data-[state=on]:border-accent capitalize"
                         >
-                            Clear results
+                            {mode === "filename" ? "Filename" : mode}
+                        </ToggleGroupItem>
+                    ),
+                )}
+            </ToggleGroup>
+
+            <Button
+                size="sm"
+                variant="outline"
+                onClick={onOpenExplorer}
+                className="shrink-0 gap-1.5"
+                title="Browse the library folder tree, create folders, delete entries"
+                aria-label="Browse library"
+            >
+                <FolderOpen size={14} aria-hidden />
+                <span className="hidden sm:inline">Browse</span>
+            </Button>
+            <Button
+                size="sm"
+                variant={batchMode ? "default" : "outline"}
+                onClick={onToggleBatchMode}
+                className="shrink-0"
+                title="Batch convert mode"
+                aria-label="Toggle batch convert mode"
+                aria-pressed={batchMode}
+            >
+                <ListChecks size={14} aria-hidden />
+            </Button>
+            <Button
+                size="sm"
+                variant="outline"
+                onClick={onRefresh}
+                disabled={loading}
+                className="shrink-0"
+                title="Refresh the list"
+                aria-label="Refresh the file list"
+            >
+                <RefreshCw
+                    size={14}
+                    aria-hidden
+                    className={loading ? "animate-spin" : ""}
+                />
+            </Button>
+        </div>
+    );
+}
+
+interface FileListProps {
+    files: FileEntry[];
+    loading: boolean;
+    selected: FileEntry | null;
+    batchMode: boolean;
+    batchSelected: Set<string>;
+    emptyText: string;
+    onSelect: (file: FileEntry) => void;
+    onBatchToggle: (path: string) => void;
+}
+
+function FileList({
+    files,
+    loading,
+    selected,
+    batchMode,
+    batchSelected,
+    emptyText,
+    onSelect,
+    onBatchToggle,
+}: FileListProps) {
+    return (
+        <div className="bg-muted/40 border border-border rounded-md overflow-y-auto max-h-[28rem] min-h-40">
+            {loading ? (
+                <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+                    <Loader2
+                        size={14}
+                        aria-hidden
+                        className="animate-spin text-muted-foreground shrink-0"
+                    />
+                    Loading.
+                </div>
+            ) : files.length === 0 ? (
+                <div className="flex items-center justify-center py-10 text-sm text-muted-foreground italic px-4 text-center leading-relaxed">
+                    {emptyText}
+                </div>
+            ) : (
+                files.map((file) => (
+                    <FileBrowserItem
+                        key={file.path}
+                        file={file}
+                        isSelected={selected?.path === file.path}
+                        batchMode={batchMode}
+                        isBatchSelected={batchSelected.has(file.path)}
+                        onClick={() => {
+                            if (batchMode) onBatchToggle(file.path);
+                            else onSelect(file);
+                        }}
+                        onBatchToggle={() => onBatchToggle(file.path)}
+                    />
+                ))
+            )}
+        </div>
+    );
+}
+
+interface WorkAreaProps {
+    root: FileRoot;
+    batchMode: boolean;
+    batchSelected: Set<string>;
+    batchProgress: BatchProgress | null;
+    convertFormat: ConvertFormat;
+    convertQuality: ConvertQuality;
+    deleteOriginal: boolean;
+    onConvertFormatChange: (f: ConvertFormat) => void;
+    onConvertQualityChange: (q: ConvertQuality) => void;
+    onDeleteOriginalChange: (v: boolean) => void;
+    onSelectAllConvertible: () => void;
+    onClearBatch: () => void;
+    onBatchConvert: () => void;
+    onClearBatchResults: () => void;
+    selected: FileEntry | null;
+    outputDash: string;
+    outputPipe: string;
+    extractedArtist: string;
+    onDeselect: () => void;
+    onSelectedChange: (next: FileEntry) => void;
+    onListReload: () => void;
+    onMovedToLibrary: (toPath: string, name: string) => void;
+    onError: (msg: string) => void;
+}
+
+function WorkArea(props: WorkAreaProps) {
+    if (props.batchMode) {
+        return (
+            <BatchConvertPanel
+                batchSelected={props.batchSelected}
+                batchProgress={props.batchProgress}
+                convertFormat={props.convertFormat}
+                convertQuality={props.convertQuality}
+                deleteOriginal={props.deleteOriginal}
+                onConvertFormatChange={props.onConvertFormatChange}
+                onConvertQualityChange={props.onConvertQualityChange}
+                onDeleteOriginalChange={props.onDeleteOriginalChange}
+                onSelectAllConvertible={props.onSelectAllConvertible}
+                onClearBatch={props.onClearBatch}
+                onBatchConvert={props.onBatchConvert}
+                onClearBatchResults={props.onClearBatchResults}
+            />
+        );
+    }
+    if (props.selected) {
+        return (
+            <SelectedFilePanel
+                selected={props.selected}
+                root={props.root}
+                outputDash={props.outputDash}
+                outputPipe={props.outputPipe}
+                extractedArtist={props.extractedArtist}
+                convertFormat={props.convertFormat}
+                convertQuality={props.convertQuality}
+                deleteOriginal={props.deleteOriginal}
+                onConvertFormatChange={props.onConvertFormatChange}
+                onConvertQualityChange={props.onConvertQualityChange}
+                onDeleteOriginalChange={props.onDeleteOriginalChange}
+                onDeselect={props.onDeselect}
+                onSelectedChange={props.onSelectedChange}
+                onListReload={props.onListReload}
+                onMovedToLibrary={props.onMovedToLibrary}
+                onError={props.onError}
+            />
+        );
+    }
+    // Empty placeholder, lg+ only (on mobile, the empty right column would
+    // be a useless wedge of space below the file list).
+    return (
+        <div className="hidden lg:flex items-center justify-center min-h-40 border-2 border-dashed border-border rounded-md text-sm text-muted-foreground italic px-4 py-6 text-center">
+            {props.root === "downloads"
+                ? "Pick a download to rename, convert, or move into the library."
+                : "Select a file to rename or convert."}
+        </div>
+    );
+}
+
+interface BatchConvertPanelProps {
+    batchSelected: Set<string>;
+    batchProgress: BatchProgress | null;
+    convertFormat: ConvertFormat;
+    convertQuality: ConvertQuality;
+    deleteOriginal: boolean;
+    onConvertFormatChange: (f: ConvertFormat) => void;
+    onConvertQualityChange: (q: ConvertQuality) => void;
+    onDeleteOriginalChange: (v: boolean) => void;
+    onSelectAllConvertible: () => void;
+    onClearBatch: () => void;
+    onBatchConvert: () => void;
+    onClearBatchResults: () => void;
+}
+
+function BatchConvertPanel({
+    batchSelected,
+    batchProgress,
+    convertFormat,
+    convertQuality,
+    deleteOriginal,
+    onConvertFormatChange,
+    onConvertQualityChange,
+    onDeleteOriginalChange,
+    onSelectAllConvertible,
+    onClearBatch,
+    onBatchConvert,
+    onClearBatchResults,
+}: BatchConvertPanelProps) {
+    const inFlight =
+        batchProgress !== null && !!batchProgress.currentFile;
+    const failedCount = batchProgress
+        ? batchProgress.results.filter((r) => !r.ok).length
+        : 0;
+    const okCount = batchProgress
+        ? batchProgress.results.filter((r) => r.ok).length
+        : 0;
+
+    return (
+        <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+                <span className="text-sm font-medium text-foreground">
+                    {batchSelected.size} file
+                    {batchSelected.size === 1 ? "" : "s"} selected
+                </span>
+                <div className="flex items-center gap-3 text-xs">
+                    <button
+                        type="button"
+                        onClick={onSelectAllConvertible}
+                        className="text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                        Select convertible
+                    </button>
+                    {batchSelected.size > 0 && (
+                        <button
+                            type="button"
+                            onClick={onClearBatch}
+                            className="text-muted-foreground hover:text-destructive transition-colors"
+                        >
+                            Clear
                         </button>
                     )}
                 </div>
+            </div>
+
+            <ConversionPanel
+                formats={["mp3", "flac", "ogg"]}
+                format={convertFormat}
+                quality={convertQuality}
+                deleteOriginal={deleteOriginal}
+                onFormatChange={onConvertFormatChange}
+                onQualityChange={onConvertQualityChange}
+                onDeleteChange={onDeleteOriginalChange}
+                checkboxId="delete-original-batch"
+            />
+
+            {batchProgress && (
+                <div className="flex flex-col gap-1.5">
+                    {inFlight ? (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <Loader2
+                                size={14}
+                                aria-hidden
+                                className="animate-spin text-muted-foreground shrink-0"
+                            />
+                            <span>
+                                Converting {batchProgress.current} of{" "}
+                                {batchProgress.total}:{" "}
+                                <span className="font-mono text-xs">
+                                    {batchProgress.currentFile}
+                                </span>
+                            </span>
+                        </div>
+                    ) : (
+                        <p className="text-sm text-success">
+                            Converted {okCount}
+                            {failedCount > 0
+                                ? `. ${failedCount} failed.`
+                                : "."}
+                        </p>
+                    )}
+                    {batchProgress.results
+                        .filter((r) => !r.ok)
+                        .map((r, i) => (
+                            <p
+                                key={i}
+                                className="text-xs text-destructive font-mono break-all"
+                            >
+                                {r.name}: {r.error}
+                            </p>
+                        ))}
+                </div>
             )}
 
-            {/* Selected file work area */}
-            {selected && (
-                <SelectedFilePanel
-                    selected={selected}
-                    outputDash={outputDash}
-                    outputPipe={outputPipe}
-                    extractedArtist={extractedArtist}
-                    convertFormat={convertFormat}
-                    convertQuality={convertQuality}
-                    deleteOriginal={deleteOriginal}
-                    onConvertFormatChange={setConvertFormat}
-                    onConvertQualityChange={setConvertQuality}
-                    onDeleteOriginalChange={setDeleteOriginal}
-                    onDeselect={() => setSelected(null)}
-                    onSelectedChange={setSelected}
-                    onListReload={() => loadFiles(query, searchMode)}
-                    onError={setError}
-                />
+            <Button
+                onClick={onBatchConvert}
+                disabled={batchSelected.size === 0 || inFlight}
+                className="h-12 w-full gap-2 text-base"
+            >
+                <Repeat size={18} aria-hidden />
+                Convert {batchSelected.size} file
+                {batchSelected.size === 1 ? "" : "s"}
+            </Button>
+
+            {batchProgress && !inFlight && (
+                <button
+                    type="button"
+                    onClick={onClearBatchResults}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors text-center"
+                >
+                    Clear results
+                </button>
             )}
-                    </div>
-                </CollapsibleContent>
-            </Card>
-        </Collapsible>
+        </div>
     );
 }

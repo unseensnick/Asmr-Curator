@@ -7,12 +7,23 @@ services:
             - "8000:8000"
         volumes:
             - ./data:/data # SQLite db — persists on host
-            - ${AUDIO_PATH}:/mnt/audio:ro # audio library — set AUDIO_PATH in .env
+            # Curated archive (read + write: the user can rename in place and
+            # this is where the optional Move-to-library step lands files).
+            - ${LIBRARY_PATH}:/mnt/audio # set LIBRARY_PATH in .env
+            # Ingest staging (writable: patreon-dl, Drive scrape, external
+            # audio downloads all land here). DOWNLOAD_PATH and LIBRARY_PATH
+            # must point at distinct host directories — the backend errors
+            # on startup if either is unset or they're the same path.
+            - ${DOWNLOAD_PATH}:/mnt/downloads # set DOWNLOAD_PATH in .env
         environment:
             - DB_PATH=/data/dictionary.db
             - PYTHONPATH=/app
-            - AUDIO_ROOT=/mnt/audio
+            - LIBRARY_PATH=/mnt/audio
+            - DOWNLOAD_PATH=/mnt/downloads
             - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
             - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5vl:7b}
+            - DRIVE_SCRAPE_CONCURRENCY=${DRIVE_SCRAPE_CONCURRENCY:-1}
+            - DRIVE_BROWSER_IDLE_TIMEOUT_S=${DRIVE_BROWSER_IDLE_TIMEOUT_S:-300}
+            - DRIVE_DOWNLOAD_TIMEOUT_S=${DRIVE_DOWNLOAD_TIMEOUT_S:-14400}
         restart: unless-stopped
 

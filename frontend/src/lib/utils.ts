@@ -10,6 +10,19 @@ export function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** Split a backend error message of the form `... log tail: <noisy>` into a
+ *  short head (safe to display to the user) and the noisy log tail (route to
+ *  the dedicated log surface). When the marker isn't present, head == full
+ *  message and tail == "". */
+export function splitLogTail(msg: string): { head: string; logTail: string } {
+  const idx = msg.indexOf("log tail:");
+  if (idx === -1) return { head: msg, logTail: "" };
+  return {
+    head: msg.slice(0, idx).trim().replace(/[.\s]+$/, ""),
+    logTail: msg.slice(idx + "log tail:".length).trim(),
+  };
+}
+
 export function sanitizeFilename(str: string): string {
   return str
     .replace(/[\\/:*?"<>]/g, "")

@@ -1,11 +1,41 @@
 [project]
 name = "asmr-filename-generator"
-version = "1.1.1"
-description = "Self-hosted ASMR Workbench — vision LLM extraction, tag dictionary, file rename + ID3, audio conversion"
+version = "2.0.1"
+description = "Self-hosted ASMR Curator: vision LLM extraction, tag dictionary, file rename + ID3, audio conversion"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi==0.115.5",
     "uvicorn[standard]==0.32.1",
     "python-multipart==0.0.12",
+    "playwright==1.59.0",
+    # Pinned to match backend/requirements.txt — pyproject.toml drives
+    # `uv sync` in the devcontainer; requirements.txt drives the Docker
+    # build. Both must list the same direct deps or one path silently
+    # misses imports (httpx is in main.py for external-audio streaming
+    # + the SSE response client; mutagen writes ID3/FLAC/MP4 tags).
+    "httpx==0.27.2",
+    "mutagen==1.47.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[tool.pytest.ini_options]
+# `testpaths` is relative to the rootdir, which pytest sets to the dir
+# containing the configfile when `-c backend/pyproject.toml` is passed.
+# That means rootdir == `backend/`, and this entry must be `tests`
+# (not `backend/tests`) — otherwise pytest would try to collect from
+# `backend/backend/tests` and silently find nothing.
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+asyncio_mode = "auto"
+# Add the repo root to sys.path so tests can `from backend.X import ...`.
+# `pythonpath` entries resolve relative to rootdir (= `backend/`), so `..`
+# is the repo root. The devcontainer sets PYTHONPATH separately, but CI
+# does not, and without this entry pytest collection fails with
+# `ModuleNotFoundError: No module named 'backend'`.
+pythonpath = [".."]
