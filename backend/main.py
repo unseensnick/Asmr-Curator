@@ -53,9 +53,9 @@ FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
 
 
 def _require_env_path(name: str) -> Path:
-    """Resolve a required env var into a directory Path, or raise with a
-    clear setup-time message. Both DOWNLOAD_PATH and LIBRARY_PATH must be
-    set and point to existing directories; there is no silent fallback."""
+    """Resolve a required env var to an existing directory, or raise loudly."""
+    # No silent fallback — misconfiguration (typo, missing mount) must fail at
+    # startup, not let the app come up half-broken.
     value = os.environ.get(name)
     if not value:
         raise RuntimeError(
@@ -142,8 +142,6 @@ def validate_under_download(rel_path: str) -> Path:
 
 
 def root_for(name: str) -> Path:
-    """Pick a configured root by user-facing name. Endpoints that take a
-    `root` field call this to dispatch into the right path tree."""
     if name == "library":
         return LIBRARY_PATH
     if name == "downloads":
@@ -1046,14 +1044,10 @@ def convert_file(body: ConvertIn):
 PATREON_COOKIE_KEY = "patreon_cookie"
 GOOGLE_COOKIE_KEY = "google_cookie"
 
-# Drive scrapes must run one at a time per Google account: every playback
-# session triggers `accounts.google.com/RotateCookies` mid-stream, and when
-# multiple sessions race that rotation only the last wins server-side. The
-# losers then get probe-shape (~1 KB) bodies on their follow-up fetch
-# because Drive's CDN does an extra session check on videoplayback. Default
-# capacity 1; raise via `DRIVE_SCRAPE_CONCURRENCY` if you're scraping
-# different accounts (where the rotation race doesn't apply) or willing to
-# accept the failure mode.
+# Drive scrapes serialise per-account because Google's mid-stream
+# `RotateCookies` race lets only the last concurrent session win — losers
+# get ~1 KB probe-shaped responses. Raise capacity only when scraping
+# different accounts where rotations can't collide.
 _DRIVE_SCRAPE_CAPACITY = max(1, int(os.environ.get("DRIVE_SCRAPE_CONCURRENCY", "1")))
 _drive_scrape_lock = asyncio.Semaphore(_DRIVE_SCRAPE_CAPACITY)
 # Plain int — single-event-loop concurrency means `+=`/`-=` need no lock.
@@ -1301,22 +1295,12 @@ def patreon_fetch_endpoint(body: PatreonFetchIn):
     return response
 
 
-# ── External audio ingest (browser-extension handoff) ─────────────────────────
-#
-# Patreon posts often link to audio hosted on third-party services (Google
-# Drive, etc.) that patreon-dl doesn't follow. Two ingest paths exist:
-#
-#   1. `/api/patreon/ingest-external-audio` — called by the browser extension
-#      once it has already captured + cleaned a Google playback URL from the
-#      page's network traffic. We just download.
-#   2. `/api/patreon/ingest-drive-link` — called by the workbench UI for a
-#      Drive viewer URL surfaced via `external_links`. We use Playwright +
-#      the synced Google cookie to load Drive headlessly, intercept the
-#      playback URL, clean, then download. No extension capture needed.
-#
-# The audio helpers (URL cleaning, filename derivation, etc.) live in
-# `backend/audio_utils.py` so both paths and the Playwright module share them
-# without a circular import back into FastAPI.
+# ── External audio ingest ─────────────────────────────────────────────────────
+# Two endpoints write under DOWNLOAD_PATH for third-party audio:
+# `/api/patreon/ingest-external-audio` (direct download from a cleaned URL)
+# and `/api/patreon/ingest-drive-link` (Playwright scrape of a Drive viewer
+# URL, defined further down). Shared URL/filename helpers are in
+# `backend/audio_utils.py`; see `.claude/rules/architecture.md` for the split.
 
 
 class IngestExternalAudioIn(BaseModel):
