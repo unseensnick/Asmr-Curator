@@ -1,0 +1,106 @@
+name: Release Extension
+
+run-name: Build extension v${{ github.event.inputs.extension_version }} → ${{ github.event.inputs.attach_to_release }}
+
+# Companion to .github/workflows/release.yml. Built as a separate workflow so
+# a Docker-image build failure can't take the extension release down with it
+# (and vice versa). The extension is versioned independently from the main
+# app — its release notes come from extension/CHANGELOG.md, and a single
+# project release on GitHub can carry an extension zip whose version doesn't
+# match.
+
+on:
+  workflow_dispatch:
+    inputs:
+      extension_version:
+        description: 'Extension version (without "v" prefix, e.g. 0.1.0). Must have a matching section in extension/CHANGELOG.md.'
+        required: true
+        type: string
+      attach_to_release:
+        description: 'Project release tag to attach to (e.g. v2.0.1).'
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.inputs.extension_version }}
+  cancel-in-progress: false
+
+jobs:
+  release-extension:
+    name: Build and attach extension zip
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Clone repo
+        uses: actions/checkout@v4
+
+      - name: Setup CHANGELOG parser
+        uses: taiki-e/install-action@parse-changelog
+
+      - name: Get extension changelog
+        id: changelog
+        shell: bash
+        run: |
+          # Plain SemVer (major.minor.patch[-pre][+build]) or Unreleased.
+          VERSION_FORMAT='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z\.-]+)?(\+[0-9A-Za-z\.-]+)?$|^Unreleased$'
+          {
+            echo "CHANGELOG<<END_OF_FILE"
+            parse-changelog extension/CHANGELOG.md "${{ github.event.inputs.extension_version }}" --version-format "$VERSION_FORMAT" \
+              || parse-changelog extension/CHANGELOG.md Unreleased --version-format "$VERSION_FORMAT" \
+              || echo "No documented extension changes for this version yet."
+            echo ""
+            echo "END_OF_FILE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Bump extension manifest version
+        shell: bash
+        run: |
+          # Keep extension/manifest.json's version field in lockstep with the
+          # workflow input. Chrome Web Store and AMO both refuse uploads that
+          # don't bump the version, so each release ships a freshly-versioned
+          # zip. Ephemeral edit — lives in the workflow checkout only, never
+          # committed back.
+          jq --arg v "${{ github.event.inputs.extension_version }}" \
+             '.version = $v' extension/manifest.json > extension/manifest.json.tmp
+          mv extension/manifest.json.tmp extension/manifest.json
+          echo "Extension manifest version:"
+          jq -r '.version' extension/manifest.json
+
+      - name: Build extension zip
+        id: zip
+        shell: bash
+        run: |
+          # Chrome Web Store + AMO expect manifest.json at the zip root, so
+          # cd into extension/ first instead of zipping the parent directory.
+          # CHANGELOG.md is excluded — the version-specific release notes are
+          # already in the GitHub release body via the previous step.
+          ZIP_NAME="asmr-curator-companion-v${{ github.event.inputs.extension_version }}.zip"
+          (cd extension && zip -r "../$ZIP_NAME" . -x "*.DS_Store" -x ".git/*" -x "CHANGELOG.md")
+          ls -lh "$ZIP_NAME"
+          echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+          echo "zip_path=$GITHUB_WORKSPACE/$ZIP_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Attaches the zip + appends the body section to the named project
+          # release (created by the main Release workflow). softprops appends
+          # to an existing release; if it doesn't exist yet, it creates a
+          # fresh draft using this tag.
+          tag_name: ${{ github.event.inputs.attach_to_release }}
+          name: ${{ github.event.inputs.attach_to_release }}
+          body: |
+            ### Browser extension (`${{ steps.zip.outputs.zip_name }}`)
+
+            ${{ steps.changelog.outputs.CHANGELOG }}
+
+            Download the zip from the Assets section below and load it as an unpacked extension via `chrome://extensions` (Chrome / Edge) or `about:debugging` (Firefox 121+). See [`extension/README.md`](https://github.com/${{ github.repository }}/blob/${{ github.event.inputs.attach_to_release }}/extension/README.md) for the install walkthrough.
+          append_body: true
+          files: |
+            ${{ steps.zip.outputs.zip_path }}
+          draft: true
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
