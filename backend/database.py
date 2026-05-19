@@ -2,7 +2,23 @@ import sqlite3
 import os
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TypedDict
+
+
+# ── Row shapes ────────────────────────────────────────────────────────────────
+# Mirror what the helpers below return, so callers don't have to remember the
+# key set. Plain TypedDicts (not Pydantic) — the data already comes from SQLite
+# and the values aren't user input, so runtime validation buys nothing.
+
+class VocabEntry(TypedDict):
+    id: int
+    canonical: str
+    aliases: list[str]
+
+
+class SuppressedEntry(TypedDict):
+    id: int
+    term: str
 
 
 def _default_db_path() -> str:
@@ -112,11 +128,11 @@ def get_conn():
 
 # ── Schema ────────────────────────────────────────────────────────────────────
 
-def _vocab_row_to_dict(row) -> dict:
+def _vocab_row_to_dict(row: sqlite3.Row) -> VocabEntry:
     return {"id": row["id"], "canonical": row["canonical"], "aliases": json.loads(row["aliases"])}
 
 
-def _canonical_exists(conn, canonical: str, exclude_id: Optional[int] = None) -> bool:
+def _canonical_exists(conn: sqlite3.Connection, canonical: str, exclude_id: Optional[int] = None) -> bool:
     if exclude_id is None:
         return conn.execute(
             "SELECT id FROM tag_vocabulary WHERE LOWER(canonical)=LOWER(?)", (canonical,)
@@ -256,7 +272,7 @@ def _migrate_legacy_to_vocabulary(conn):
 
 # ── Vocabulary CRUD ───────────────────────────────────────────────────────────
 
-def get_vocabulary() -> list[dict]:
+def get_vocabulary() -> list[VocabEntry]:
     # Ordered by id (insertion order) so the UI's drag-reorder is durable: the
     # bulk-replace PUT /api/dictionary wipes and re-inserts in array order,
     # which renumbers ids in that order — but the order only sticks if reads
@@ -270,7 +286,7 @@ def get_vocabulary() -> list[dict]:
         return [_vocab_row_to_dict(r) for r in rows]
 
 
-def add_vocab_entry(canonical: str, aliases: list[str]) -> dict:
+def add_vocab_entry(canonical: str, aliases: list[str]) -> VocabEntry:
     """Add a new canonical tag. Raises ValueError on duplicate canonical."""
     with get_conn() as conn:
         if _canonical_exists(conn, canonical):
@@ -283,7 +299,7 @@ def add_vocab_entry(canonical: str, aliases: list[str]) -> dict:
         return _vocab_row_to_dict(cur.fetchone())
 
 
-def edit_vocab_entry(entry_id: int, canonical: str, aliases: list[str]) -> Optional[dict]:
+def edit_vocab_entry(entry_id: int, canonical: str, aliases: list[str]) -> Optional[VocabEntry]:
     with get_conn() as conn:
         if _canonical_exists(conn, canonical, exclude_id=entry_id):
             raise ValueError(f"Canonical tag already exists: {canonical}")
@@ -304,15 +320,15 @@ def delete_vocab_entry(entry_id: int) -> bool:
 
 # ── Suppressed terms CRUD ─────────────────────────────────────────────────────
 
-def get_suppressed() -> list[dict]:
+def get_suppressed() -> list[SuppressedEntry]:
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT id, term FROM suppressed_terms ORDER BY term COLLATE NOCASE"
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [{"id": r["id"], "term": r["term"]} for r in rows]
 
 
-def add_suppressed(term: str) -> dict:
+def add_suppressed(term: str) -> SuppressedEntry:
     with get_conn() as conn:
         existing = conn.execute(
             "SELECT id FROM suppressed_terms WHERE LOWER(term)=LOWER(?)", (term,)
@@ -323,7 +339,8 @@ def add_suppressed(term: str) -> dict:
             "INSERT INTO suppressed_terms (term) VALUES (?) RETURNING id, term",
             (term,),
         )
-        return dict(cur.fetchone())
+        row = cur.fetchone()
+        return {"id": row["id"], "term": row["term"]}
 
 
 def delete_suppressed(term_id: int) -> bool:
