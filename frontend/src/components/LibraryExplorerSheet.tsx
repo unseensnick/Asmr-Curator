@@ -73,6 +73,13 @@ interface LibraryExplorerSheetProps {
      *  downloads) and select the file so the existing rename / convert /
      *  move flows take over. */
     onSelectFile: (file: FileEntry, root: FileRoot) => void;
+    /** Shared library-subdir position. Controlled from FileBrowser so
+     *  navigating here updates the Move-to-library picker in
+     *  SelectedFilePanel (and vice versa). Downloads has its own local
+     *  state — only the library side is shared, since the move picker is
+     *  library-only. */
+    librarySubdir: string;
+    onLibrarySubdirChange: (subdir: string) => void;
 }
 
 // Path sentinel used by the DeleteCandidate state to route through a
@@ -146,15 +153,25 @@ export default function LibraryExplorerSheet({
     open,
     onOpenChange,
     onSelectFile,
+    librarySubdir,
+    onLibrarySubdirChange,
 }: LibraryExplorerSheetProps) {
     // Active filesystem root. Always one of "library" / "downloads" —
     // the left rail makes both visible at all times, so there's no
-    // "top-level Locations" state to fall back to. Both `root` and
-    // `subdir` are preserved across opens — the user typically files
-    // batches into the same destination, and re-walking from scratch
-    // each time is death-by-clicks.
+    // "top-level Locations" state to fall back to.
+    //
+    // Subdir is per-root: the library side comes from the parent
+    // (controlled, shared with the Move-to-library picker) so position
+    // survives across surfaces; the downloads side is local because the
+    // picker doesn't target downloads. Switching root flips between the
+    // two without resetting either — each remembers its own position.
     const [root, setRoot] = useState<FileRoot>("library");
-    const [subdir, setSubdir] = useState("");
+    const [downloadsSubdir, setDownloadsSubdir] = useState("");
+    const subdir = root === "library" ? librarySubdir : downloadsSubdir;
+    const setSubdir = (next: string) => {
+        if (root === "library") onLibrarySubdirChange(next);
+        else setDownloadsSubdir(next);
+    };
     const [entries, setEntries] = useState<Entry[] | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
@@ -666,11 +683,12 @@ export default function LibraryExplorerSheet({
 
     function switchRoot(next: FileRoot) {
         if (next === root) return;
-        // Subdir and filter are contextual to the previous root's tree;
-        // the cut clipboard is the explicit exception — it persists by
-        // design so the user can cut in one root and paste in another.
+        // Filter is contextual to the previous root's tree (rarely useful
+        // after a switch); the cut clipboard is the explicit exception —
+        // it persists by design so the user can cut in one root and paste
+        // in another. Subdir is per-root and lives on its own state, so
+        // switching just reveals the other root's saved position.
         setRoot(next);
-        setSubdir("");
         setFilter("");
         setNewFolderOpen(false);
         setMoveNotice(null);

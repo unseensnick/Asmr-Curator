@@ -105,6 +105,13 @@ export default function FileBrowser({
     // different folder-creation affordances in one panel was confusing.
     const [explorerOpen, setExplorerOpen] = useState(false);
 
+    // Shared library-subdir state. The Sheet and the Move-to-library
+    // picker (inside SelectedFilePanel) are two views of the same position
+    // in LIBRARY_PATH — navigating one updates the other so batching
+    // multiple files into the same destination doesn't make the user re-
+    // walk the tree per file.
+    const [librarySubdir, setLibrarySubdir] = useState("");
+
     // Conversion preferences, persist across sessions.
     const [convertFormat, setConvertFormat] = useState<ConvertFormat>(() => {
         const stored = localStorage.getItem("convertFormat") as ConvertFormat;
@@ -472,6 +479,8 @@ export default function FileBrowser({
                                 outputDash={outputDash}
                                 outputPipe={outputPipe}
                                 extractedArtist={extractedArtist}
+                                librarySubdir={librarySubdir}
+                                onLibrarySubdirChange={setLibrarySubdir}
                                 onDeselect={() => setSelected(null)}
                                 onSelectedChange={setSelected}
                                 onListReload={() => {
@@ -507,6 +516,8 @@ export default function FileBrowser({
             <LibraryExplorerSheet
                 open={explorerOpen}
                 onOpenChange={setExplorerOpen}
+                librarySubdir={librarySubdir}
+                onLibrarySubdirChange={setLibrarySubdir}
                 onSelectFile={(file, pickedRoot) => {
                     // Drop the user onto the tab matching the root they
                     // picked from so the existing work-area flows take
@@ -725,6 +736,8 @@ interface WorkAreaProps {
     outputDash: string;
     outputPipe: string;
     extractedArtist: string;
+    librarySubdir: string;
+    onLibrarySubdirChange: (subdir: string) => void;
     onDeselect: () => void;
     onSelectedChange: (next: FileEntry) => void;
     onListReload: () => void;
@@ -762,6 +775,8 @@ function WorkArea(props: WorkAreaProps) {
                 convertFormat={props.convertFormat}
                 convertQuality={props.convertQuality}
                 deleteOriginal={props.deleteOriginal}
+                librarySubdir={props.librarySubdir}
+                onLibrarySubdirChange={props.onLibrarySubdirChange}
                 onConvertFormatChange={props.onConvertFormatChange}
                 onConvertQualityChange={props.onConvertQualityChange}
                 onDeleteOriginalChange={props.onDeleteOriginalChange}
