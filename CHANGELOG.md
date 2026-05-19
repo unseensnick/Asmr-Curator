@@ -13,6 +13,7 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ### Fixes
 
+- **Rename-during-move now writes the metadata tags too.** Previously `/api/move` only handled the filename change when `new_name` was supplied; the title / artist / album / album-artist tags the user filled in were silently dropped. The endpoint now accepts an optional `metadata` field (same shape as `/api/rename`) and writes tags after the move when the destination is a metadata-compatible audio file. Frontend sends the current metadata fields alongside the rename so a single Move-here click produces the same file state as Rename followed by Move.
 - **Rename form's artist field now stays in sync with the TagsEditor's "from \<artist\>" caption.** Previously the field only pre-filled on file selection — running a Patreon / Screenshot extract *after* a file was already picked would update the caption but leave the artist field blank. Both are now driven by the same extracted-artist state, so what the user sees above is what gets written into the metadata.
 - **Move-to-library picker remembers your last destination across files** — it and the library explorer Sheet share one position now, so filing multiple files into the same subfolder doesn't re-walk the tree each time. Switching root inside the Sheet also preserves each root's position separately.
 - **Rename-and-embed-metadata during a move is now opt-in via checkbox** (was opt-out). Missing the checkbox no longer silently combines the two operations when the user only intended a plain move.

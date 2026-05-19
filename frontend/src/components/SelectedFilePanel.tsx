@@ -363,12 +363,19 @@ export default function SelectedFilePanel({
                 fromRoot={root}
                 /* If the user has a generated rename preview that differs
                  * from the current filename, the move offers to apply it
-                 * during the move (one server call instead of two). */
+                 * during the move (one server call instead of two) along
+                 * with the metadata tags below. */
                 pendingNewName={
                     newName && !bytesOver && newName !== selected.name
                         ? newName
                         : null
                 }
+                pendingMetadata={{
+                    title: metaTitle,
+                    artist: metaArtist,
+                    album: metaAlbum,
+                    album_artist: linkArtists ? metaArtist : metaAlbumArtist,
+                }}
                 subdir={librarySubdir}
                 onSubdirChange={onLibrarySubdirChange}
                 onMoved={(toPath, name) => {
@@ -387,6 +394,16 @@ interface MoveToLibrarySectionProps {
     selected: FileEntry;
     fromRoot: FileRoot;
     pendingNewName: string | null;
+    /** Current metadata field values, sent alongside `new_name` when the
+     *  rename-during-move checkbox is ticked. Matches the backend's
+     *  `MetadataIn` shape — backend writes tags after the move when the
+     *  destination is a metadata-compatible audio file. */
+    pendingMetadata: {
+        title: string;
+        artist: string;
+        album: string;
+        album_artist: string;
+    };
     /** Controlled-from-parent so the picker shares its current position
      *  with the LibraryExplorerSheet — see FileBrowser's `librarySubdir`. */
     subdir: string;
@@ -398,12 +415,16 @@ interface MoveToLibrarySectionProps {
 interface MoveResponse {
     to_path: string;
     new_name: string;
+    // Partial-success path: move committed, metadata embed failed. The
+    // file is on disk at to_path but its tags weren't written.
+    metadata_error?: string;
 }
 
 function MoveToLibrarySection({
     selected,
     fromRoot,
     pendingNewName,
+    pendingMetadata,
     subdir,
     onSubdirChange: setSubdir,
     onMoved,
@@ -497,9 +518,18 @@ function MoveToLibrarySection({
             };
             if (applyRename && pendingNewName) {
                 body.new_name = pendingNewName;
+                body.metadata = pendingMetadata;
             }
             const data = await apiPost<MoveResponse>(API.move, body);
             setOpen(false);
+            // Partial-success path: move committed but metadata embed
+            // failed. Surface as a warning so the user knows tags didn't
+            // get written; the file is at its new location either way.
+            if (data.metadata_error) {
+                onError(
+                    `Moved, but metadata embed failed: ${data.metadata_error}`,
+                );
+            }
             onMoved(data.to_path, data.new_name);
         } catch (e) {
             onError("Move failed: " + getErrorMessage(e));

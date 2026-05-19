@@ -583,11 +583,25 @@ def make_directory(body: MkdirIn):
     }
 
 
+class MetadataIn(BaseModel):
+    """Tag fields embedded after a rename or a rename-during-move.
+
+    Shared by /api/rename and /api/move so a move-with-new-name can also
+    write the user-supplied title/artist/album tags in one server round-
+    trip — matching the rename-and-embed pattern the rename endpoint has
+    always supported."""
+    title: str = ""
+    artist: str = ""
+    album: str = ""
+    album_artist: str = ""
+
+
 class MoveIn(BaseModel):
     from_path: str                # relative path of the source (file OR folder)
     from_root: str                # "library" | "downloads"
     to_subdir: str                # destination folder relative to LIBRARY_PATH ("" = root)
     new_name: Optional[str] = None  # optional rename during the move
+    metadata: Optional[MetadataIn] = None  # tags to embed after the move (only when dest is a metadata-compatible audio file)
 
 
 def _plan_move(
@@ -652,7 +666,9 @@ def _plan_move(
 def move_file(body: MoveIn):
     """Move a file or folder from `from_root` into LIBRARY_PATH/<to_subdir>/,
     optionally renaming during the move so the user can do "rename + move"
-    atomically.
+    atomically. When the destination is a metadata-compatible audio file
+    and `body.metadata` is set, tags are written after the move — same
+    behaviour as /api/rename's optional metadata embed.
 
     Source can be a file (the SelectedFilePanel rename+move case) or a
     folder (the explorer's cut+paste-folder case). shutil.move handles
@@ -665,10 +681,40 @@ def move_file(body: MoveIn):
     except OSError as e:
         raise HTTPException(500, f"Move failed: {e}")
 
+    # Optional metadata embed after the move. Quietly skipped for folder
+    # moves and for files whose suffix can't carry tags — those paths just
+    # return the plain `moved: True` response and never expose
+    # metadata_error. Mirrors the /api/rename pattern: tag-write failures
+    # don't fail the move (the file is on disk where the user asked), they
+    # surface as a partial-success field the client can show as a warning.
+    metadata_error: Optional[str] = None
+    if (
+        body.metadata
+        and dest.is_file()
+        and dest.suffix.lower() in METADATA_COMPATIBLE_EXTS
+        and any([
+            body.metadata.title,
+            body.metadata.artist,
+            body.metadata.album,
+            body.metadata.album_artist,
+        ])
+    ):
+        try:
+            _write_metadata(
+                dest,
+                body.metadata.title,
+                body.metadata.artist,
+                body.metadata.album,
+                body.metadata.album_artist,
+            )
+        except Exception as e:
+            metadata_error = str(e)
+
     return {
         "moved": True,
         "to_path": str(dest.relative_to(LIBRARY_PATH.resolve())),
         "new_name": dest.name,
+        **({"metadata_error": metadata_error} if metadata_error else {}),
     }
 
 
@@ -938,12 +984,6 @@ def rename_path(body: RenamePathIn):
 
 
 # ── Rename ────────────────────────────────────────────────────────────────────
-
-class MetadataIn(BaseModel):
-    title: str = ""
-    artist: str = ""
-    album: str = ""
-    album_artist: str = ""
 
 class RenameIn(BaseModel):
     path: str                           # relative path to file inside the chosen root
