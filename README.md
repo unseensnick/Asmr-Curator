@@ -134,14 +134,16 @@ docker compose up --build
 
 **Option B — pull the published GHCR image:**
 
-Releases are published to `ghcr.io/unseensnick/asmr-filename-gen:latest` (and `:<version>`). To run that image instead of building, set the `image:` key in `docker-compose.yml`:
+Releases are published to `ghcr.io/unseensnick/asmr-curator:latest` (and `:<version>`). To run that image instead of building, set the `image:` key in `docker-compose.yml`:
 
 ```yaml
 services:
     asmr-tool:
-        image: ghcr.io/unseensnick/asmr-filename-gen:latest
+        image: ghcr.io/unseensnick/asmr-curator:latest
         # remove the `build:` block
 ```
+
+> Releases prior to v2.0.4 were published under the old repo slug at `ghcr.io/unseensnick/asmr-filename-gen` — those tags stay reachable but receive no new builds.
 
 Then:
 

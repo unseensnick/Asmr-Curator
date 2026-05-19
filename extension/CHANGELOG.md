@@ -20,7 +20,8 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ### Changes
 
-- **Renamed to "ASMR Curator Companion"** in the toolbar tooltip, addons list, and popup header. The Firefox add-on ID stays pinned to its original value so existing installs don't look like a new extension.
+- **Popup and settings page restyled to match the main app.** Cool slate surfaces, a warm-cream foreground, and a teal-cyan accent on the Sync button and the update banner, replacing the earlier violet-on-near-black palette.
+- **Renamed to "ASMR Curator Companion"** across the toolbar tooltip, addons-list entry, popup header, and the Firefox add-on ID. Firefox users on the previous temporary install will need to re-load the unpacked add-on after updating.
 
 ## [0.1.2]
 

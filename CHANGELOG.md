@@ -13,7 +13,7 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ### Changes
 
-- **Patreon downloads now land at `DOWNLOAD_PATH/<creator>/<post_id> - <post_title>/<file>`** instead of a flat `<post_id>/<file>`. The Downloads tab is browsable by creator at a glance instead of squinting at numeric post IDs; patreon-dl's deeper internal tree under `.patreon-dl/` is unchanged. Existing downloads at the old layout stay where they are — the cached-sidecar fast path checks both, so re-fetches don't see them as missing.
+- **Patreon downloads now land at `DOWNLOAD_PATH/<creator>/<post_id> - <post_title>/<file>`** instead of a flat `<post_id>/<file>`. The Downloads tab is browsable by creator at a glance instead of squinting at numeric post IDs. Existing downloads at the old layout stay where they are.
 
 ### Additions
 
@@ -23,7 +23,7 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ### Other
 
-- **The browser extension shipped at 0.1.2 with 2.0.3 remains compatible.** None of the cookie-sync endpoints (`/api/settings/{patreon,google}-cookie`) change in this release; users on 0.1.2 don't need to re-install.
+- **Backend logger renamed `asmr_workbench` → `asmr_curator`.** Visible in log aggregators that filter by logger name; no behaviour change.
 
 ## [2.0.3]
 
