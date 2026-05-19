@@ -1,5 +1,7 @@
 # ASMR Curator
 
+[![Release](https://img.shields.io/github/v/release/unseensnick/Asmr-Curator?display_name=tag&sort=semver)](https://github.com/unseensnick/Asmr-Curator/releases/latest) [![Build](https://img.shields.io/github/actions/workflow/status/unseensnick/Asmr-Curator/build_check.yml?branch=main&label=build)](https://github.com/unseensnick/Asmr-Curator/actions/workflows/build_check.yml) [![GHCR](https://img.shields.io/badge/ghcr.io-asmr--curator-blue?logo=docker&logoColor=white)](https://github.com/unseensnick/Asmr-Curator/pkgs/container/asmr-curator) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Self-hosted tool for organising a local ASMR library. Pulls audio from Patreon (including Drive-hosted files), writes consistent filenames against a tag dictionary you control, and keeps the whole catalogue under one filesystem you bind-mount into the container.
 
 > **Provided as-is, no warranty, no liability.** Hobby project, MIT-licensed, run at your own risk. Personal use only — you are responsible for the terms of service of any platform you connect (Patreon, Google), and for not redistributing copyrighted content. Full text in [LICENSE](LICENSE) and the [License and responsible use](#license-and-responsible-use) section.
