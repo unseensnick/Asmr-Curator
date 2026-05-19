@@ -56,6 +56,12 @@ interface SelectedFilePanelProps {
     convertFormat: ConvertFormat;
     convertQuality: ConvertQuality;
     deleteOriginal: boolean;
+    /** Shared library-subdir position. The Move-to-library picker reads
+     *  and writes this so it stays in sync with the LibraryExplorerSheet
+     *  — filing multiple files into the same destination doesn't re-walk
+     *  the tree per file. */
+    librarySubdir: string;
+    onLibrarySubdirChange: (subdir: string) => void;
     onConvertFormatChange: (f: ConvertFormat) => void;
     onConvertQualityChange: (q: ConvertQuality) => void;
     onDeleteOriginalChange: (v: boolean) => void;
@@ -102,6 +108,8 @@ export default function SelectedFilePanel({
     convertFormat,
     convertQuality,
     deleteOriginal,
+    librarySubdir,
+    onLibrarySubdirChange,
     onConvertFormatChange,
     onConvertQualityChange,
     onDeleteOriginalChange,
@@ -363,6 +371,8 @@ export default function SelectedFilePanel({
                         ? newName
                         : null
                 }
+                subdir={librarySubdir}
+                onSubdirChange={onLibrarySubdirChange}
                 onMoved={(toPath, name) => {
                     onListReload();
                     onMovedToLibrary(toPath, name);
@@ -379,6 +389,10 @@ interface MoveToLibrarySectionProps {
     selected: FileEntry;
     fromRoot: FileRoot;
     pendingNewName: string | null;
+    /** Controlled-from-parent so the picker shares its current position
+     *  with the LibraryExplorerSheet — see FileBrowser's `librarySubdir`. */
+    subdir: string;
+    onSubdirChange: (subdir: string) => void;
     onMoved: (toPath: string, name: string) => void;
     onError: (msg: string) => void;
 }
@@ -392,20 +406,25 @@ function MoveToLibrarySection({
     selected,
     fromRoot,
     pendingNewName,
+    subdir,
+    onSubdirChange: setSubdir,
     onMoved,
     onError,
 }: MoveToLibrarySectionProps) {
     const [open, setOpen] = useState(false);
-    // Picker state: which library subdir is the user currently inside?
-    // "" means LIBRARY_PATH root. Drilling pushes path segments; the
-    // breadcrumb at the top lets the user pop back up.
-    const [subdir, setSubdir] = useState("");
+    // `subdir` is controlled from the parent (FileBrowser's
+    // `librarySubdir`) so navigation here stays in sync with the
+    // LibraryExplorerSheet — filing multiple files into the same
+    // destination doesn't re-walk the tree.
     const [entries, setEntries] = useState<
         { name: string; type: "file" | "dir" }[] | null
     >(null);
     const [loading, setLoading] = useState(false);
     const [moving, setMoving] = useState(false);
-    const [applyRename, setApplyRename] = useState(true);
+    // Default off: the move-and-rename is opt-in. Was opt-out previously,
+    // which silently combined the two operations and was easy to miss
+    // when the user only intended to move.
+    const [applyRename, setApplyRename] = useState(false);
 
     // Inline "+ New folder" state (creates under the currently-viewed subdir).
     const [newFolderOpen, setNewFolderOpen] = useState(false);
