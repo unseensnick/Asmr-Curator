@@ -16,12 +16,12 @@ from backend.patreon_fetch import (
     _find_cached_creator_posts,
     _find_cached_post,
     _flatten_audio,
-    _flatten_dest_parts,
     _is_allowlisted_host,
     _post_id_from_url,
     _vanity_from_url,
     _walk_prosemirror_nodes,
 )
+from backend.audio_utils import flatten_dest_parts
 
 
 # ── _post_id_from_url ──────────────────────────────────────────────────────
@@ -467,7 +467,7 @@ class TestFlattenAudio:
 
         # safe_filename_component substitutes `/\:*?"<>|` and control chars
         # with `_`. The post-id stays raw (it's already alphanumeric).
-        expected_creator, expected_folder = _flatten_dest_parts(
+        expected_creator, expected_folder = flatten_dest_parts(
             "67890", "John / Jane", "Has: Bad?Chars*"
         )
         # Sanity-check the dest_parts helper produced safe segments.

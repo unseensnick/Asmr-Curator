@@ -181,10 +181,17 @@ export async function ingestDriveLinkStream(
   postId: string,
   driveUrl: string,
   onEvent: (event: IngestDriveLinkEvent) => void,
-  options: { filename?: string; signal?: AbortSignal } = {},
+  options: {
+    filename?: string;
+    title?: string;
+    artist?: string;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<IngestDriveLinkResponse> {
   const body: Record<string, unknown> = { post_id: postId, drive_url: driveUrl };
   if (options.filename) body.filename = options.filename;
+  if (options.title) body.title = options.title;
+  if (options.artist) body.artist = options.artist;
 
   const response = await fetch(API.ingestDriveLink, {
     method: "POST",

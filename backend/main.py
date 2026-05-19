@@ -1410,10 +1410,12 @@ async def ingest_external_audio(body: IngestExternalAudioIn):
 
     cleaned_url = audio_utils.strip_query_params(source_url)
 
-    # validate_under_download enforces the DOWNLOAD_PATH boundary even if
-    # post_id somehow contains traversal segments that slipped past the
-    # prefix check.
-    dest_dir = validate_under_download(post_id)
+    # _ingest_dest_dir chooses the flattened `<creator>/<post_id> - <title>/`
+    # layout when artist or title is supplied (matches patreon-dl), and
+    # falls back to legacy `<post_id>/` otherwise. validate_under_download
+    # enforces the DOWNLOAD_PATH boundary against any traversal that slips
+    # past the prefix check.
+    dest_dir = _ingest_dest_dir(post_id, body.artist, body.title)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     timeout = httpx.Timeout(connect=15.0, read=300.0, write=60.0, pool=15.0)
@@ -1495,6 +1497,28 @@ class IngestDriveLinkIn(BaseModel):
     post_id: str
     drive_url: str
     filename: Optional[str] = None
+    # Post metadata used to land the file at the flattened
+    # `<creator>/<post_id> - <title>/` layout. When neither is supplied,
+    # the legacy `<post_id>/` fallback is used so external callers without
+    # the metadata keep working.
+    title: Optional[str] = None
+    artist: Optional[str] = None
+
+
+def _ingest_dest_dir(post_id: str, artist: Optional[str], title: Optional[str]) -> Path:
+    """Resolve the per-post destination under DOWNLOAD_PATH.
+
+    With artist or title supplied, the new flattened layout
+    (`<creator>/<post_id> - <title>/`) is used; missing pieces are filled in
+    by `flatten_dest_parts`. Without either, falls back to the legacy
+    `<post_id>/` shape for callers that don't carry metadata.
+    """
+    if artist or title:
+        creator, folder = audio_utils.flatten_dest_parts(
+            post_id, artist or "", title or "",
+        )
+        return validate_under_download(f"{creator}/{folder}")
+    return validate_under_download(post_id)
 
 
 @app.post("/api/patreon/ingest-drive-link")
@@ -1542,7 +1566,7 @@ async def ingest_drive_link(body: IngestDriveLinkIn):
     except (ValueError, json.JSONDecodeError) as e:
         raise HTTPException(500, f"Google cookie in settings is malformed: {e}")
 
-    dest_dir = validate_under_download(post_id)
+    dest_dir = _ingest_dest_dir(post_id, body.artist, body.title)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     # ── SSE generator ─────────────────────────────────────────────────────

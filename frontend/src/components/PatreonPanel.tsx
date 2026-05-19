@@ -517,7 +517,12 @@ function SinglePostResult({ post, onApply }: SinglePostResultProps) {
       ) : null}
 
       {post.external_links && post.external_links.length > 0 && (
-        <ExternalLinksHint postId={post.post_id} links={post.external_links} />
+        <ExternalLinksHint
+          postId={post.post_id}
+          artist={post.artist}
+          title={post.title}
+          links={post.external_links}
+        />
       )}
 
       <Button onClick={onApply} className="h-12 w-full text-base">

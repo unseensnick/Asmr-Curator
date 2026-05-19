@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-from backend.audio_utils import safe_filename_component
+from backend.audio_utils import flatten_dest_parts, safe_filename_component
 
 PATREON_DL_BIN = os.environ.get("PATREON_DL_BIN", "patreon-dl")
 # Hard cap so a runaway creator-wide download can't hang the API forever.
@@ -577,7 +577,7 @@ def _iter_cached_posts(output_dir: Path):
         post_dir = api_file.parent.parent
         audio_path = _find_first_audio(post_dir)
         if audio_path is None:
-            creator, folder_name = _flatten_dest_parts(post_id, artist, title)
+            creator, folder_name = flatten_dest_parts(post_id, artist, title)
             new_dir = output_dir.parent / creator / folder_name
             legacy_dir = output_dir.parent / post_id
             for candidate in (new_dir, legacy_dir):
@@ -981,24 +981,6 @@ def _find_first_audio(post_dir: Path) -> Optional[Path]:
 # `stop.on = previouslyDownloaded` on re-fetches.
 
 
-def _flatten_dest_parts(post_id: str, artist: str, title: str) -> tuple[str, str]:
-    """Return (creator_segment, post_folder_segment) for the flattened
-    `DOWNLOAD_PATH/<creator>/<post_id> - <title>/` layout.
-
-    Both segments are sanitised via `safe_filename_component` (strips
-    directory separators + control chars, caps UTF-8 byte length). An
-    empty / fully-sanitised-away `artist` falls back to "Unknown
-    creator"; an empty title drops the ` - <title>` suffix and leaves
-    just `<post_id>` so the folder always has at least one identifier.
-    Shared between `_flatten_audio` (which writes) and
-    `_iter_cached_posts` (which reads), so the two stay in lockstep.
-    """
-    creator = safe_filename_component(artist) or "Unknown creator"
-    title_part = safe_filename_component(title)
-    folder_name = f"{post_id} - {title_part}" if title_part else post_id
-    return creator, folder_name
-
-
 def _flatten_audio(
     posts: list[FetchedPost], patreon_root: Path,
 ) -> list[FetchedPost]:
@@ -1030,7 +1012,7 @@ def _flatten_audio(
         src = Path(post.audio_path)
         if not src.is_file():
             continue
-        creator, folder_name = _flatten_dest_parts(post.post_id, post.artist, post.title)
+        creator, folder_name = flatten_dest_parts(post.post_id, post.artist, post.title)
         dest_dir = library_path / creator / folder_name
         try:
             dest_dir.mkdir(parents=True, exist_ok=True)

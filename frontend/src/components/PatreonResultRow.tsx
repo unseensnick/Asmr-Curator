@@ -90,6 +90,8 @@ export default function PatreonResultRow({
         <div className="px-4 pb-3 -mt-1">
           <ExternalLinksHint
             postId={post.post_id}
+            artist={post.artist}
+            title={post.title}
             links={post.external_links ?? []}
           />
         </div>

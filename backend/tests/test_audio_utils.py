@@ -16,6 +16,7 @@ from backend.audio_utils import (
     derive_filename,
     ext_from_content_type,
     filename_from_content_disposition,
+    flatten_dest_parts,
     safe_filename_component,
     strip_query_params,
     unique_destination,
@@ -283,3 +284,47 @@ class TestDeriveFilename:
             fallback_stem="post_123",
         )
         assert result == "x.mp3"
+
+
+# ── flatten_dest_parts ─────────────────────────────────────────────────────
+
+
+class TestFlattenDestParts:
+    def test_returns_creator_and_post_folder_for_happy_path(self):
+        creator, folder = flatten_dest_parts("12345", "Foo Bar", "My Post Title")
+        assert creator == "Foo Bar"
+        assert folder == "12345 - My Post Title"
+
+    def test_falls_back_to_unknown_creator_when_artist_empty(self):
+        creator, _ = flatten_dest_parts("12345", "", "Some Title")
+        assert creator == "Unknown creator"
+
+    def test_drops_title_suffix_when_title_empty(self):
+        _, folder = flatten_dest_parts("12345", "Foo", "")
+        assert folder == "12345"
+
+    def test_substitutes_invalid_chars_rather_than_dropping_them(self):
+        # safe_filename_component replaces `/\:*?"<>|` and control chars
+        # with `_` rather than stripping them, so an artist of `///`
+        # becomes `___` (still a valid, scoped folder name) — not empty,
+        # so no "Unknown creator" fallback fires.
+        creator, _ = flatten_dest_parts("12345", "///", "Some Title")
+        assert creator == "___"
+
+    def test_sanitises_slash_in_creator(self):
+        creator, _ = flatten_dest_parts("12345", "Foo/Bar", "T")
+        # A literal slash would let the path escape DOWNLOAD_PATH/<creator>/.
+        assert "/" not in creator
+        assert "\\" not in creator
+
+    def test_sanitises_slash_in_title(self):
+        _, folder = flatten_dest_parts("12345", "Foo", "Bad/Title")
+        assert "/" not in folder
+        assert "\\" not in folder
+
+    def test_post_id_passes_through_unsanitised(self):
+        # Caller is responsible for rejecting traversal in post_id (the
+        # ingest endpoints check for '/', '\\', leading dot). The helper
+        # itself is path-agnostic about the id.
+        _, folder = flatten_dest_parts("12345", "Foo", "Title")
+        assert folder.startswith("12345 - ")
