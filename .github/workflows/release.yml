@@ -78,6 +78,12 @@ jobs:
           context: .
           file: Dockerfile
           push: true
+          # Skip BuildKit's provenance + SBOM attestations. They double the
+          # number of untagged manifests shown on the GHCR Versions page
+          # without buying anything for a homelab tool that doesn't gate
+          # consumers on cosign verification.
+          provenance: false
+          sbom: false
           tags: |
             ${{ env.IMAGE }}:${{ github.event.inputs.version }}
             ${{ env.IMAGE }}:latest
