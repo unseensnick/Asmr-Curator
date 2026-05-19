@@ -11,6 +11,8 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
+## [2.0.2]
+
 ### Other
 
 - **Releases can carry a browser-extension zip as a downloadable asset**, attached by a separate `Release Extension` workflow. The extension is versioned independently with its own `extension/CHANGELOG.md`; release notes for the zip come from there.
