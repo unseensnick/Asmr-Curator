@@ -3,79 +3,140 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ASMR Workbench Companion — Settings</title>
+    <title>ASMR Curator Companion — Settings</title>
     <style>
       :root {
         color-scheme: dark;
-        --bg: #0f0f12;
-        --panel: #18181d;
-        --border: #2a2a31;
-        --text: #f4f4f5;
-        --muted: #9a9aa3;
-        --accent: #a78bfa;
-        --accent-strong: #7c3aed;
+        --background: oklch(0.155 0.015 265);
+        --card: oklch(0.198 0.018 265);
+        --muted: oklch(0.228 0.016 265);
+        --primary: oklch(0.55 0.09 195);
+        --primary-foreground: oklch(0.965 0.012 85);
+        --foreground: oklch(0.918 0.012 85);
+        --muted-foreground: oklch(0.690 0.018 85);
+        --border: oklch(0.918 0.012 85 / 13%);
+        --success: oklch(0.70 0.12 150);
+        --destructive: oklch(0.64 0.16 30);
+        --ring: oklch(0.55 0.09 195 / 55%);
+        --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable",
+          "Segoe UI", Roboto, system-ui, sans-serif;
+        --font-mono: ui-monospace, "JetBrains Mono", "SF Mono",
+          Menlo, Consolas, monospace;
       }
+      * { box-sizing: border-box; }
       body {
         margin: 0;
-        min-width: 420px;
-        padding: 20px;
-        font: 400 13px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        background: var(--bg);
-        color: var(--text);
+        min-width: 440px;
+        padding: 1.5rem 1.5rem 1.25rem;
+        font: 400 0.875rem/1.55 var(--font-sans);
+        background: var(--background);
+        color: var(--foreground);
       }
-      h1 { font-size: 14px; margin: 0 0 16px; letter-spacing: 0.04em; }
-      label {
+      h1 {
+        margin: 0 0 1.25rem;
+        font-size: 0.9375rem;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+      .eyebrow {
         display: block;
-        font-size: 11px;
+        font-size: 0.6875rem;
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.12em;
-        color: var(--muted);
-        margin-bottom: 6px;
+        letter-spacing: 0.14em;
+        color: var(--muted-foreground);
+        margin: 0 0 0.5rem;
       }
       input[type="text"] {
         width: 100%;
-        box-sizing: border-box;
-        font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
-        padding: 8px 10px;
-        border-radius: 8px;
+        font: 400 0.875rem/1.4 var(--font-mono);
+        padding: 0.625rem 0.75rem;
+        border-radius: 0.5rem;
         border: 1px solid var(--border);
-        background: var(--panel);
-        color: var(--text);
+        background: var(--background);
+        color: var(--foreground);
+        transition: border-color 0.12s ease, box-shadow 0.12s ease;
       }
-      input[type="text"]:focus { outline: none; border-color: var(--accent); }
-      .hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
-      .row { display: flex; gap: 8px; margin-top: 16px; }
+      input[type="text"]::placeholder {
+        color: var(--muted-foreground);
+        opacity: 0.6;
+      }
+      input[type="text"]:focus {
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px var(--ring);
+      }
+      .hint {
+        font-size: 0.8125rem;
+        color: var(--muted-foreground);
+        margin: 0.5rem 0 0;
+        line-height: 1.5;
+      }
+      .row {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 1.25rem;
+      }
       button {
         appearance: none;
-        font: 500 13px/1 inherit;
-        padding: 8px 14px;
-        border-radius: 8px;
+        font: 500 0.875rem/1 var(--font-sans);
+        height: 2.25rem;
+        padding: 0 1rem;
+        border-radius: 1.625rem;
         cursor: pointer;
-        background: var(--accent-strong);
-        color: #fff;
-        border: 1px solid var(--accent-strong);
+        background: var(--primary);
+        color: var(--primary-foreground);
+        border: 1px solid var(--primary);
+        transition: filter 0.12s ease, transform 0.12s ease,
+          background-color 0.12s ease;
       }
-      button:hover { background: #6d28d9; }
+      button:hover { filter: brightness(1.06); }
+      button:active { transform: translateY(1px); }
+      button:focus-visible {
+        outline: 2px solid var(--ring);
+        outline-offset: 2px;
+      }
       button.secondary {
         background: transparent;
-        color: var(--text);
+        color: var(--foreground);
         border: 1px solid var(--border);
+        filter: none;
       }
-      button.secondary:hover { border-color: var(--accent); color: var(--accent); }
-      .status { font-size: 12px; margin-top: 12px; min-height: 16px; color: var(--muted); }
-      .status.ok { color: #22c55e; }
-      .status.err { color: #ef4444; }
+      button.secondary:hover {
+        background: var(--muted);
+        border-color: var(--border);
+      }
+      .status {
+        font-size: 0.8125rem;
+        margin: 0.875rem 0 0;
+        min-height: 1.1rem;
+        color: var(--muted-foreground);
+        line-height: 1.5;
+      }
+      .status.ok { color: var(--success); }
+      .status.err { color: var(--destructive); }
+      .status code {
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        background: var(--muted);
+        color: var(--foreground);
+        padding: 0.05rem 0.3rem;
+        border-radius: 0.25rem;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        input[type="text"], button { transition: none; }
+        button:active { transform: none; }
+      }
     </style>
   </head>
   <body>
-    <h1>ASMR Workbench Companion settings</h1>
+    <h1>ASMR Curator Companion · Settings</h1>
 
-    <label for="backend-url">Backend URL</label>
+    <span class="eyebrow">Backend URL</span>
     <input id="backend-url" type="text" spellcheck="false" placeholder="http://localhost:8000" />
     <p class="hint">
-      The base URL of the ASMR Workbench backend. The extension posts your
-      Patreon and Google session cookies here when you click Sync.
+      Base URL of the ASMR Curator backend. The extension posts your Patreon
+      and Google session cookies here when you click Sync.
     </p>
 
     <div class="row">
