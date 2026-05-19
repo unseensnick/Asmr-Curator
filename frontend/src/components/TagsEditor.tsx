@@ -254,6 +254,8 @@ export default function TagsEditor({
           variant="outline"
           size="lg"
           onClick={handleGenerate}
+          disabled={!title.trim()}
+          title={!title.trim() ? "Add an audio title first" : undefined}
           className="gap-2 justify-self-end"
         >
           <Sparkles size={16} aria-hidden />

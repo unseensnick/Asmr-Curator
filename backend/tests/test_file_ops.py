@@ -5,6 +5,7 @@ Each test gets fresh DOWNLOAD_PATH and LIBRARY_PATH dirs via monkeypatch on
 the module-level constants. The `client` fixture also returns the two paths
 so tests can stage files on disk directly and assert post-move layout.
 """
+import json
 from pathlib import Path
 
 import pytest
@@ -263,6 +264,29 @@ class TestMove:
 # ── /api/move/batch ────────────────────────────────────────────────────────
 
 
+def _consume_batch_sse(response) -> tuple[dict, list[dict]]:
+    """Parse a `/api/move/batch` SSE response stream and return the
+    `complete` payload plus the list of `item` frames seen along the
+    way. Mirrors what the frontend's `moveBatchStream` does."""
+    final: dict | None = None
+    items: list[dict] = []
+    for line in response.iter_lines():
+        if not line:
+            continue
+        # TestClient yields each frame's `data:` line as a single str
+        # (no `b"data: "` prefix vs newline-split body); be tolerant.
+        text = line if isinstance(line, str) else line.decode("utf-8")
+        if not text.startswith("data:"):
+            continue
+        payload = json.loads(text.split(":", 1)[1].strip())
+        if payload.get("event") == "item":
+            items.append(payload)
+        elif payload.get("event") == "complete":
+            final = payload
+    assert final is not None, "SSE stream ended without a `complete` event"
+    return final, items
+
+
 class TestMoveBatch:
     def test_moves_multiple_files(self, client):
         c, download, library = client
@@ -270,7 +294,8 @@ class TestMoveBatch:
         (download / "post" / "a.mp3").write_bytes(b"a")
         (download / "post" / "b.mp3").write_bytes(b"b")
         (library / "Solar Girl").mkdir()
-        r = c.post(
+        with c.stream(
+            "POST",
             "/api/move/batch",
             json={
                 "items": [
@@ -280,11 +305,14 @@ class TestMoveBatch:
                 "from_root": "downloads",
                 "to_subdir": "Solar Girl",
             },
-        )
-        assert r.status_code == 200, r.json()
-        body = r.json()
-        assert body["moved"] == 2
-        assert all(item["ok"] for item in body["results"])
+        ) as r:
+            assert r.status_code == 200, r.read()
+            assert r.headers["content-type"].startswith("text/event-stream")
+            final, item_events = _consume_batch_sse(r)
+        assert final["moved"] == 2
+        assert all(item["ok"] for item in final["results"])
+        # Per-item progress frames arrive in submission order.
+        assert [e["index"] for e in item_events] == [0, 1]
         assert (library / "Solar Girl" / "a.mp3").read_bytes() == b"a"
         assert (library / "Solar Girl" / "b.mp3").read_bytes() == b"b"
 
@@ -296,7 +324,8 @@ class TestMoveBatch:
         (library / "Solar Girl").mkdir()
         # Pre-existing file in the destination causes a collision for `dup.mp3` only.
         (library / "Solar Girl" / "dup.mp3").write_bytes(b"existing")
-        r = c.post(
+        with c.stream(
+            "POST",
             "/api/move/batch",
             json={
                 "items": [
@@ -306,12 +335,12 @@ class TestMoveBatch:
                 "from_root": "downloads",
                 "to_subdir": "Solar Girl",
             },
-        )
-        assert r.status_code == 200
-        body = r.json()
-        assert body["moved"] == 1
-        ok_results = [r for r in body["results"] if r["ok"]]
-        fail_results = [r for r in body["results"] if not r["ok"]]
+        ) as r:
+            assert r.status_code == 200
+            final, _ = _consume_batch_sse(r)
+        assert final["moved"] == 1
+        ok_results = [r for r in final["results"] if r["ok"]]
+        fail_results = [r for r in final["results"] if not r["ok"]]
         assert len(ok_results) == 1 and ok_results[0]["from_path"] == "post/a.mp3"
         assert len(fail_results) == 1 and fail_results[0]["from_path"] == "post/dup.mp3"
         assert fail_results[0]["error"]["code"] == "collision"
@@ -325,7 +354,8 @@ class TestMoveBatch:
         (library / "A").mkdir()
         (library / "A" / "B").mkdir()
         (library / "song.mp3").write_bytes(b"a")
-        r = c.post(
+        with c.stream(
+            "POST",
             "/api/move/batch",
             json={
                 "items": [
@@ -335,23 +365,26 @@ class TestMoveBatch:
                 "from_root": "library",
                 "to_subdir": "A/B",
             },
-        )
-        assert r.status_code == 200
-        body = r.json()
-        assert body["moved"] == 1
-        codes = {(r["from_path"], r.get("error", {}).get("code"), r["ok"]) for r in body["results"]}
+        ) as r:
+            assert r.status_code == 200
+            final, _ = _consume_batch_sse(r)
+        assert final["moved"] == 1
+        codes = {(r["from_path"], r.get("error", {}).get("code"), r["ok"]) for r in final["results"]}
         assert ("A", "cycle", False) in codes
         assert ("song.mp3", None, True) in codes
         assert (library / "A" / "B" / "song.mp3").exists()
 
     def test_empty_items_is_noop(self, client):
         c, _, _ = client
-        r = c.post(
+        with c.stream(
+            "POST",
             "/api/move/batch",
             json={"items": [], "from_root": "library", "to_subdir": ""},
-        )
-        assert r.status_code == 200
-        assert r.json() == {"moved": 0, "results": []}
+        ) as r:
+            assert r.status_code == 200
+            final, items = _consume_batch_sse(r)
+        assert final == {"event": "complete", "moved": 0, "results": []}
+        assert items == []
 
 
 # ── /api/delete ────────────────────────────────────────────────────────────

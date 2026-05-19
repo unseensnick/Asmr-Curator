@@ -13,7 +13,7 @@ import {
     Send,
     X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import ConversionPanel from "@/components/ConversionPanel";
 import { Button } from "@/components/ui/button";
@@ -412,31 +412,44 @@ function MoveToLibrarySection({
     const [newFolderName, setNewFolderName] = useState("");
     const [newFolderBusy, setNewFolderBusy] = useState(false);
 
-    async function loadSubdir(s: string) {
-        setLoading(true);
-        try {
-            const data = await apiGet<ListedDirResponse>(
-                API.files + buildQueryString({ root: "library", subdir: s }),
-            );
-            setEntries(
-                data.entries
-                    .filter((e) => e.type === "dir")
-                    .map((e) => ({ name: e.name, type: "dir" as const })),
-            );
-        } catch (e) {
-            onError("Couldn't load library folders: " + getErrorMessage(e));
-            setEntries([]);
-        } finally {
-            setLoading(false);
-        }
-    }
+    // useCallback so the effect's deps can include loadSubdir cleanly
+    // (without it, the function ref churns every render and the
+    // effect would re-fire on every render, or we'd need an
+    // exhaustive-deps disable).
+    const loadSubdir = useCallback(
+        async (s: string) => {
+            setLoading(true);
+            try {
+                const data = await apiGet<ListedDirResponse>(
+                    API.files +
+                        buildQueryString({ root: "library", subdir: s }),
+                );
+                setEntries(
+                    data.entries
+                        .filter((e) => e.type === "dir")
+                        .map((e) => ({ name: e.name, type: "dir" as const })),
+                );
+            } catch (e) {
+                onError("Couldn't load library folders: " + getErrorMessage(e));
+                setEntries([]);
+            } finally {
+                setLoading(false);
+            }
+        },
+        [onError],
+    );
 
     // Lazy first load + reload on subdir change while open.
+    //
+    // NOTE(unseensnick): `loadSubdir` does a synchronous setLoading(true)
+    // to show the spinner before the fetch arrives — the rule flags
+    // this as set-state-in-effect, but it's the standard data-fetching
+    // pattern recommended in the React docs.
     useEffect(() => {
         if (!open) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- see NOTE above
         loadSubdir(subdir);
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- subdir + open drive the reload
-    }, [open, subdir]);
+    }, [open, subdir, loadSubdir]);
 
     function drillInto(name: string) {
         const next = subdir ? `${subdir}/${name}` : name;

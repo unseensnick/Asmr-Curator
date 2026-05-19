@@ -204,12 +204,22 @@ export default function FileBrowser({
     }
 
     // Consume bridge requests from PatreonPanel: open the panel, switch
-    // to Downloads, synthesise a FileEntry so SelectedFilePanel can drive
-    // rename + move without waiting for the (just-completed) search to
-    // include the file, scroll into view, then clear.
+    // to Downloads, synthesise a FileEntry so SelectedFilePanel can
+    // drive rename + move without waiting for the (just-completed)
+    // search to include the file, scroll into view, then clear.
+    //
+    // NOTE(unseensnick): this is the canonical "event-from-parent"
+    // pattern that React's `useEvent` was designed for, but useEvent
+    // hasn't shipped stable. The rule (correctly) flags the multiple
+    // synchronous setState calls as set-state-in-effect; the proper
+    // fixes are useImperativeHandle (bigger refactor) or just calling
+    // a method through a ref instead of round-tripping through a
+    // prop. For now the prop-driven effect stays disabled. Re-evaluate
+    // when useEvent stabilises.
     useEffect(() => {
         if (!bridgeRequest) return;
         const { path, filename } = bridgeRequest;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- see NOTE above
         setOpen(true);
         if (root !== "downloads") {
             setRoot("downloads");

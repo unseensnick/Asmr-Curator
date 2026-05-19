@@ -15,7 +15,7 @@ import {
     emptyDict,
 } from "@/lib/types";
 import type { AppDict, DictionaryApiResponse } from "@/lib/types";
-import { sanitizeFilename } from "@/lib/utils";
+import { getErrorMessage, sanitizeFilename } from "@/lib/utils";
 
 type SourceMode = "patreon" | "screenshot";
 
@@ -46,6 +46,11 @@ export default function App() {
     const [extractedArtist, setExtractedArtist] = useState("");
     const [sourceMode, setSourceMode] = useState<SourceMode>("patreon");
     const [powerMode, setPowerMode] = useState<boolean>(() => loadPowerMode());
+    // Surfaced when the cold-load dictionary fetch fails. Without it the
+    // app would silently come up with an empty vocabulary and the user
+    // would assume the whole thing is broken — the librarian-voice
+    // banner says the backend isn't responding and offers a retry.
+    const [dictLoadError, setDictLoadError] = useState<string | null>(null);
     // After a Patreon Apply the user can click "Rename and move <file>" to
     // jump straight to the FileBrowser Downloads tab with the downloaded
     // file pre-selected. Lifted state because PatreonPanel and FileBrowser
@@ -85,10 +90,31 @@ export default function App() {
     }
 
     // ── Dictionary load ───────────────────────────────────────────────────────
+    //
+    // No synchronous setState in the effect body — only in the async
+    // .then / .catch callbacks. The retry button clears the banner
+    // synchronously from its click handler (which is allowed) so the
+    // visual disappears immediately on click; the .then will also clear
+    // it when the retry succeeds. `react-hooks/set-state-in-effect`
+    // would flag any synchronous set here.
+    function fetchDictionary() {
+        apiGet<DictionaryApiResponse>(API.dictionary)
+            .then((data) => {
+                setDict(dictFromApiResponse(data));
+                setDictLoadError(null);
+            })
+            .catch((e) => {
+                // Surface, don't swallow. An empty vocabulary with no
+                // explanation reads as "the app is broken" to the
+                // sleepy persona — librarian voice + a Retry button
+                // beats a silent empty state every time.
+                setDictLoadError(
+                    "Couldn't reach the dictionary. " + getErrorMessage(e),
+                );
+            });
+    }
     useEffect(() => {
-        apiGet<DictionaryApiResponse>(API.dictionary).then((data) => {
-            setDict(dictFromApiResponse(data));
-        });
+        fetchDictionary();
     }, []);
 
     function handleExtracted(
@@ -106,11 +132,46 @@ export default function App() {
         <div className="max-w-[160rem] mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 py-8 lg:py-10">
             <Header
                 dictTagCount={dict.vocabulary.length}
-                onOpenLibrarySettings={() => setLibraryOpen(true)}
-                onOpenCookies={() => setCookiesOpen(true)}
+                onOpenLibrarySettings={() => {
+                    // Mutually exclusive — having both right-side modals
+                    // open at once is undefined-stacking and the Radix
+                    // focus scopes fight each other.
+                    setCookiesOpen(false);
+                    setLibraryOpen(true);
+                }}
+                onOpenCookies={() => {
+                    setLibraryOpen(false);
+                    setCookiesOpen(true);
+                }}
                 powerMode={powerMode}
                 onPowerModeChange={setPowerMode}
             />
+
+            {/* Cold-load dictionary error. Shows once if the initial
+             *  /api/dictionary fetch fails; clears on successful retry.
+             *  Quiet warning surface — destructive color is reserved
+             *  for dangerous actions, not "thing didn't load." */}
+            {dictLoadError && (
+                <div className="mt-6 flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground/90">
+                    <span className="flex-1 leading-relaxed">
+                        {dictLoadError} Tags won&apos;t match canonical
+                        forms until this resolves.
+                    </span>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            // Clear the banner immediately for feedback;
+                            // .then will set it back to null on success
+                            // and .catch will re-populate on failure.
+                            setDictLoadError(null);
+                            fetchDictionary();
+                        }}
+                        className="font-medium text-foreground hover:text-primary transition-colors underline-offset-4 hover:underline"
+                    >
+                        Retry
+                    </button>
+                </div>
+            )}
 
             {/* Page grid: 1-col mobile → 2-col lg → 3-col dashboard at xl+.
                 Visual flow is Source → Edit → Output → Library at every
@@ -152,7 +213,10 @@ export default function App() {
                                 dict={dict}
                                 onExtracted={handleExtracted}
                                 powerMode={powerMode}
-                                onOpenCookies={() => setCookiesOpen(true)}
+                                onOpenCookies={() => {
+                                    setLibraryOpen(false);
+                                    setCookiesOpen(true);
+                                }}
                                 onBridgeToDownloads={(path, filename) =>
                                     setBridgeRequest({ path, filename })
                                 }

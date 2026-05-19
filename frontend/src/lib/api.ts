@@ -41,10 +41,11 @@ const ENDPOINT_TIMEOUTS: Array<{ match: RegExp; ms: number }> = [
   { match: /^\/api\/convert\b/,            ms: 600_000 },  // ffmpeg encodes; matches backend timeout
   { match: /^\/api\/patreon\/fetch\b/,     ms: 1_800_000 }, // creator-wide downloads
   { match: /^\/api\/patreon\/ingest-external-audio\b/, ms: 600_000 },
-  // Note: `/api/patreon/ingest-drive-link` is intentionally not listed —
-  // it returns a `text/event-stream`, consumed by `ingestDriveLinkStream`
-  // below with its own (no-op) timer. A hard total-timeout would cut a
-  // healthy stream short during a long download.
+  // Note: `/api/patreon/ingest-drive-link` and `/api/move/batch` are
+  // intentionally not listed — both return a `text/event-stream`,
+  // consumed by their own streaming helpers below (`ingestDriveLinkStream`
+  // / `moveBatchStream`). A hard total-timeout would cut a healthy
+  // stream short during a long cross-mount move or Drive download.
 ];
 
 function timeoutFor(path: string): number {
@@ -285,4 +286,105 @@ export function fetchPatreonPost(
     body.dry_run = true;
   }
   return apiPost<PatreonFetchResponse>(API.patreonFetch, body);
+}
+
+// ── Batch move (cut/paste) ───────────────────────────────────────────────────
+//
+// `/api/move/batch` is a Server-Sent-Events route so the client can show
+// per-item progress on long cross-mount batches (the backend runs each
+// `shutil.move` in an `asyncio.to_thread`). Frames:
+//   • `started`  — `{ event, total }`
+//   • `item`     — `{ event, index, total, from_path, ok, to_path?, error? }`
+//   • `complete` — `{ event, moved, results }`  (final aggregate)
+
+export interface MoveBatchItem {
+  from_path: string;
+  new_name?: string;
+}
+
+export interface MoveBatchRequest {
+  items: MoveBatchItem[];
+  from_root: FileRoot;
+  to_subdir: string;
+}
+
+export interface MoveBatchResult {
+  from_path: string;
+  ok: boolean;
+  to_path?: string;
+  error?: { code: string; message: string };
+}
+
+export interface MoveBatchResponse {
+  moved: number;
+  results: MoveBatchResult[];
+}
+
+export type MoveBatchEvent =
+  | { event: "started"; total: number }
+  | ({ event: "item"; index: number; total: number } & MoveBatchResult)
+  | { event: "complete"; moved: number; results: MoveBatchResult[] };
+
+export async function moveBatchStream(
+  body: MoveBatchRequest,
+  onEvent?: (e: MoveBatchEvent) => void,
+): Promise<MoveBatchResponse> {
+  const response = await fetch(API.moveBatch, {
+    method: "POST",
+    headers: { ...JSON_HEADERS, Accept: "text/event-stream" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    // Up-front validation errors (e.g. malformed body) come through as a
+    // normal JSON response, not an SSE stream. Surface their `detail`.
+    const text = await response.text().catch(() => "");
+    throw new Error(text || `Request failed: ${response.status}`);
+  }
+  if (!response.body) {
+    throw new Error("Response has no body — SSE not supported in this browser?");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  let final: MoveBatchResponse | undefined;
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      while (true) {
+        const sepIdx = buffer.indexOf("\n\n");
+        if (sepIdx < 0) break;
+        const frame = buffer.slice(0, sepIdx).replace(/\r/g, "");
+        buffer = buffer.slice(sepIdx + 2);
+        for (const line of frame.split("\n")) {
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trimStart();
+          let parsed: MoveBatchEvent;
+          try {
+            parsed = JSON.parse(payload) as MoveBatchEvent;
+          } catch {
+            continue; // Malformed frame — ignore rather than crash.
+          }
+          onEvent?.(parsed);
+          if (parsed.event === "complete") {
+            final = { moved: parsed.moved, results: parsed.results };
+          }
+        }
+      }
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // Already released — no-op.
+    }
+  }
+
+  if (!final) {
+    throw new Error("Move batch ended without a final `complete` event");
+  }
+  return final;
 }
