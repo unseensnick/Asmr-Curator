@@ -160,12 +160,18 @@ export default function SelectedFilePanel({
     // Pre-populate artist when a new file is selected OR a fresh extract
     // lands (Patreon / Screenshot). Mirrors the TagsEditor's
     // "from <artist>" caption — both are driven by the same
-    // `extractedArtist` state, so the rename form's artist field stays in
-    // sync with what the user sees above. Previously this only fired on
-    // file change, so an extract running AFTER the file was selected
-    // didn't update the artist box even though the "from <artist>"
-    // caption did.
+    // `extractedArtist` prop, so the rename form's artist field stays in
+    // sync with what the user sees above.
+    //
+    // NOTE(unseensnick): the project's standard "sync editable state from
+    // prop" pattern (same shape as the outputPipe→metaTitle effect above).
+    // react-hooks/set-state-in-effect flags it because the source is a
+    // prop in deps rather than a ref; the alternative would lose the
+    // post-prop-arrival catch-up (only initial-file-pick refill would
+    // work). Disabled line-targeted, matching how data-fetching effects
+    // elsewhere in this file handle the rule.
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- see NOTE above
         if (extractedArtist) setMetaArtist(extractedArtist);
     }, [selected.path, extractedArtist]);
 
