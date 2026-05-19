@@ -1,5 +1,5 @@
 /**
- * ASMR Workbench Companion — background service worker.
+ * ASMR Curator Companion — background service worker.
  *
  * One job: push the user's Patreon and Google session cookies to the local
  * backend so patreon-dl (Patreon) and the headless-Chromium Drive scrape

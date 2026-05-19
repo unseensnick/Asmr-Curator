@@ -2,7 +2,7 @@
  * Shared storage helpers. The extension persists a single value:
  *
  *   sync storage (survives browser restart, syncs across devices)
- *     - `backendUrl`  base URL of the local ASMR Workbench backend,
+ *     - `backendUrl`  base URL of the local ASMR Curator backend,
  *                     e.g. http://localhost:8000
  */
 (function () {

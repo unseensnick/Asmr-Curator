@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "ASMR Workbench Companion",
+  "name": "ASMR Curator Companion",
   "version": "1.0.0",
-  "description": "Syncs your Patreon and Google session cookies to the local ASMR Workbench backend so patreon-dl and the Drive scrape can authenticate.",
+  "description": "Syncs your Patreon and Google session cookies to the local ASMR Curator backend so patreon-dl and the Drive scrape can authenticate.",
   "permissions": [
     "cookies",
     "storage"
@@ -34,7 +34,7 @@
     }
   ],
   "action": {
-    "default_title": "ASMR Workbench Companion",
+    "default_title": "ASMR Curator Companion",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon.svg",
@@ -47,7 +47,7 @@
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "asmr-workbench-companion@unseensnick.local",
+      "id": "asmr-curator-companion@unseensnick.local",
       "strict_min_version": "121.0"
     }
   }

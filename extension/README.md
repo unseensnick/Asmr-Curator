@@ -1,7 +1,7 @@
-# ASMR Workbench Companion (browser extension)
+# ASMR Curator Companion (browser extension)
 
 A small Manifest V3 extension that syncs your **Patreon** and **Google**
-session cookies to the local ASMR Workbench backend. Both cookies are
+session cookies to the local ASMR Curator backend. Both cookies are
 needed by the backend:
 
 - **Patreon cookie** → `patreon-dl` uses it to authenticate against
@@ -26,7 +26,7 @@ The extension is unpacked-load only (not on the Chrome Web Store / AMO).
 1. Open `chrome://extensions`.
 2. Enable **Developer mode** (top-right toggle).
 3. Click **Load unpacked** and pick the `extension/` directory.
-4. Click the puzzle-piece icon → pin "ASMR Workbench Companion" so it stays
+4. Click the puzzle-piece icon → pin "ASMR Curator Companion" so it stays
    in the toolbar.
 
 ### Firefox (121+)
@@ -41,7 +41,7 @@ The extension is unpacked-load only (not on the Chrome Web Store / AMO).
 ## First-time setup
 
 1. Click the extension icon → **Settings** (top-right of the popup).
-2. Set the **Backend URL** to wherever the workbench is reachable.
+2. Set the **Backend URL** to wherever the backend is reachable.
    Default is `http://localhost:8000`. Click **Test connection** to
    confirm the backend responds.
 3. Log into [patreon.com](https://www.patreon.com) **and**

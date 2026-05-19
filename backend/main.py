@@ -30,7 +30,7 @@ _FORMATS_CONFIG_PATH = Path(__file__).parent.parent / "frontend" / "src" / "lib"
 with _FORMATS_CONFIG_PATH.open() as _f:
     _FORMATS_CONFIG = json.load(_f)
 
-log = logging.getLogger("asmr_workbench")
+log = logging.getLogger("asmr_curator")
 
 # Max accepted size for a base64-encoded screenshot in /api/extract.
 # Base64 inflates by ~4/3, so 32 MB of base64 ≈ 24 MB of binary image. That's
