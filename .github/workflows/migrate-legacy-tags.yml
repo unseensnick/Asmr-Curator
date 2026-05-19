@@ -1,0 +1,58 @@
+name: Migrate legacy tags
+
+run-name: Copy asmr-filename-gen 2.0.0–2.0.3 manifests to asmr-curator
+
+# One-shot migration. The old `asmr-filename-gen` GHCR package carries
+# v2.0.0 – v2.0.3 manifests from before the repo rename. This workflow
+# copies those manifests into the new `asmr-curator` package via
+# `docker buildx imagetools create`, so the new package's Versions page
+# shows the full release history (1.x is intentionally skipped — those
+# tags have 2–3 downloads each and no real users).
+#
+# Idempotent: re-running creates the same target digest at each tag, no
+# duplication. Delete this workflow file after the run succeeds.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print commands without executing"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  packages: write
+
+jobs:
+  migrate:
+    name: Copy legacy manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Copy 2.0.0–2.0.3 manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          OLD=ghcr.io/unseensnick/asmr-filename-gen
+          NEW=ghcr.io/unseensnick/asmr-curator
+          for T in 2.0.0 2.0.1 2.0.2 2.0.3; do
+            echo "── $OLD:$T → $NEW:$T"
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo "(dry run) docker buildx imagetools create --tag $NEW:$T $OLD:$T"
+            else
+              docker buildx imagetools create --tag "$NEW:$T" "$OLD:$T"
+            fi
+          done
+          echo
+          echo "Done. Verify on:"
+          echo "  https://github.com/unseensnick/Asmr-Curator/pkgs/container/asmr-curator/versions"
