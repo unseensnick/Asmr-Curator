@@ -4,7 +4,7 @@ import { Plus, Sparkles, User } from "lucide-react";
 import TagChip from "@/components/TagChip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { AppDict } from "@/lib/types";
+import type { AppDict, VocabEntry } from "@/lib/types";
 import { normalizeTag } from "@/lib/utils";
 
 interface TagsEditorProps {
@@ -20,6 +20,12 @@ interface TagsEditorProps {
    *  Empty string when nothing has been extracted yet (artist workflow). */
   artist?: string;
   dict: AppDict;
+  /** Add an unrecognised tag to the dictionary as a new canonical entry. */
+  onPromoteToCanonical: (text: string) => Promise<void>;
+  /** Add an unrecognised tag as an alias of an existing canonical. The
+   *  caller (TagChip) hands back the canonical entry it picked so this
+   *  handler doesn't have to look it up against potentially-stale state. */
+  onPromoteToAlias: (text: string, canonical: VocabEntry) => Promise<void>;
   onGenerate: () => void;
 }
 
@@ -40,6 +46,8 @@ export default function TagsEditor({
   onSuffixChange,
   artist,
   dict,
+  onPromoteToCanonical,
+  onPromoteToAlias,
   onGenerate,
 }: TagsEditorProps) {
   const [tagInputVal, setTagInputVal] = useState("");
@@ -188,6 +196,9 @@ export default function TagsEditor({
                 onDragStart={() => onDragStart(i)}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => onDrop(e, i)}
+                vocabulary={dict.vocabulary}
+                onPromoteToCanonical={onPromoteToCanonical}
+                onPromoteToAlias={onPromoteToAlias}
               />
             ))}
           </div>

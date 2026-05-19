@@ -9,12 +9,12 @@ import PatreonPanel from "@/components/PatreonPanel";
 import ScreenshotPanel from "@/components/ScreenshotPanel";
 import TagsEditor from "@/components/TagsEditor";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { apiGet, API } from "@/lib/api";
+import { apiGet, API, apiPatch, apiPost } from "@/lib/api";
 import {
     dictFromApiResponse,
     emptyDict,
 } from "@/lib/types";
-import type { AppDict, DictionaryApiResponse } from "@/lib/types";
+import type { AppDict, DictionaryApiResponse, VocabEntry } from "@/lib/types";
 import { getErrorMessage, sanitizeFilename } from "@/lib/utils";
 
 type SourceMode = "patreon" | "screenshot";
@@ -125,6 +125,47 @@ export default function App() {
         setTitle(newTitle);
         setTags(newTags);
         setExtractedArtist(artist);
+    }
+
+    // Promote an unrecognised tag chip to the dictionary. Two flavours,
+    // wired into TagChip's right-click menu:
+    //
+    //   - `promoteToCanonical(text)` creates a new vocabulary entry with
+    //     `text` as the canonical and no aliases. Same wire as
+    //     VocabularyPane's `handleAdd`.
+    //   - `promoteToAlias(text, canonical)` appends `text` to an existing
+    //     canonical's aliases via PATCH /api/vocabulary/{id}. Takes the
+    //     full entry (not just the id) to avoid a stale-closure read of
+    //     `dict.vocabulary` here in App.
+    //
+    // Both update local dict state on success so the chip's "not in your
+    // dictionary yet" tint clears the next render without a round-trip.
+    async function promoteToCanonical(text: string): Promise<void> {
+        const row = await apiPost<VocabEntry>(API.vocabulary, {
+            canonical: text,
+            aliases: [],
+        });
+        setDict((prev) => ({
+            ...prev,
+            vocabulary: [...prev.vocabulary, row],
+        }));
+    }
+
+    async function promoteToAlias(
+        text: string,
+        canonical: VocabEntry,
+    ): Promise<void> {
+        const row = await apiPatch<VocabEntry>(
+            API.vocabEntry(canonical.id),
+            {
+                canonical: canonical.canonical,
+                aliases: [...canonical.aliases, text],
+            },
+        );
+        setDict((prev) => ({
+            ...prev,
+            vocabulary: prev.vocabulary.map((x) => (x.id === row.id ? row : x)),
+        }));
     }
 
 
@@ -256,6 +297,8 @@ export default function App() {
                         onSuffixChange={setSuffix}
                         artist={extractedArtist}
                         dict={dict}
+                        onPromoteToCanonical={promoteToCanonical}
+                        onPromoteToAlias={promoteToAlias}
                         onGenerate={generate}
                     />
                 </div>
