@@ -5,11 +5,13 @@
   "description": "Syncs your Patreon and Google session cookies to the local ASMR Curator backend so patreon-dl and the Drive scrape can authenticate.",
   "permissions": [
     "cookies",
-    "storage"
+    "storage",
+    "alarms"
   ],
   "host_permissions": [
     "https://*.patreon.com/*",
     "https://*.google.com/*",
+    "https://api.github.com/*",
     "http://*/*",
     "https://*/*"
   ],

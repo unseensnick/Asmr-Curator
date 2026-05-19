@@ -15,7 +15,83 @@ if (typeof importScripts === "function") {
 }
 
 const browserApi = self.browser || self.chrome;
-const { getBackendUrl } = self.AsmrExt;
+const { getBackendUrl, getLatestExtensionInfo, setLatestExtensionInfo } = self.AsmrExt;
+
+// ── Update check ──────────────────────────────────────────────────────────────
+//
+// Daily check against the project's GitHub releases for a newer extension
+// zip (`asmr-curator-companion-vX.Y.Z.zip`). Cached in chrome.storage.local
+// so the popup reads instantly without a fresh API call on every open.
+// 60 requests/hour unauthenticated is plenty for a once-a-day fire.
+
+const UPDATE_CHECK_ALARM = "check-extension-update";
+const UPDATE_CHECK_INTERVAL_MIN = 24 * 60;
+const RELEASES_URL =
+  "https://api.github.com/repos/unseensnick/Asmr-Curator/releases?per_page=10";
+const EXT_ASSET_RE =
+  /^asmr-curator-companion-v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\.zip$/;
+
+// Plain semver compare. Returns < 0 if a < b, 0 if equal, > 0 if a > b. Only
+// covers MAJOR.MINOR.PATCH[-pre] — fancier semver isn't needed for our zips.
+function compareSemver(a, b) {
+  const [aMain, aPre] = a.split("-");
+  const [bMain, bPre] = b.split("-");
+  const aParts = aMain.split(".").map(Number);
+  const bParts = bMain.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    if (aParts[i] !== bParts[i]) return aParts[i] - bParts[i];
+  }
+  // Release (no pre-release tag) beats any pre-release on the same triple.
+  if (aPre === bPre) return 0;
+  if (!aPre) return 1;
+  if (!bPre) return -1;
+  return aPre.localeCompare(bPre);
+}
+
+async function checkForUpdate() {
+  try {
+    const response = await fetch(RELEASES_URL, {
+      headers: { Accept: "application/vnd.github+json" },
+    });
+    if (!response.ok) return;
+    const releases = await response.json();
+    let latest = null;
+    // Releases come newest-first; the first release whose assets include an
+    // extension zip wins. Some releases ship only the Docker image with no
+    // extension zip — skip those.
+    for (const release of releases) {
+      for (const asset of release.assets || []) {
+        const m = EXT_ASSET_RE.exec(asset.name || "");
+        if (m && (!latest || compareSemver(m[1], latest) > 0)) {
+          latest = m[1];
+        }
+      }
+      if (latest) break;
+    }
+    if (latest) {
+      await setLatestExtensionInfo({ version: latest, checkedAt: Date.now() });
+    }
+  } catch (err) {
+    // Network failure / rate limit / API shape change — leave the cached
+    // value alone, log to the extension console for diagnosis.
+    console.warn("Extension update check failed:", err);
+  }
+}
+
+function scheduleUpdateCheck() {
+  browserApi.alarms.create(UPDATE_CHECK_ALARM, {
+    when: Date.now() + 5000,
+    periodInMinutes: UPDATE_CHECK_INTERVAL_MIN,
+  });
+}
+
+browserApi.runtime.onInstalled.addListener(scheduleUpdateCheck);
+browserApi.runtime.onStartup.addListener(scheduleUpdateCheck);
+browserApi.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === UPDATE_CHECK_ALARM) {
+    checkForUpdate();
+  }
+});
 
 // ── Cookie sync ───────────────────────────────────────────────────────────────
 //
@@ -110,6 +186,20 @@ browserApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         case "GET_BACKEND_URL":
           sendResponse({ ok: true, backendUrl: await getBackendUrl() });
           return;
+        case "GET_UPDATE_STATUS": {
+          const info = await getLatestExtensionInfo();
+          const installed = browserApi.runtime.getManifest().version;
+          const hasUpdate =
+            !!info.version && compareSemver(info.version, installed) > 0;
+          sendResponse({
+            ok: true,
+            installed,
+            latest: info.version,
+            checkedAt: info.checkedAt,
+            hasUpdate,
+          });
+          return;
+        }
         default:
           sendResponse({ ok: false, error: "Unknown message type" });
       }
