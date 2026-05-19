@@ -11,6 +11,8 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
+## [2.0.4]
+
 ### Changes
 
 - **Patreon downloads now land at `DOWNLOAD_PATH/<creator>/<post_id> - <post_title>/<file>`** instead of a flat `<post_id>/<file>`. The Downloads tab is browsable by creator at a glance instead of squinting at numeric post IDs. Drive ingest + external-audio ingest now follow the same layout when the calling post's metadata is available (legacy `<post_id>/` is still accepted as a fallback). Existing downloads at the old layout stay where they are.

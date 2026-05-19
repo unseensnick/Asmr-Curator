@@ -14,6 +14,8 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
+## [1.0.0]
+
 ### Additions
 
 - **Update-available banner.** The popup now checks GitHub Releases once a day for a newer extension zip and surfaces a small "Update available — vX.Y.Z" banner with a link to the latest release when one is found.
