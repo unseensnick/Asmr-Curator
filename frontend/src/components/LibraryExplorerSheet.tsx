@@ -569,16 +569,16 @@ export default function LibraryExplorerSheet({
                 return;
             }
 
-            // Ctrl/Cmd+A — select every visible row. Library only;
-            // gated on non-editable so it doesn't fight the native
-            // select-all behaviour inside the filter / rename inputs.
+            // Ctrl/Cmd+A — select every visible row. Works in both roots
+            // (Library + Downloads share the selection model); gated on
+            // non-editable so it doesn't fight the native select-all
+            // behaviour inside the filter / rename inputs.
             if (
                 e.key.toLowerCase() === "a" &&
                 (e.ctrlKey || e.metaKey) &&
                 !e.shiftKey &&
                 !e.altKey &&
-                !editable &&
-                rootRef.current === "library"
+                !editable
             ) {
                 const list = visibleRef.current ?? [];
                 if (!list.length) return;
@@ -799,14 +799,14 @@ export default function LibraryExplorerSheet({
 
     function handleEntryClick(entry: Entry, e: ReactMouseEvent) {
         // `event.detail` is 1 on a single click, 2 on the second of a
-        // double-click. Routing double-clicks to activate (drill / open)
-        // and single-clicks to select gives the OS-style multi-select
-        // model the user expects in Library. Downloads keeps single-
-        // click = activate (no selection model there — intentional
-        // asymmetry: Library is where the user organises, Downloads
-        // is transient ingest staging).
+        // double-click. Routing double-clicks to activate (drill folder /
+        // open file) and single-clicks to select gives the OS-style
+        // multi-select model in both roots. Downloads previously used
+        // single-click-to-open; symmetry with Library makes batching
+        // (multi-select + Del, drag-select, etc.) work uniformly across
+        // both roots.
         const isDouble = e.detail >= 2;
-        if (isDouble || root !== "library") {
+        if (isDouble) {
             handleActivate(entry);
             return;
         }
@@ -987,7 +987,6 @@ export default function LibraryExplorerSheet({
 
     function handleListMouseDown(e: ReactMouseEvent<HTMLDivElement>) {
         if (e.button !== 0) return;
-        if (rootRef.current !== "library") return;
         const target = e.target as HTMLElement | null;
         // Mousedown on a row defers to its click handler — drag-select
         // only starts in empty space (between rows or below the list).
@@ -1600,9 +1599,7 @@ export default function LibraryExplorerSheet({
                                      *  wins. */}
                                     {visible && visible.length > 0 && (
                                         <p className="px-5 py-1.5 text-[11px] italic text-muted-foreground/70 border-b border-border shrink-0">
-                                            {root === "library"
-                                                ? "Click to select. Double-click to open. Right-click for more."
-                                                : "Downloads is staging. Click a file to open it."}
+                                            Click to select. Double-click to open. Right-click for more.
                                         </p>
                                     )}
 
@@ -1613,7 +1610,7 @@ export default function LibraryExplorerSheet({
                                         className="flex-1 min-h-0 overflow-y-auto relative"
                                         data-explorer-list
                                         role="listbox"
-                                        aria-multiselectable={root === "library"}
+                                        aria-multiselectable={true}
                                         aria-busy={isSearching ? searchBusy : loading}
                                         aria-label={`${rootLabel(root)} contents`}
                                     >
@@ -1672,10 +1669,7 @@ export default function LibraryExplorerSheet({
                                                             entry.type === "dir"
                                                                 ? "drill in"
                                                                 : "open";
-                                                        const rowTitle =
-                                                            root === "library"
-                                                                ? `Double-click to ${activateVerb} · F2 to rename · Del to delete`
-                                                                : `Click to ${activateVerb} · F2 to rename · Del to delete`;
+                                                        const rowTitle = `Double-click to ${activateVerb} · F2 to rename · Del to delete`;
                                                         const isRowRenaming =
                                                             renamePath === entry.path;
                                                         return (
