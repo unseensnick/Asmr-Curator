@@ -14,6 +14,14 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
+### Additions
+
+- **Update-available banner.** The popup now checks GitHub Releases once a day for a newer extension zip and surfaces a small "Update available — vX.Y.Z" banner with a link to the latest release when one is found.
+
+### Changes
+
+- **Renamed to "ASMR Curator Companion"** in the toolbar tooltip, addons list, and popup header. The Firefox add-on ID stays pinned to its original value so existing installs don't look like a new extension.
+
 ## [0.1.2]
 
 ### Additions

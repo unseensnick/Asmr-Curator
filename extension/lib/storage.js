@@ -1,9 +1,14 @@
 /**
- * Shared storage helpers. The extension persists a single value:
+ * Shared storage helpers.
  *
  *   sync storage (survives browser restart, syncs across devices)
  *     - `backendUrl`  base URL of the local ASMR Curator backend,
  *                     e.g. http://localhost:8000
+ *
+ *   local storage (per-machine cache, not synced)
+ *     - `latestExtensionInfo`  { version, checkedAt } — last GitHub
+ *                              release version observed by the daily
+ *                              update check + when we observed it
  */
 (function () {
   const DEFAULT_BACKEND_URL = "http://localhost:8000";
@@ -21,10 +26,23 @@
     return browserApi.storage.sync.set({ backendUrl: url });
   }
 
+  async function getLatestExtensionInfo() {
+    const { latestExtensionInfo } = await browserApi.storage.local.get({
+      latestExtensionInfo: { version: null, checkedAt: 0 },
+    });
+    return latestExtensionInfo || { version: null, checkedAt: 0 };
+  }
+
+  async function setLatestExtensionInfo(info) {
+    return browserApi.storage.local.set({ latestExtensionInfo: info });
+  }
+
   self.AsmrExt = self.AsmrExt || {};
   Object.assign(self.AsmrExt, {
     DEFAULT_BACKEND_URL,
     getBackendUrl,
     setBackendUrl,
+    getLatestExtensionInfo,
+    setLatestExtensionInfo,
   });
 })();

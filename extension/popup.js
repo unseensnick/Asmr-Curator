@@ -9,7 +9,26 @@
     syncBtn: document.getElementById("sync-cookie"),
     cookieStatus: document.getElementById("cookie-status"),
     optionsLink: document.getElementById("options-link"),
+    updateBanner: document.getElementById("update-banner"),
+    updateBannerVersion: document.getElementById("update-banner-version"),
+    updateBannerMeta: document.getElementById("update-banner-meta"),
+    updateBannerLink: document.getElementById("update-banner-link"),
   };
+
+  async function checkForUpdateBanner() {
+    let res;
+    try {
+      res = await browserApi.runtime.sendMessage({ type: "GET_UPDATE_STATUS" });
+    } catch {
+      return;
+    }
+    if (!res || !res.ok || !res.hasUpdate) return;
+    els.updateBannerVersion.textContent = `v${res.latest}`;
+    els.updateBannerMeta.textContent = `installed v${res.installed}`;
+    els.updateBannerLink.href =
+      "https://github.com/unseensnick/Asmr-Curator/releases/latest";
+    els.updateBanner.classList.add("show");
+  }
 
   function setStatus(text, kind) {
     els.cookieStatus.textContent = text;
@@ -52,4 +71,5 @@
     e.preventDefault();
     browserApi.runtime.openOptionsPage();
   });
+  checkForUpdateBanner();
 })();
