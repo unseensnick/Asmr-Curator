@@ -2,27 +2,20 @@
   "manifest_version": 3,
   "name": "ASMR Workbench Companion",
   "version": "1.0.0",
-  "description": "Auto-syncs your Patreon session cookie to the local ASMR Workbench backend and captures audio URLs from third-party hosts (Google Drive) embedded in Patreon posts.",
+  "description": "Syncs your Patreon and Google session cookies to the local ASMR Workbench backend so patreon-dl and the Drive scrape can authenticate.",
   "permissions": [
     "cookies",
-    "webRequest",
-    "storage",
-    "tabs"
+    "storage"
   ],
   "host_permissions": [
     "https://*.patreon.com/*",
     "https://*.google.com/*",
-    "*://*.drive.google.com/*",
-    "*://*.googleusercontent.com/*",
-    "*://*.googlevideo.com/*",
     "http://localhost/*",
     "http://127.0.0.1/*"
   ],
   "background": {
     "service_worker": "background.js",
     "scripts": [
-      "lib/url-clean.js",
-      "lib/post-id.js",
       "lib/storage.js",
       "background.js"
     ]
@@ -30,7 +23,7 @@
   "content_scripts": [
     {
       "matches": ["https://*.patreon.com/*"],
-      "js": ["lib/url-clean.js", "lib/post-id.js", "content_script.js"],
+      "js": ["content_script.js"],
       "run_at": "document_idle"
     }
   ],

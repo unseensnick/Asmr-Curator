@@ -1,17 +1,10 @@
 (function () {
-  const {
-    getBackendUrl,
-    setBackendUrl,
-    DEFAULT_BACKEND_URL,
-    getAutoIngest,
-    setAutoIngest,
-  } = self.AsmrExt;
+  const { getBackendUrl, setBackendUrl, DEFAULT_BACKEND_URL } = self.AsmrExt;
   const els = {
     input: document.getElementById("backend-url"),
     save: document.getElementById("save"),
     test: document.getElementById("test"),
     status: document.getElementById("status"),
-    autoIngest: document.getElementById("auto-ingest"),
   };
 
   function setStatus(text, kind) {
@@ -24,7 +17,6 @@
     const url = await getBackendUrl();
     els.input.value = url;
     els.input.placeholder = DEFAULT_BACKEND_URL;
-    els.autoIngest.checked = await getAutoIngest();
   }
 
   function sanitize(value) {
@@ -39,18 +31,6 @@
     els.input.value = url;
     await setBackendUrl(url);
     setStatus(`Saved: ${url}`, "ok");
-  });
-
-  // Persist auto-ingest immediately on toggle — no separate save button needed
-  // since the setting is a boolean.
-  els.autoIngest.addEventListener("change", async () => {
-    await setAutoIngest(els.autoIngest.checked);
-    setStatus(
-      els.autoIngest.checked
-        ? "Auto-download enabled."
-        : "Auto-download disabled — captures stay pending in the popup.",
-      "ok",
-    );
   });
 
   els.test.addEventListener("click", async () => {
