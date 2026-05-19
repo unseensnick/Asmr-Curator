@@ -13,6 +13,7 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ### Fixes
 
+- **Rename form's artist field now stays in sync with the TagsEditor's "from \<artist\>" caption.** Previously the field only pre-filled on file selection — running a Patreon / Screenshot extract *after* a file was already picked would update the caption but leave the artist field blank. Both are now driven by the same extracted-artist state, so what the user sees above is what gets written into the metadata.
 - **Move-to-library picker remembers your last destination across files** — it and the library explorer Sheet share one position now, so filing multiple files into the same subfolder doesn't re-walk the tree each time. Switching root inside the Sheet also preserves each root's position separately.
 - **Rename-and-embed-metadata during a move is now opt-in via checkbox** (was opt-out). Missing the checkbox no longer silently combines the two operations when the user only intended a plain move.
 - **`docker compose up --build` no longer chokes on Windows hosts.** A `.dockerignore` now excludes `backend/.venv/`, `frontend/node_modules/`, `.git/`, `data/`, and other host-only directories from the build context. The Linux venv's `lib64` symlink was breaking Docker's file-walker on Windows; the change also drops build-context transfer from ~72 MB to a few MB and speeds up builds noticeably on every host.
