@@ -4,6 +4,27 @@ Self-hosted tool for organising a local ASMR library. Pulls audio from Patreon (
 
 > **Provided as-is, no warranty, no liability.** Hobby project, MIT-licensed, run at your own risk. Personal use only — you are responsible for the terms of service of any platform you connect (Patreon, Google), and for not redistributing copyrighted content. Full text in [LICENSE](LICENSE) and the [License and responsible use](#license-and-responsible-use) section.
 
+## Migrating from the old `asmr-filename-gen` image
+
+**If your `docker pull` is failing with `denied` against `ghcr.io/unseensnick/asmr-filename-gen:<anything>`:** the image moved. The repo and GHCR package were renamed from `asmr-filename-gen` to `asmr-curator` in v2.0.4. The old package has been retired; the new image lives at `ghcr.io/unseensnick/asmr-curator`.
+
+Switch your `docker-compose.yml`:
+
+```yaml
+services:
+  asmr-tool:
+    image: ghcr.io/unseensnick/asmr-curator:latest  # was: asmr-filename-gen
+```
+
+Then:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+**No data migration needed.** Your SQLite dictionary, the `LIBRARY_PATH` bind mount, and the `DOWNLOAD_PATH` bind mount are unchanged. Existing files, tags, settings, and cookies carry over as-is — only the image source changes.
+
 ## Stack
 
 | Layer     | Tech                                           |
