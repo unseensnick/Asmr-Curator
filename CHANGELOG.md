@@ -11,6 +11,8 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
+## [2.0.3]
+
 ### Fixes
 
 - **FileBrowser stays on whichever tab you're on after a move.** Auto-switching to Library every time made batching files out of Downloads a chore. Selection clears, both lists refresh in place, you pick the next file from where you were.

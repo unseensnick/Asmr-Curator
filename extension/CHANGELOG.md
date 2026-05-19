@@ -14,6 +14,8 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
+## [0.1.2]
+
 ### Additions
 
 - **Toolbar icon.** Ships with the ASMR Curator brand mark (the same SVG the web app uses as its favicon) instead of the browser's default puzzle-piece glyph.
