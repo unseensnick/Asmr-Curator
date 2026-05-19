@@ -36,6 +36,17 @@ jobs:
       - name: Clone repo
         uses: actions/checkout@v4
 
+      - name: Normalize attach_to_release tag
+        # Strip any leading `v`, then prepend one. Lets dispatchers type
+        # either `2.0.4` or `v2.0.4` without softprops/action-gh-release
+        # creating a second draft at the unprefixed tag because no
+        # matching release exists yet.
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.attach_to_release }}"
+          TAG="${TAG#v}"
+          echo "ATTACH_TO_RELEASE=v$TAG" >> "$GITHUB_ENV"
+
       - name: Setup CHANGELOG parser
         uses: taiki-e/install-action@parse-changelog
 
@@ -88,15 +99,17 @@ jobs:
           # Attaches the zip + appends the body section to the named project
           # release (created by the main Release workflow). softprops appends
           # to an existing release; if it doesn't exist yet, it creates a
-          # fresh draft using this tag.
-          tag_name: ${{ github.event.inputs.attach_to_release }}
-          name: ${{ github.event.inputs.attach_to_release }}
+          # fresh draft using this tag. env.ATTACH_TO_RELEASE is the
+          # `v`-prefixed form (see the Normalize step above) so this matches
+          # whatever the Release workflow produced.
+          tag_name: ${{ env.ATTACH_TO_RELEASE }}
+          name: ${{ env.ATTACH_TO_RELEASE }}
           body: |
             ### Browser extension (`${{ steps.zip.outputs.zip_name }}`)
 
             ${{ steps.changelog.outputs.CHANGELOG }}
 
-            Download the zip from the Assets section below and load it as an unpacked extension via `chrome://extensions` (Chrome / Edge) or `about:debugging` (Firefox 121+). See [`extension/README.md`](https://github.com/${{ github.repository }}/blob/${{ github.event.inputs.attach_to_release }}/extension/README.md) for the install walkthrough.
+            Download the zip from the Assets section below and load it as an unpacked extension via `chrome://extensions` (Chrome / Edge) or `about:debugging` (Firefox 121+). See [`extension/README.md`](https://github.com/${{ github.repository }}/blob/${{ env.ATTACH_TO_RELEASE }}/extension/README.md) for the install walkthrough.
           append_body: true
           files: |
             ${{ steps.zip.outputs.zip_path }}
