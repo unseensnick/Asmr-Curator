@@ -1,27 +1,20 @@
 {
   "name": "Full Stack Dev (Debian)",
-  "build": {
-    "dockerfile": "Dockerfile"
-  },
+
+  "// dockerComposeFile / service": "Sources every per-machine config (LIBRARY_PATH, DOWNLOAD_PATH, OLLAMA_BASE_URL, etc.) from the repo root's `.env` via `../docker-compose.dev.yml`. The dev compose lives at the repo root (not in this folder) so docker-compose's project directory matches where `.env` is — same arrangement as the production compose next to it. No personal data lives in this file.",
+  "dockerComposeFile": "../docker-compose.dev.yml",
+  "service": "dev",
+  "workspaceFolder": "/workspaces/asmr-filename-gen",
   "remoteUser": "devuser",
-  "containerEnv": {
-    "DB_PATH": "/workspaces/asmr-filename-gen/data/dictionary.db",
-    "PYTHONPATH": "/workspaces/asmr-filename-gen",
-    "UV_LINK_MODE": "copy",
-    "VIRTUAL_ENV": "/home/devuser/.venv",
-    "AUDIO_ROOT": "/mnt/audio",
-    "OLLAMA_BASE_URL": "http://10.10.1.13:11434",
-    "OLLAMA_MODEL": "qwen2.5vl:7b"
-  },
+
   "forwardPorts": [
     8000,
     5173
   ],
-  "mounts": [
-    "source=C:\\Users\\unseensnick\\Desktop\\projects\\asmr,target=/mnt/audio,type=bind,consistency=cached"
-  ],
+
   "postCreateCommand": "sudo chown -R devuser:devuser /workspaces/asmr-filename-gen && sudo chmod -R u+rw /workspaces/asmr-filename-gen",
-  "postStartCommand": "uv pip install --python /home/devuser/.venv/bin/python -r /workspaces/asmr-filename-gen/backend/requirements.txt -q && volta install node@25 && npm install -g /workspaces/asmr-filename-gen/vendor/patreon-dl/patreon-dl-3.8.1-localfix.tgz",
+  "postStartCommand": "uv pip install --python /home/devuser/.venv/bin/python -r /workspaces/asmr-filename-gen/backend/requirements.txt -q && volta install node@25 && npm install -g patreon-dl@3.9.0",
+
   "customizations": {
     "vscode": {
       "extensions": [

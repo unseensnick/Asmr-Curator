@@ -7,5 +7,12 @@
     {
       "path": "./tsconfig.node.json"
     }
-  ]
+  ],
+  "// compilerOptions": "Duplicated from tsconfig.app.json's path aliases so shadcn's `@/*` resolver finds them at the root tsconfig (the file shadcn checks first). The actual TS compile reads from the referenced project configs, not from here — this block exists purely for shadcn's auto-detection when running `npx shadcn add <component>`. Without it, shadcn falls back to treating `@/` as a literal directory and installs primitives at `frontend/@/components/ui/` instead of `frontend/src/components/ui/`.",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  }
 }

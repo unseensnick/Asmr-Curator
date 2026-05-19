@@ -6,6 +6,7 @@
 # The Linux kernel reads `#!/bin/bash\r` literally and exec fails. Other files
 # (Dockerfile, .py, .json) are fine with CRLF; their interpreters accept both.
 dev.sh text eol=lf
+.claude/hooks/*.sh text eol=lf
 
 # Binary files — never normalise line endings.
 *.png binary

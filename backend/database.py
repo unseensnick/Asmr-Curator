@@ -1,9 +1,23 @@
 import sqlite3
 import os
 import json
+from pathlib import Path
 from typing import Optional
 
-DB_PATH = os.environ.get("DB_PATH", "/data/dictionary.db")
+
+def _default_db_path() -> str:
+    """Default DB_PATH; Windows-aware so a host-side run doesn't drop the DB outside the repo."""
+    if os.name == "nt":
+        # Python resolves the POSIX default `/data/dictionary.db` against the
+        # current drive root on Windows (e.g. `E:\data\dictionary.db`), which
+        # silently creates a stray seeded DB outside the repo. Anchor to the
+        # repo root instead. Docker + devcontainer override DB_PATH explicitly.
+        repo_root = Path(__file__).resolve().parent.parent
+        return str(repo_root / "data" / "dictionary.db")
+    return "/data/dictionary.db"
+
+
+DB_PATH = os.environ.get("DB_PATH", _default_db_path())
 
 # ── Default vocabulary ────────────────────────────────────────────────────────
 # Each entry: (canonical_display_form, [lowercase_aliases...])
@@ -243,9 +257,15 @@ def _migrate_legacy_to_vocabulary(conn):
 # ── Vocabulary CRUD ───────────────────────────────────────────────────────────
 
 def get_vocabulary() -> list[dict]:
+    # Ordered by id (insertion order) so the UI's drag-reorder is durable: the
+    # bulk-replace PUT /api/dictionary wipes and re-inserts in array order,
+    # which renumbers ids in that order — but the order only sticks if reads
+    # follow the ids back. On the alias collision in buildDictDerived (last
+    # write wins), the user's drag-reorder is the only knob to pick which
+    # entry wins on a contested alias.
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, canonical, aliases FROM tag_vocabulary ORDER BY canonical COLLATE NOCASE"
+            "SELECT id, canonical, aliases FROM tag_vocabulary ORDER BY id"
         ).fetchall()
         return [_vocab_row_to_dict(r) for r in rows]
 

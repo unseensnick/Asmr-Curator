@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   frontend:
-    name: Frontend (lint + typecheck + build)
+    name: Frontend (lint + typecheck + build + tests)
     runs-on: ubuntu-latest
 
     steps:
@@ -41,8 +41,23 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      - name: Unit tests (vitest)
+        working-directory: frontend
+        # `--reporter=junit` emits a JUnit XML alongside the default reporter
+        # so the report-publisher job picks it up. `|| true` is NOT used —
+        # a failing test fails this job and the PR check.
+        run: npm test -- --reporter=default --reporter=junit --outputFile.junit=test-results.xml
+
+      - name: Upload frontend test results
+        uses: actions/upload-artifact@v4
+        if: success() || failure()
+        with:
+          name: frontend-test-results
+          path: frontend/test-results.xml
+          if-no-files-found: warn
+
   backend:
-    name: Backend (syntax check)
+    name: Backend (syntax check + tests)
     runs-on: ubuntu-latest
 
     steps:
@@ -53,9 +68,60 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
 
       - name: Install backend dependencies
         run: pip install -r backend/requirements.txt
 
+      - name: Install test dependencies
+        run: pip install pytest pytest-asyncio
+
       - name: Syntax check
         run: python -m compileall -q backend
+
+      - name: Unit tests (pytest)
+        # `-c backend/pyproject.toml` points pytest at the [tool.pytest.ini_options]
+        # block there; the `testpaths` setting picks up backend/tests/.
+        run: pytest -c backend/pyproject.toml --junitxml=backend-test-results.xml
+
+      - name: Upload backend test results
+        uses: actions/upload-artifact@v4
+        if: success() || failure()
+        with:
+          name: backend-test-results
+          path: backend-test-results.xml
+          if-no-files-found: warn
+
+  publish-test-results:
+    name: Publish JUnit reports
+    needs: [frontend, backend]
+    if: success() || failure()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download frontend test results
+        uses: actions/download-artifact@v4
+        if: success() || failure()
+        with:
+          name: frontend-test-results
+          path: frontend-test-results
+        continue-on-error: true
+
+      - name: Download backend test results
+        uses: actions/download-artifact@v4
+        if: success() || failure()
+        with:
+          name: backend-test-results
+          path: backend-test-results
+        continue-on-error: true
+
+      - name: Publish JUnit summary
+        uses: mikepenz/action-junit-report@v5
+        if: success() || failure()
+        with:
+          include_passed: true
+          detailed_summary: true
+          report_paths: |
+            frontend-test-results/test-results.xml
+            backend-test-results/backend-test-results.xml

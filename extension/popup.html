@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ASMR Workbench Companion</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f0f12;
+        --panel: #18181d;
+        --border: #2a2a31;
+        --text: #f4f4f5;
+        --muted: #9a9aa3;
+        --accent: #a78bfa;
+        --accent-strong: #7c3aed;
+        --success: #22c55e;
+        --error: #ef4444;
+      }
+      body {
+        margin: 0;
+        min-width: 320px;
+        max-width: 360px;
+        font: 400 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      header h1 {
+        margin: 0;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+      }
+      header a {
+        color: var(--muted);
+        font-size: 11px;
+        text-decoration: none;
+      }
+      header a:hover { color: var(--text); }
+      section { padding: 12px; }
+      .section-title {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 0 0 8px;
+      }
+      button.primary {
+        appearance: none;
+        font: inherit;
+        font-weight: 500;
+        padding: 8px 12px;
+        border-radius: 8px;
+        cursor: pointer;
+        width: 100%;
+        background: var(--accent-strong);
+        color: #fff;
+        border: 1px solid var(--accent-strong);
+        transition: background 0.12s ease;
+      }
+      button.primary:hover { background: #6d28d9; }
+      button.primary:disabled { background: #3b3b44; border-color: #3b3b44; cursor: not-allowed; }
+      .status { font-size: 11px; color: var(--muted); margin-top: 8px; min-height: 14px; }
+      .status.ok    { color: var(--success); }
+      .status.err   { color: var(--error); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>ASMR Workbench</h1>
+      <a id="options-link" href="#">Settings</a>
+    </header>
+
+    <section>
+      <p class="section-title">Session cookies</p>
+      <button id="sync-cookie" class="primary">Sync Patreon + Google cookies</button>
+      <p id="cookie-status" class="status">
+        Pushes your current Patreon and Google cookies to the backend so
+        patreon-dl and the Drive scrape can authenticate. Log in to both
+        sites first.
+      </p>
+    </section>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

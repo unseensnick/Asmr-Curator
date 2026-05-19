@@ -1,47 +1,80 @@
-import { useRef, useState } from "react";
-import { useClipboard } from "@/hooks/useClipboard";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ImagePlus,
-  Sparkles,
-  Copy,
   Check,
-  ChevronRight,
   ChevronDown,
+  Copy,
+  ImagePlus,
+  Loader2,
+  Replace,
+  ScanSearch,
+  X,
 } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { useClipboard } from "@/hooks/useClipboard";
+import { API, apiPost } from "@/lib/api";
 import { parseLlmJson, parseTitleLine } from "@/lib/parser";
-import { apiPost, API } from "@/lib/api";
 import type { AppDict } from "@/lib/types";
-import { normalizeTag, getErrorMessage } from "@/lib/utils";
+import { getErrorMessage, normalizeTag } from "@/lib/utils";
 
 interface ScreenshotPanelProps {
   dict: AppDict;
   onExtracted: (title: string, tags: string[], artist: string) => void;
+  /** When the app-level power mode is on, the raw-LLM debug surface is
+   *  rendered (and defaulted open). When off, the debug surface is not
+   *  mounted at all. rawLlmText state still gets set on extract, so
+   *  flipping power mode mid-session reveals already-captured output. */
+  powerMode?: boolean;
+  /** True when the Screenshot tab is the active source. Gates the
+   *  window-level paste listener so Ctrl+V captures an image without
+   *  the user having to click into the panel first. */
+  isActive: boolean;
 }
 
 interface ExtractResponse {
   raw_text: string;
 }
 
-export default function ScreenshotPanel({ dict, onExtracted }: ScreenshotPanelProps) {
+type Status = { type: "success" | "error" | "info"; msg: string };
+
+/**
+ * Screenshot to filename. Drop / paste / pick an image, send it to the
+ * vision LLM, get title + tags back. Fallback path when patreon-dl can't
+ * fetch the post directly. Sibling of PatreonPanel and built on the same
+ * Penthouse Reading Nook surface conventions.
+ */
+export default function ScreenshotPanel({
+  dict,
+  onExtracted,
+  powerMode = false,
+  isActive,
+}: ScreenshotPanelProps) {
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
-  const [status, setStatus] = useState<{
-    type: "success" | "error" | "info";
-    msg: string;
-  } | null>(null);
+  const [status, setStatus] = useState<Status | null>(null);
   const [rawLlmText, setRawLlmText] = useState("");
-  const [debugOpen, setDebugOpen] = useState(false);
-  const { copied: debugCopied, copy: copyDebug } = useClipboard();
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Power mode render-gates the debug disclosure entirely below; when off,
+  // the disclosure does not mount. The Collapsible inside it owns its own
+  // open state (uncontrolled, defaulted open), so the user can still flip
+  // it manually within a session. Flipping power mode unmounts/remounts,
+  // resetting to defaultOpen.
+
   // ── Image handling ────────────────────────────────────────────────────────
 
-  function handleFile(file: File) {
+  // useCallback with [] so the window-paste effect below doesn't re-attach
+  // every render. handleFile only touches stable state setters, so the
+  // closure captured at first mount keeps working.
+  const handleFile = useCallback((file: File) => {
     if (!file.type.startsWith("image/")) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
@@ -50,18 +83,55 @@ export default function ScreenshotPanel({ dict, onExtracted }: ScreenshotPanelPr
       setPreviewUrl(dataUrl);
       setStatus(null);
       setRawLlmText("");
-      setDebugOpen(false);
     };
     reader.readAsDataURL(file);
-  }
+  }, []);
+
+  // Window-level paste so Ctrl+V works without the user having to click
+  // into the panel first to focus it (a <div> isn't focusable, so the
+  // React onPaste handler we used to have only fired after a click).
+  // Bails out when the active element is an editable input so paste into
+  // any form field still works normally — only "free" pastes are
+  // intercepted, and only when the Screenshot tab is the active source.
+  useEffect(() => {
+    if (!isActive) return;
+    function handleWindowPaste(e: ClipboardEvent) {
+      const t = e.target as Element | null;
+      if (
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLTextAreaElement ||
+        (t instanceof HTMLElement && t.isContentEditable)
+      ) {
+        return;
+      }
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith("image/")) {
+          const f = item.getAsFile();
+          if (f) {
+            e.preventDefault();
+            handleFile(f);
+            return;
+          }
+        }
+      }
+    }
+    window.addEventListener("paste", handleWindowPaste);
+    return () => window.removeEventListener("paste", handleWindowPaste);
+  }, [isActive, handleFile]);
 
   function clearImage() {
     setImageBase64(null);
     setPreviewUrl(null);
     setStatus(null);
     setRawLlmText("");
-    setDebugOpen(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function replaceImage() {
+    clearImage();
+    fileInputRef.current?.click();
   }
 
   function onDragOver(e: React.DragEvent) {
@@ -77,30 +147,27 @@ export default function ScreenshotPanel({ dict, onExtracted }: ScreenshotPanelPr
     const f = e.dataTransfer.files[0];
     if (f) handleFile(f);
   }
-  function onPaste(e: React.ClipboardEvent) {
-    for (const item of Array.from(e.clipboardData?.items ?? [])) {
-      if (item.type.startsWith("image/")) {
-        const f = item.getAsFile();
-        if (f) { handleFile(f); break; }
-      }
-    }
-  }
 
   // ── Extract ───────────────────────────────────────────────────────────────
 
   async function handleExtract() {
     if (!imageBase64) return;
     setExtracting(true);
-    setStatus({ type: "info", msg: "Sending to Ollama…" });
+    setStatus({ type: "info", msg: "Extracting metadata." });
     try {
       const { raw_text } = await apiPost<ExtractResponse>(API.extract, {
         image_b64: imageBase64,
       });
 
-      const { raw_title_line: rawTitleLine, raw_pill_tags: rawPillTags, creator_name, creator_confidence } = parseLlmJson(raw_text);
+      const {
+        raw_title_line: rawTitleLine,
+        raw_pill_tags: rawPillTags,
+        creator_name,
+        creator_confidence,
+      } = parseLlmJson(raw_text);
       const { title, embeddedTags } = parseTitleLine(rawTitleLine);
 
-      // Merge embedded title tags + LLM pill tags, normalised, deduped
+      // Merge embedded title tags + LLM pill tags, normalised, deduped.
       const seen = new Set<string>();
       const allTags: string[] = [];
       for (const raw of [...embeddedTags, ...rawPillTags]) {
@@ -112,13 +179,16 @@ export default function ScreenshotPanel({ dict, onExtracted }: ScreenshotPanelPr
       }
 
       setRawLlmText(raw_text);
-      setDebugOpen(false);
-      const artist = creator_confidence === "high" && creator_name ? creator_name : "";
+      const artist =
+        creator_confidence === "high" && creator_name ? creator_name : "";
       onExtracted(title || rawTitleLine || "", allTags, artist);
       setStatus(
         title
-          ? { type: "success", msg: "Done — review and adjust below" }
-          : { type: "info", msg: "No title found — fill manually" },
+          ? { type: "success", msg: "Got it. Use for filename when ready." }
+          : {
+              type: "info",
+              msg: "No title found. Fill it in manually below.",
+            },
       );
     } catch (err) {
       setStatus({
@@ -130,172 +200,265 @@ export default function ScreenshotPanel({ dict, onExtracted }: ScreenshotPanelPr
     }
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
-
   return (
     <>
-      <Card
-        className="flex-1 flex flex-col rounded-xl border border-border shadow-none ring-0 p-5 gap-0"
-        onPaste={onPaste}
-      >
-        {/* Upload zone / preview */}
+      <div className="flex-1 flex flex-col bg-card border border-border rounded-xl p-6 sm:p-7 gap-5 min-h-0">
         {!previewUrl ? (
-          <div
-            className={`flex-1 min-h-0 border-2 border-dashed rounded-lg flex flex-col items-center justify-center gap-2 text-center px-4 py-7 cursor-pointer transition-colors ${
-              dragOver
-                ? "border-primary bg-primary/5"
-                : "border-border bg-secondary hover:border-primary hover:bg-primary/5"
-            }`}
+          <DropZone
+            dragOver={dragOver}
             onClick={() => fileInputRef.current?.click()}
             onDragOver={onDragOver}
             onDragLeave={onDragLeave}
             onDrop={onDrop}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files?.[0]) handleFile(e.target.files[0]);
-              }}
-            />
-            <ImagePlus size={28} className="opacity-40 text-primary" />
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              <strong className="text-primary font-normal">Click</strong>
-              , drag &amp; drop, or{" "}
-              <strong className="text-primary font-normal">Ctrl+V</strong> to paste
-            </p>
-          </div>
+          />
         ) : (
-          <div className="flex-1 min-h-45 relative rounded-lg overflow-hidden bg-secondary">
-            <img
-              src={previewUrl}
-              alt="Screenshot preview"
-              className="absolute inset-0 w-full h-full object-contain object-top cursor-zoom-in hover:opacity-90 transition-opacity rounded-lg"
-              onClick={() => setLightboxOpen(true)}
-            />
-            <div className="absolute top-2 right-2 flex gap-1.5 z-10">
-              <button
-                onClick={() => {
-                  clearImage();
-                  fileInputRef.current?.click();
-                }}
-                className="w-7 h-7 rounded-md border border-white/15 bg-background/80 backdrop-blur-sm text-foreground flex items-center justify-center hover:border-primary hover:text-primary transition-all text-sm"
-                title="Change image"
-              >
-                ↩
-              </button>
-              <button
-                onClick={clearImage}
-                className="w-7 h-7 rounded-md border border-white/15 bg-background/80 backdrop-blur-sm text-foreground flex items-center justify-center hover:border-destructive hover:text-destructive transition-all text-sm"
-                title="Remove image"
-              >
-                ×
-              </button>
-            </div>
-          </div>
+          <Preview
+            previewUrl={previewUrl}
+            onOpenLightbox={() => setLightboxOpen(true)}
+            onReplace={replaceImage}
+            onRemove={clearImage}
+          />
         )}
 
-        {/* Extract button */}
-        <div className="mt-3 shrink-0">
-          <Button
-            className="w-full gap-2"
-            disabled={!imageBase64 || extracting}
-            onClick={handleExtract}
-          >
-            {extracting ? (
-              <span className="w-3.5 h-3.5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-            ) : (
-              <Sparkles size={16} />
-            )}
-            {extracting ? "Extracting…" : "Extract"}
-          </Button>
-        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files?.[0]) handleFile(e.target.files[0]);
+          }}
+        />
 
-        {/* Status line */}
-        {status && (
-          <div
-            className={`flex items-center gap-2 text-[11px] mt-2 min-h-4 shrink-0 ${
-              status.type === "success"
-                ? "text-success"
-                : status.type === "error"
-                  ? "text-destructive"
-                  : "text-muted-foreground"
-            }`}
-          >
-            {status.type === "info" && extracting && (
-              <span className="w-3 h-3 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin shrink-0" />
-            )}
-            {status.type === "success" && "✓ "}
-            {status.type === "error" && "✗ "}
-            {status.msg}
-          </div>
-        )}
-
-        {/* Debug toggle — only shown after a successful extract */}
-        {rawLlmText && (
-          <div className="shrink-0 mt-3">
-            <div className="flex items-center w-full">
-              <button
-                className="flex flex-1 items-center gap-1.5 text-[10px] text-muted-foreground hover:text-primary transition-colors tracking-[0.06em] select-none"
-                onClick={() => setDebugOpen((v) => !v)}
-              >
-                {debugOpen ? (
-                  <ChevronDown size={12} />
-                ) : (
-                  <ChevronRight size={12} />
-                )}
-                Raw LLM output
-              </button>
-              <button
-                className={`flex items-center border rounded px-1.5 py-0.5 transition-all ${
-                  debugCopied
-                    ? "text-success border-success/30 bg-success/10"
-                    : "text-muted-foreground border-transparent hover:border-border hover:text-foreground hover:bg-secondary"
-                }`}
-                onClick={() => copyDebug(rawLlmText)}
-                title="Copy raw LLM text"
-              >
-                {debugCopied ? <Check size={12} /> : <Copy size={12} />}
-              </button>
-            </div>
-
-            {debugOpen && (
-              <pre className="mt-2 bg-secondary border border-border rounded-md p-3 text-[10px] text-muted-foreground whitespace-pre-wrap wrap-break-word max-h-42.5 overflow-y-auto leading-relaxed">
-                <span className="text-primary font-medium">Raw LLM JSON:</span>
-                {"\n"}
-                {rawLlmText}
-              </pre>
-            )}
-          </div>
-        )}
-      </Card>
-
-      {/* Lightbox */}
-      {lightboxOpen && previewUrl && (
-        <div
-          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-6 cursor-zoom-out animate-in fade-in duration-150"
-          onClick={() => setLightboxOpen(false)}
+        <Button
+          onClick={handleExtract}
+          disabled={!imageBase64 || extracting}
+          className="h-12 w-full gap-2 text-base shrink-0"
         >
-          <div
-            className="relative max-w-205 w-full cursor-default animate-in zoom-in-95 duration-150"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              className="absolute -top-3.5 -right-3.5 w-7 h-7 rounded-full bg-secondary border border-border text-muted-foreground flex items-center justify-center hover:border-primary hover:text-primary transition-all text-sm"
-              onClick={() => setLightboxOpen(false)}
-            >
-              ×
-            </button>
-            <img
-              src={previewUrl}
-              alt="Screenshot preview"
-              className="w-full rounded-xl block shadow-2xl ring-1 ring-border"
-            />
-          </div>
-        </div>
+          {extracting ? (
+            <Loader2 size={16} aria-hidden className="animate-spin" />
+          ) : (
+            <ScanSearch size={18} aria-hidden />
+          )}
+          {extracting ? "Extracting" : "Extract"}
+        </Button>
+
+        {status && <StatusBanner status={status} />}
+
+        {powerMode && rawLlmText && <DebugDisclosure rawText={rawLlmText} />}
+      </div>
+
+      {lightboxOpen && previewUrl && (
+        <Lightbox
+          previewUrl={previewUrl}
+          onClose={() => setLightboxOpen(false)}
+        />
       )}
     </>
+  );
+}
+
+// ─── helpers ─────────────────────────────────────────────────────────────
+
+interface DropZoneProps {
+  dragOver: boolean;
+  onClick: () => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDragLeave: () => void;
+  onDrop: (e: React.DragEvent) => void;
+}
+
+function DropZone({
+  dragOver,
+  onClick,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+}: DropZoneProps) {
+  const baseClass =
+    "flex-1 min-h-0 border-2 border-dashed rounded-lg flex flex-col items-center justify-center gap-3 text-center px-4 py-7 cursor-pointer transition-colors";
+  const stateClass = dragOver
+    ? "border-primary/60 bg-accent/30"
+    : "border-border hover:border-muted-foreground/40";
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label="Drop, paste, or click to add a screenshot"
+      className={`${baseClass} ${stateClass}`}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      <ImagePlus
+        size={28}
+        aria-hidden
+        className="text-muted-foreground/60"
+      />
+      <p className="text-sm text-muted-foreground leading-relaxed">
+        Drop, paste, or click to add a screenshot.
+        <br />
+        <span className="text-xs text-muted-foreground/80">
+          Paste with{" "}
+          <kbd className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-muted text-foreground/80">
+            Ctrl
+          </kbd>{" "}
+          <kbd className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-muted text-foreground/80">
+            V
+          </kbd>
+          .
+        </span>
+      </p>
+    </div>
+  );
+}
+
+interface PreviewProps {
+  previewUrl: string;
+  onOpenLightbox: () => void;
+  onReplace: () => void;
+  onRemove: () => void;
+}
+
+function Preview({
+  previewUrl,
+  onOpenLightbox,
+  onReplace,
+  onRemove,
+}: PreviewProps) {
+  return (
+    <div className="flex-1 min-h-44 relative rounded-lg overflow-hidden bg-muted/40 border border-border">
+      <img
+        src={previewUrl}
+        alt="Screenshot preview"
+        className="absolute inset-0 w-full h-full object-contain object-top cursor-zoom-in hover:opacity-90 transition-opacity"
+        onClick={onOpenLightbox}
+      />
+      <div className="absolute top-2 right-2 flex gap-1.5 z-10">
+        <button
+          type="button"
+          onClick={onReplace}
+          className="size-8 rounded-md border border-border bg-card text-muted-foreground flex items-center justify-center hover:text-foreground hover:border-muted-foreground/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+          title="Replace image"
+          aria-label="Replace image"
+        >
+          <Replace size={14} aria-hidden />
+        </button>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="size-8 rounded-md border border-border bg-card text-muted-foreground flex items-center justify-center hover:text-destructive hover:border-destructive/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+          title="Remove image"
+          aria-label="Remove image"
+        >
+          <X size={14} aria-hidden />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+interface StatusBannerProps {
+  status: Status;
+}
+
+function StatusBanner({ status }: StatusBannerProps) {
+  const tone =
+    status.type === "success"
+      ? "text-success"
+      : status.type === "error"
+        ? "text-destructive"
+        : "text-muted-foreground";
+  // max-w-prose + break-words: keeps long backend errors from stretching the
+  // banner across the full panel and pushing other content around.
+  return (
+    <p className={`text-sm leading-relaxed max-w-prose break-words ${tone}`}>
+      {status.msg}
+    </p>
+  );
+}
+
+interface DebugDisclosureProps {
+  rawText: string;
+}
+
+function DebugDisclosure({ rawText }: DebugDisclosureProps) {
+  const { copied, copy } = useClipboard();
+  return (
+    <Collapsible defaultOpen>
+      <div className="flex items-center justify-between gap-2">
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="group/debug flex items-center gap-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors py-1 px-1 -mx-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+          >
+            <ChevronDown
+              size={14}
+              aria-hidden
+              className="transition-transform motion-safe:duration-200 motion-safe:ease-out group-data-[state=closed]/debug:-rotate-90"
+            />
+            Raw LLM output
+          </button>
+        </CollapsibleTrigger>
+        <button
+          type="button"
+          onClick={() => copy(rawText)}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+          title="Copy raw LLM output"
+          aria-label={copied ? "Copied to clipboard" : "Copy raw LLM output"}
+        >
+          {copied ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />}
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <CollapsibleContent className="overflow-hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:slide-in-from-top-1 data-[state=closed]:slide-out-to-top-1">
+        <pre className="mt-2 bg-muted/40 border border-border rounded-md p-3 font-mono text-xs text-muted-foreground whitespace-pre-wrap wrap-break-word max-h-48 overflow-y-auto leading-relaxed">
+          {rawText}
+        </pre>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+interface LightboxProps {
+  previewUrl: string;
+  onClose: () => void;
+}
+
+function Lightbox({ previewUrl, onClose }: LightboxProps) {
+  return (
+    <div
+      role="dialog"
+      aria-label="Screenshot preview"
+      aria-modal="true"
+      className="fixed inset-0 z-50 bg-background/90 backdrop-blur-md flex items-center justify-center p-6 cursor-zoom-out animate-in fade-in duration-150"
+      onClick={onClose}
+    >
+      <div
+        className="relative max-w-205 w-full cursor-default animate-in zoom-in-95 duration-150"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute -top-3.5 -right-3.5 size-8 rounded-full bg-card border border-border text-muted-foreground flex items-center justify-center hover:text-foreground hover:border-muted-foreground/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+          aria-label="Close preview"
+        >
+          <X size={14} aria-hidden />
+        </button>
+        <img
+          src={previewUrl}
+          alt="Screenshot preview"
+          className="w-full rounded-xl block shadow-2xl ring-1 ring-border"
+        />
+      </div>
+    </div>
   );
 }

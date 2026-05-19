@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "ASMR Workbench Companion",
+  "version": "1.0.0",
+  "description": "Syncs your Patreon and Google session cookies to the local ASMR Workbench backend so patreon-dl and the Drive scrape can authenticate.",
+  "permissions": [
+    "cookies",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://*.patreon.com/*",
+    "https://*.google.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "scripts": [
+      "lib/storage.js",
+      "background.js"
+    ]
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.patreon.com/*"],
+      "js": ["content_script.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "ASMR Workbench Companion",
+    "default_popup": "popup.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "asmr-workbench-companion@unseensnick.local",
+      "strict_min_version": "121.0"
+    }
+  }
+}

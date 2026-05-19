@@ -14,6 +14,13 @@ interface ConversionPanelProps {
   checkboxId: string;
 }
 
+/**
+ * Shared format + quality + delete-original controls. Used by FileBrowser's
+ * batch panel and by SelectedFilePanel for both required-conversion and
+ * optional-conversion flows. Active toggle state uses bg-accent (matching
+ * Patreon panel filter chips), not bg-primary, so the chrome stays calm and
+ * the primary teal stays reserved for the Rename / Convert CTA below.
+ */
 export default function ConversionPanel({
   formats,
   format,
@@ -24,21 +31,25 @@ export default function ConversionPanel({
   onDeleteChange,
   checkboxId,
 }: ConversionPanelProps) {
+  const toggleItemClass =
+    "text-sm px-3 py-1.5 h-auto rounded-none! border-r border-border last:border-r-0 bg-background text-muted-foreground hover:text-foreground data-[state=on]:bg-accent data-[state=on]:text-accent-foreground data-[state=on]:border-accent uppercase";
   return (
-    <>
-      <div className="flex items-center gap-2 mb-2.5">
-        <span className="text-[10px] text-muted-foreground w-20 shrink-0">Output format</span>
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-sm font-medium tracking-wide text-muted-foreground w-24 shrink-0">
+          Output format
+        </span>
         <ToggleGroup
           type="single"
           value={format}
           onValueChange={(v) => v && onFormatChange(v as ConvertFormat)}
-          className="border border-input rounded-3xl overflow-hidden gap-0"
+          className="border border-border rounded-md overflow-hidden gap-0"
         >
           {formats.map((fmt) => (
             <ToggleGroupItem
               key={fmt}
               value={fmt}
-              className="text-[10px] tracking-[0.06em] px-2.5 py-1 h-auto rounded-none! border-r border-input last:border-r-0 bg-card text-muted-foreground hover:bg-primary/10 hover:text-foreground data-[state=on]:bg-primary data-[state=on]:text-primary-foreground uppercase"
+              className={toggleItemClass}
             >
               {fmt}
             </ToggleGroupItem>
@@ -46,10 +57,12 @@ export default function ConversionPanel({
         </ToggleGroup>
       </div>
 
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-[10px] text-muted-foreground w-20 shrink-0">Quality</span>
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-sm font-medium tracking-wide text-muted-foreground w-24 shrink-0">
+          Quality
+        </span>
         {format === "flac" ? (
-          <span className="text-[10px] text-success border border-success/30 rounded px-2 py-1">
+          <span className="text-sm text-success border border-success/30 rounded-md px-2.5 py-1.5">
             Lossless (CD quality)
           </span>
         ) : (
@@ -57,13 +70,15 @@ export default function ConversionPanel({
             type="single"
             value={quality}
             onValueChange={(v) => v && onQualityChange(v as ConvertQuality)}
-            className="border border-input rounded-3xl overflow-hidden gap-0"
+            className="border border-border rounded-md overflow-hidden gap-0"
           >
             {QUALITY_VALUES.map((q) => (
               <ToggleGroupItem
                 key={q}
                 value={q}
-                className="text-[10px] tracking-[0.06em] px-2.5 py-1 h-auto rounded-none! border-r border-input last:border-r-0 bg-card text-muted-foreground hover:bg-primary/10 hover:text-foreground data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+                className={
+                  "text-sm px-3 py-1.5 h-auto rounded-none! border-r border-border last:border-r-0 bg-background text-muted-foreground hover:text-foreground data-[state=on]:bg-accent data-[state=on]:text-accent-foreground data-[state=on]:border-accent"
+                }
               >
                 {QUALITY_LABELS[q]}
               </ToggleGroupItem>
@@ -72,16 +87,19 @@ export default function ConversionPanel({
         )}
       </div>
 
-      <div className="flex items-center gap-2 mb-3">
+      <label
+        htmlFor={checkboxId}
+        className="flex items-center gap-2 cursor-pointer select-none w-fit"
+      >
         <Checkbox
           id={checkboxId}
           checked={deleteOriginal}
           onCheckedChange={(v) => onDeleteChange(v === true)}
         />
-        <label htmlFor={checkboxId} className="text-[10px] text-muted-foreground cursor-pointer select-none">
+        <span className="text-sm text-muted-foreground">
           Delete original after converting
-        </label>
-      </div>
-    </>
+        </span>
+      </label>
+    </div>
   );
 }

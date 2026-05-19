@@ -21,8 +21,9 @@ const TONE_TO_BG: Record<SectionLabelTone, string> = {
 
 /**
  * Card-header label: small caps tracking-wide muted text, with a leading
- * colored dot. Shared across `OutputPanel`, `TagsEditor`, `DictionaryModal`,
- * and `FileBrowser` (where each card opens with the same pattern).
+ * colored dot. Shared across `OutputPanel`, `TagsEditor`,
+ * `LibraryConfigModal`, and `FileBrowser` (where each card opens with
+ * the same pattern).
  */
 export default function SectionLabel({
     children,

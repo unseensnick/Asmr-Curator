@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ASMR Workbench Companion — Settings</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f0f12;
+        --panel: #18181d;
+        --border: #2a2a31;
+        --text: #f4f4f5;
+        --muted: #9a9aa3;
+        --accent: #a78bfa;
+        --accent-strong: #7c3aed;
+      }
+      body {
+        margin: 0;
+        min-width: 420px;
+        padding: 20px;
+        font: 400 13px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      h1 { font-size: 14px; margin: 0 0 16px; letter-spacing: 0.04em; }
+      label {
+        display: block;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+      input[type="text"] {
+        width: 100%;
+        box-sizing: border-box;
+        font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text);
+      }
+      input[type="text"]:focus { outline: none; border-color: var(--accent); }
+      .hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
+      .row { display: flex; gap: 8px; margin-top: 16px; }
+      button {
+        appearance: none;
+        font: 500 13px/1 inherit;
+        padding: 8px 14px;
+        border-radius: 8px;
+        cursor: pointer;
+        background: var(--accent-strong);
+        color: #fff;
+        border: 1px solid var(--accent-strong);
+      }
+      button:hover { background: #6d28d9; }
+      button.secondary {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      button.secondary:hover { border-color: var(--accent); color: var(--accent); }
+      .status { font-size: 12px; margin-top: 12px; min-height: 16px; color: var(--muted); }
+      .status.ok { color: #22c55e; }
+      .status.err { color: #ef4444; }
+    </style>
+  </head>
+  <body>
+    <h1>ASMR Workbench Companion settings</h1>
+
+    <label for="backend-url">Backend URL</label>
+    <input id="backend-url" type="text" spellcheck="false" placeholder="http://localhost:8000" />
+    <p class="hint">
+      The base URL of the ASMR Workbench backend. The extension posts your
+      Patreon and Google session cookies here when you click Sync.
+    </p>
+
+    <div class="row">
+      <button id="save">Save</button>
+      <button id="test" class="secondary">Test connection</button>
+    </div>
+    <p id="status" class="status"></p>
+
+    <script src="lib/storage.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

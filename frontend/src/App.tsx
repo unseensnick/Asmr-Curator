@@ -1,15 +1,13 @@
-import { BookOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import DictionaryModal from "@/components/DictionaryModal";
+import CookiesModal from "@/components/CookiesModal";
 import FileBrowser from "@/components/FileBrowser";
+import Header from "@/components/Header";
+import LibraryConfigModal from "@/components/LibraryConfigModal";
 import OutputPanel from "@/components/OutputPanel";
 import PatreonPanel from "@/components/PatreonPanel";
 import ScreenshotPanel from "@/components/ScreenshotPanel";
-import StatusBar from "@/components/StatusBar";
 import TagsEditor from "@/components/TagsEditor";
-import ThemeToggle from "@/components/ThemeToggle";
-import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiGet, API } from "@/lib/api";
 import {
@@ -17,13 +15,23 @@ import {
     emptyDict,
 } from "@/lib/types";
 import type { AppDict, DictionaryApiResponse } from "@/lib/types";
-import { sanitizeFilename } from "@/lib/utils";
+import { getErrorMessage, sanitizeFilename } from "@/lib/utils";
 
-type SourceMode = "screenshot" | "patreon";
+type SourceMode = "patreon" | "screenshot";
+
+const POWER_MODE_KEY = "app.powerMode";
+
+function loadPowerMode(): boolean {
+    try {
+        return localStorage.getItem(POWER_MODE_KEY) === "true";
+    } catch {
+        return false;
+    }
+}
 
 export default function App() {
     // Theme is applied by the inline <script> in index.html before React mounts,
-    // and managed by <ThemeToggle /> thereafter. No bootstrap needed here.
+    // and managed inside <Header /> via the Settings dropdown.
 
     // ── Shared state ──────────────────────────────────────────────────────────
     const [title, setTitle] = useState("");
@@ -33,15 +41,44 @@ export default function App() {
     const [outputDash, setOutputDash] = useState("");
     const [outputPipe, setOutputPipe] = useState("");
     const [stripBrackets, setStripBrackets] = useState(true);
-    const [dictOpen, setDictOpen] = useState(false);
+    const [libraryOpen, setLibraryOpen] = useState(false);
+    const [cookiesOpen, setCookiesOpen] = useState(false);
     const [extractedArtist, setExtractedArtist] = useState("");
-    const [sourceMode, setSourceMode] = useState<SourceMode>("screenshot");
+    const [sourceMode, setSourceMode] = useState<SourceMode>("patreon");
+    const [powerMode, setPowerMode] = useState<boolean>(() => loadPowerMode());
+    // Surfaced when the cold-load dictionary fetch fails. Without it the
+    // app would silently come up with an empty vocabulary and the user
+    // would assume the whole thing is broken — the librarian-voice
+    // banner says the backend isn't responding and offers a retry.
+    const [dictLoadError, setDictLoadError] = useState<string | null>(null);
+    // After a Patreon Apply the user can click "Rename and move <file>" to
+    // jump straight to the FileBrowser Downloads tab with the downloaded
+    // file pre-selected. Lifted state because PatreonPanel and FileBrowser
+    // live in different columns and need to coordinate.
+    const [bridgeRequest, setBridgeRequest] = useState<
+        { path: string; filename: string } | null
+    >(null);
+
+    // Persist power mode so the toggle survives reloads.
+    useEffect(() => {
+        try {
+            localStorage.setItem(POWER_MODE_KEY, String(powerMode));
+        } catch {
+            // non-fatal
+        }
+    }, [powerMode]);
 
     // ── Filename generation ───────────────────────────────────────────────────
     function generate() {
         const sfx = suffix.trim() || "F4A";
+        // Strip any number of leading and trailing [bracket] markers (and the
+        // whitespace around them) regardless of contents. Mid-title brackets
+        // are left alone — they're usually part of the actual title.
         const pipeTitle = stripBrackets
-            ? title.replace(/^\s*\[[^\]]{1,50}\]\s*/g, "").trim()
+            ? title
+                .replace(/^(?:\s*\[[^\]]*\]\s*)+/, "")
+                .replace(/(?:\s*\[[^\]]*\]\s*)+$/, "")
+                .trim()
             : title;
         setOutputDash(
             [title, ...tags, sfx]
@@ -53,10 +90,31 @@ export default function App() {
     }
 
     // ── Dictionary load ───────────────────────────────────────────────────────
+    //
+    // No synchronous setState in the effect body — only in the async
+    // .then / .catch callbacks. The retry button clears the banner
+    // synchronously from its click handler (which is allowed) so the
+    // visual disappears immediately on click; the .then will also clear
+    // it when the retry succeeds. `react-hooks/set-state-in-effect`
+    // would flag any synchronous set here.
+    function fetchDictionary() {
+        apiGet<DictionaryApiResponse>(API.dictionary)
+            .then((data) => {
+                setDict(dictFromApiResponse(data));
+                setDictLoadError(null);
+            })
+            .catch((e) => {
+                // Surface, don't swallow. An empty vocabulary with no
+                // explanation reads as "the app is broken" to the
+                // sleepy persona — librarian voice + a Retry button
+                // beats a silent empty state every time.
+                setDictLoadError(
+                    "Couldn't reach the dictionary. " + getErrorMessage(e),
+                );
+            });
+    }
     useEffect(() => {
-        apiGet<DictionaryApiResponse>(API.dictionary).then((data) => {
-            setDict(dictFromApiResponse(data));
-        });
+        fetchDictionary();
     }, []);
 
     function handleExtracted(
@@ -69,129 +127,161 @@ export default function App() {
         setExtractedArtist(artist);
     }
 
-    // ── Layout ────────────────────────────────────────────────────────────────
-    // Stagger uses `[animation-delay:Nms] fill-mode-backwards` so each section
-    // starts hidden, then fades + slides in 80 ms after its predecessor. One
-    // orchestrated reveal on mount > scattered hover-tricks elsewhere.
+
     return (
-        <div className="max-w-screen-2xl mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 py-8 lg:py-10">
-            {/* Header strip */}
-            <header className="flex items-start justify-between gap-4 pb-6 mb-10 lg:mb-12 border-b border-border animate-in fade-in slide-in-from-bottom-2 duration-500 fill-mode-backwards">
-                <div className="space-y-2">
-                    <h1 className="text-3xl lg:text-4xl font-display font-semibold tracking-tight text-foreground">
-                        ASMR Workbench
-                    </h1>
-                    <p className="text-sm text-muted-foreground max-w-prose">
-                        Extract metadata from screenshots or Patreon, normalise
-                        tags, rename with ID3, and convert audio — all on your
-                        own machine.
-                    </p>
-                </div>
+        <div className="max-w-[160rem] mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 py-8 lg:py-10">
+            <Header
+                dictTagCount={dict.vocabulary.length}
+                onOpenLibrarySettings={() => {
+                    // Mutually exclusive — having both right-side modals
+                    // open at once is undefined-stacking and the Radix
+                    // focus scopes fight each other.
+                    setCookiesOpen(false);
+                    setLibraryOpen(true);
+                }}
+                onOpenCookies={() => {
+                    setLibraryOpen(false);
+                    setCookiesOpen(true);
+                }}
+                powerMode={powerMode}
+                onPowerModeChange={setPowerMode}
+            />
 
-                <div className="flex items-center gap-2 shrink-0">
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setDictOpen(true)}
-                        title="Tag Dictionary"
-                        className="gap-1.5"
+            {/* Cold-load dictionary error. Shows once if the initial
+             *  /api/dictionary fetch fails; clears on successful retry.
+             *  Quiet warning surface — destructive color is reserved
+             *  for dangerous actions, not "thing didn't load." */}
+            {dictLoadError && (
+                <div className="mt-6 flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground/90">
+                    <span className="flex-1 leading-relaxed">
+                        {dictLoadError} Tags won&apos;t match canonical
+                        forms until this resolves.
+                    </span>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            // Clear the banner immediately for feedback;
+                            // .then will set it back to null on success
+                            // and .catch will re-populate on failure.
+                            setDictLoadError(null);
+                            fetchDictionary();
+                        }}
+                        className="font-medium text-foreground hover:text-primary transition-colors underline-offset-4 hover:underline"
                     >
-                        <BookOpen size={14} />
-                        <span className="hidden sm:inline">Dictionary</span>
-                    </Button>
-                    <ThemeToggle />
+                        Retry
+                    </button>
                 </div>
-            </header>
+            )}
 
-            {/* Source + output: grid with breathing room */}
-            <section className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-[5fr_4fr] gap-6 lg:gap-10 mb-10 lg:mb-12 animate-in fade-in slide-in-from-bottom-2 duration-500 [animation-delay:80ms] fill-mode-backwards">
-                <Tabs
-                    value={sourceMode}
-                    onValueChange={(v) => setSourceMode(v as SourceMode)}
-                    className="flex flex-col gap-3 min-h-0"
-                >
-                    <TabsList
-                        variant="line"
-                        className="h-auto p-0 gap-0 bg-transparent justify-start rounded-none border-b border-border w-full"
+            {/* Page grid: 1-col mobile → 2-col lg → 3-col dashboard at xl+.
+                Visual flow is Source → Edit → Output → Library at every
+                breakpoint. Base-level `order-*` utilities apply at every
+                size so the empty Output column never lands between Source
+                and Edit on mobile (1-col stack) or at lg (2-col).
+                items-start lets the Source column grow vertically (results
+                list) without dragging the other columns taller. */}
+            <section className="mt-8 lg:mt-10 grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-[3fr_4fr_3fr] gap-6 lg:gap-10 items-start">
+                <div className="order-1 flex flex-col min-h-0">
+                    <Tabs
+                        value={sourceMode}
+                        onValueChange={(v) => setSourceMode(v as SourceMode)}
+                        className="flex flex-col gap-3 min-h-0"
                     >
-                        <TabsTrigger
-                            value="screenshot"
-                            className="px-4 py-2.5 text-xs font-display font-medium tracking-[0.04em] whitespace-nowrap rounded-none flex items-center gap-2"
+                        <TabsList
+                            variant="line"
+                            className="h-auto p-0 gap-0 bg-transparent justify-start rounded-none border-b border-border w-full"
                         >
-                            <span className="size-1.5 rounded-full bg-primary shrink-0" />
-                            Screenshot
-                        </TabsTrigger>
-                        <TabsTrigger
+                            <TabsTrigger
+                                value="patreon"
+                                className="px-4 py-2.5 text-xs font-medium tracking-[0.04em] whitespace-nowrap rounded-none"
+                            >
+                                Patreon URL
+                            </TabsTrigger>
+                            <TabsTrigger
+                                value="screenshot"
+                                className="px-4 py-2.5 text-xs font-medium tracking-[0.04em] whitespace-nowrap rounded-none"
+                            >
+                                Screenshot
+                            </TabsTrigger>
+                        </TabsList>
+
+                        <TabsContent
                             value="patreon"
-                            className="px-4 py-2.5 text-xs font-display font-medium tracking-[0.04em] whitespace-nowrap rounded-none flex items-center gap-2"
+                            className="flex-1 mt-0 min-h-0 flex flex-col data-[state=inactive]:hidden"
                         >
-                            <span className="size-1.5 rounded-full bg-primary shrink-0" />
-                            Patreon URL
-                        </TabsTrigger>
-                    </TabsList>
+                            <PatreonPanel
+                                dict={dict}
+                                onExtracted={handleExtracted}
+                                powerMode={powerMode}
+                                onOpenCookies={() => {
+                                    setLibraryOpen(false);
+                                    setCookiesOpen(true);
+                                }}
+                                onBridgeToDownloads={(path, filename) =>
+                                    setBridgeRequest({ path, filename })
+                                }
+                            />
+                        </TabsContent>
 
-                    <TabsContent
-                        value="screenshot"
-                        className="flex-1 mt-0 min-h-0 flex flex-col data-[state=inactive]:hidden"
-                    >
-                        <ScreenshotPanel
-                            dict={dict}
-                            onExtracted={handleExtracted}
-                        />
-                    </TabsContent>
+                        <TabsContent
+                            value="screenshot"
+                            className="flex-1 mt-0 min-h-0 flex flex-col data-[state=inactive]:hidden"
+                        >
+                            <ScreenshotPanel
+                                dict={dict}
+                                onExtracted={handleExtracted}
+                                powerMode={powerMode}
+                                isActive={sourceMode === "screenshot"}
+                            />
+                        </TabsContent>
+                    </Tabs>
+                </div>
 
-                    <TabsContent
-                        value="patreon"
-                        className="flex-1 mt-0 min-h-0 flex flex-col data-[state=inactive]:hidden"
-                    >
-                        <PatreonPanel
-                            dict={dict}
-                            onExtracted={handleExtracted}
-                        />
-                    </TabsContent>
-                </Tabs>
+                <div className="order-3 lg:col-span-2 xl:col-span-1 flex flex-col">
+                    <OutputPanel
+                        outputDash={outputDash}
+                        outputPipe={outputPipe}
+                        stripBrackets={stripBrackets}
+                        onStripBracketsChange={setStripBrackets}
+                    />
+                </div>
 
-                <OutputPanel
-                    outputDash={outputDash}
-                    outputPipe={outputPipe}
-                    onRegenerate={generate}
-                    stripBrackets={stripBrackets}
-                    onStripBracketsChange={setStripBrackets}
-                />
+                <div className="order-2 flex flex-col">
+                    <TagsEditor
+                        title={title}
+                        onTitleChange={setTitle}
+                        tags={tags}
+                        onTagsChange={setTags}
+                        suffix={suffix}
+                        onSuffixChange={setSuffix}
+                        artist={extractedArtist}
+                        dict={dict}
+                        onGenerate={generate}
+                    />
+                </div>
+
+                <div className="order-4 lg:col-span-2 xl:col-span-3">
+                    <FileBrowser
+                        outputDash={outputDash}
+                        outputPipe={outputPipe}
+                        extractedArtist={extractedArtist}
+                        defaultOpen={false}
+                        bridgeRequest={bridgeRequest}
+                        onBridgeConsumed={() => setBridgeRequest(null)}
+                    />
+                </div>
             </section>
 
-            {/* TagsEditor — primary workflow */}
-            <section className="mb-10 lg:mb-12 animate-in fade-in slide-in-from-bottom-2 duration-500 [animation-delay:160ms] fill-mode-backwards">
-                <TagsEditor
-                    title={title}
-                    onTitleChange={setTitle}
-                    tags={tags}
-                    onTagsChange={setTags}
-                    suffix={suffix}
-                    onSuffixChange={setSuffix}
-                    dict={dict}
-                    onGenerate={generate}
-                    onOpenDictionary={() => setDictOpen(true)}
-                />
-            </section>
-
-            {/* FileBrowser — collapsible, server-side file listing */}
-            <section className="animate-in fade-in slide-in-from-bottom-2 duration-500 [animation-delay:240ms] fill-mode-backwards">
-                <FileBrowser
-                    outputDash={outputDash}
-                    outputPipe={outputPipe}
-                    extractedArtist={extractedArtist}
-                />
-            </section>
-
-            <DictionaryModal
-                open={dictOpen}
-                onClose={() => setDictOpen(false)}
+            <LibraryConfigModal
+                open={libraryOpen}
+                onClose={() => setLibraryOpen(false)}
                 dict={dict}
                 onDictChange={setDict}
             />
-
-            <StatusBar dictTagCount={dict.vocabulary.length} />
+            <CookiesModal
+                open={cookiesOpen}
+                onClose={() => setCookiesOpen(false)}
+            />
         </div>
     );
 }
