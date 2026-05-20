@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
     AlertTriangle,
     ChevronDown,
@@ -11,8 +11,13 @@ import {
 
 import ConversionPanel from "@/components/ConversionPanel";
 import FileBrowserItem from "@/components/FileBrowserItem";
-import LibraryExplorerSheet from "@/components/LibraryExplorerSheet";
 import SelectedFilePanel from "@/components/SelectedFilePanel";
+
+// LibraryExplorerSheet is the 2100-line Browse Sheet (drag-select grid +
+// keyboard nav + Cut/Paste + rename + delete). Only renders when the user
+// clicks Browse. React.lazy keeps it out of the initial chunk; the
+// fallback is null because the Sheet's own open animation covers load.
+const LibraryExplorerSheet = lazy(() => import("@/components/LibraryExplorerSheet"));
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
@@ -446,27 +451,31 @@ export default function FileBrowser({
                 </CollapsibleContent>
             </div>
 
-            <LibraryExplorerSheet
-                open={explorerOpen}
-                onOpenChange={setExplorerOpen}
-                librarySubdir={librarySubdir}
-                onLibrarySubdirChange={setLibrarySubdir}
-                onSelectFile={(file, pickedRoot) => {
-                    // Drop the user onto the tab matching the root they
-                    // picked from so the existing work-area flows take
-                    // over. Mirrors the Patreon-bridge handoff.
-                    if (root !== pickedRoot) {
-                        setRoot(pickedRoot);
-                        setBatchSelected(new Set());
-                        loadFiles(query, searchMode, pickedRoot);
-                    }
-                    setSelected(file);
-                    rootRef.current?.scrollIntoView({
-                        behavior: "smooth",
-                        block: "start",
-                    });
-                }}
-            />
+            <Suspense fallback={null}>
+                {explorerOpen && (
+                    <LibraryExplorerSheet
+                        open={explorerOpen}
+                        onOpenChange={setExplorerOpen}
+                        librarySubdir={librarySubdir}
+                        onLibrarySubdirChange={setLibrarySubdir}
+                        onSelectFile={(file, pickedRoot) => {
+                            // Drop the user onto the tab matching the root they
+                            // picked from so the existing work-area flows take
+                            // over. Mirrors the Patreon-bridge handoff.
+                            if (root !== pickedRoot) {
+                                setRoot(pickedRoot);
+                                setBatchSelected(new Set());
+                                loadFiles(query, searchMode, pickedRoot);
+                            }
+                            setSelected(file);
+                            rootRef.current?.scrollIntoView({
+                                behavior: "smooth",
+                                block: "start",
+                            });
+                        }}
+                    />
+                )}
+            </Suspense>
         </Collapsible>
     );
 }
@@ -604,7 +613,12 @@ function FileList({
     onBatchToggle,
 }: FileListProps) {
     return (
-        <div className="bg-muted/40 border border-border rounded-md overflow-y-auto max-h-[28rem] min-h-40">
+        <div
+            role="region"
+            aria-label="File list"
+            aria-busy={loading}
+            className="bg-muted/40 border border-border rounded-md overflow-y-auto max-h-[28rem] min-h-40"
+        >
             {loading ? (
                 <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
                     <Loader2
