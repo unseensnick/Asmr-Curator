@@ -1,11 +1,32 @@
+import { useState } from "react";
 import { X } from "lucide-react";
 
 import SectionLabel from "@/components/SectionLabel";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { FileEntry } from "@/lib/types";
 
 export type BulkEditRoot = "library" | "downloads";
+
+/**
+ * Per-file local edits. Both fields start empty; the backend treats an
+ * empty title as 'leave existing alone' (skip-on-empty), and empty tags
+ * mean 'no tags in the new filename' when rename is on. Phase 6 will add
+ * a Load-from-cache button that pre-fills these from `post-api.json`
+ * sidecars.
+ */
+interface PerFileEdit {
+    title: string;
+    /** Comma-separated input the user types. Split into a tag array only
+     *  when composing the new filename in phase 7; kept as raw text here
+     *  so the user can free-form edit without the comma roundtrip
+     *  rewriting whitespace as they type. */
+    tags: string;
+}
+
+const EMPTY_EDIT: PerFileEdit = { title: "", tags: "" };
 
 interface BulkEditSheetProps {
     open: boolean;
@@ -31,13 +52,33 @@ interface BulkEditSheetProps {
  * details, apply-to-all, rename), sticky footer with a Cancel + the gated
  * Preview-changes commit.
  *
- * This commit lands the structural shell only. The editable per-file table
- * (phase 4), the apply-to-all form (phase 5), the load-from-cache wiring
- * (phase 6), and the dry-run rename preview (phase 7) fill the sections
- * in. Phase 8 lands the toolbar button that actually opens this; until
- * then the sheet is wired but unreachable from the UI.
+ * This commit fills in the per-file table (phase 4). The apply-to-all
+ * form (phase 5), the load-from-cache wiring (phase 6), and the dry-run
+ * rename preview (phase 7) fill the remaining sections. Phase 8 lands
+ * the toolbar button that actually opens this; until then the sheet is
+ * wired but unreachable from the UI.
+ *
+ * State resets on unmount — App.tsx conditionally renders this only
+ * while `bulkEditOpen` is true, so re-opening always starts fresh
+ * without a manual cleanup effect.
  */
 export default function BulkEditSheet({ open, onClose, files, root: _root }: BulkEditSheetProps) {
+    // Keyed by `FileEntry.path` (relative to the chosen root). Paths the
+    // user hasn't touched aren't in the map — `editFor` falls back to
+    // EMPTY_EDIT so the inputs render as blank with placeholder copy.
+    const [edits, setEdits] = useState<Record<string, PerFileEdit>>({});
+
+    function patchEdit(path: string, partial: Partial<PerFileEdit>) {
+        setEdits((prev) => ({
+            ...prev,
+            [path]: { ...(prev[path] ?? EMPTY_EDIT), ...partial },
+        }));
+    }
+
+    function editFor(path: string): PerFileEdit {
+        return edits[path] ?? EMPTY_EDIT;
+    }
+
     const count = files.length;
     const fileWord = count === 1 ? "file" : "files";
 
@@ -76,7 +117,103 @@ export default function BulkEditSheet({ open, onClose, files, root: _root }: Bul
                 <div className="flex-1 overflow-y-auto px-5 py-5 flex flex-col gap-7">
                     <section aria-label="Per-file details" className="flex flex-col gap-3">
                         <SectionLabel>Per-file details</SectionLabel>
-                        {/* phase 4: per-file editable table (title + tags per row) */}
+                        {count === 0 ? (
+                            <p className="text-sm text-muted-foreground italic">
+                                No files selected.
+                            </p>
+                        ) : (
+                            <TooltipProvider delayDuration={500}>
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="border-b border-border">
+                                            <th
+                                                scope="col"
+                                                className="text-left text-[10px] font-medium tracking-[0.08em] uppercase text-muted-foreground/80 px-3 py-2 w-[34%]"
+                                            >
+                                                File
+                                            </th>
+                                            <th
+                                                scope="col"
+                                                className="text-left text-[10px] font-medium tracking-[0.08em] uppercase text-muted-foreground/80 px-3 py-2 w-[30%]"
+                                            >
+                                                Title
+                                            </th>
+                                            <th
+                                                scope="col"
+                                                className="text-left text-[10px] font-medium tracking-[0.08em] uppercase text-muted-foreground/80 px-3 py-2"
+                                            >
+                                                Tags
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {files.map((file) => {
+                                            const edit = editFor(file.path);
+                                            return (
+                                                <tr
+                                                    key={file.path}
+                                                    className="border-b border-border last:border-b-0"
+                                                >
+                                                    <th
+                                                        scope="row"
+                                                        className="text-left font-normal px-3 py-3 align-middle min-w-0"
+                                                    >
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <span className="block font-mono text-xs text-foreground truncate">
+                                                                    {file.name}
+                                                                </span>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent
+                                                                side="right"
+                                                                className="max-w-md"
+                                                            >
+                                                                <div className="flex flex-col gap-0.5 font-mono text-left">
+                                                                    <span className="break-all">
+                                                                        {file.name}
+                                                                    </span>
+                                                                    {file.folder && (
+                                                                        <span className="text-background/70 break-all">
+                                                                            {file.folder}/
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                    </th>
+                                                    <td className="px-3 py-2 align-middle">
+                                                        <Input
+                                                            value={edit.title}
+                                                            onChange={(ev) =>
+                                                                patchEdit(file.path, {
+                                                                    title: ev.target.value,
+                                                                })
+                                                            }
+                                                            placeholder="Keep existing"
+                                                            aria-label={`Title for ${file.name}`}
+                                                            className="font-mono text-sm"
+                                                        />
+                                                    </td>
+                                                    <td className="px-3 py-2 align-middle">
+                                                        <Input
+                                                            value={edit.tags}
+                                                            onChange={(ev) =>
+                                                                patchEdit(file.path, {
+                                                                    tags: ev.target.value,
+                                                                })
+                                                            }
+                                                            placeholder="tag1, tag2, …"
+                                                            aria-label={`Tags for ${file.name}`}
+                                                            className="font-mono text-sm"
+                                                        />
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </TooltipProvider>
+                        )}
                     </section>
 
                     <section aria-label="Apply to all" className="flex flex-col gap-3">
@@ -91,7 +228,7 @@ export default function BulkEditSheet({ open, onClose, files, root: _root }: Bul
                 </div>
 
                 {/* Footer — Cancel + the gated commit. Preview-changes stays
-                    disabled until phases 4-7 surface an edited value to act on. */}
+                    disabled until phases 5-7 surface an edited value to act on. */}
                 <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border shrink-0">
                     <Button variant="ghost" size="sm" onClick={onClose}>
                         Cancel
