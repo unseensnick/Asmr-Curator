@@ -98,6 +98,20 @@ jobs:
     name: Backend (syntax check + tests)
     runs-on: ubuntu-latest
 
+    # backend/main.py and backend/database.py both perform module-import-time
+    # side effects that demand writable paths: main.py raises if DOWNLOAD_PATH
+    # or LIBRARY_PATH is unset, and database.py's init_db() mkdir's the
+    # parent of DB_PATH (default /data/ — not writable on a hosted runner).
+    # Any step that imports backend.main hits these — pytest, scripts/
+    # check_api_docs.py, and any future tooling that walks the FastAPI app.
+    # Hoisting to the job env keeps every step covered without per-step
+    # duplication. The conftest fixture's os.environ.setdefault is a no-op
+    # when these are already set, so local tests behave identically.
+    env:
+      DOWNLOAD_PATH: ${{ runner.temp }}/downloads
+      LIBRARY_PATH: ${{ runner.temp }}/library
+      DB_PATH: ${{ runner.temp }}/dictionary.db
+
     steps:
       - name: Clone repo
         uses: actions/checkout@v4
@@ -148,21 +162,10 @@ jobs:
         # reporter prints the per-file table to the CI log so a dipping
         # file is visible without downloading the artifact.
         #
-        # env: three module-import-time side effects need writable paths
-        # before pytest's collection phase. The conftest session-autouse
-        # fixture runs AFTER collection, so it can't help here. Setting
-        # the vars at the workflow step mirrors local dev shells where
-        # they're already exported.
-        #
-        #   - DOWNLOAD_PATH / LIBRARY_PATH: backend/main.py:_require_env_path
-        #     raises at module load when either is unset.
-        #   - DB_PATH: backend/database.py calls init_db() at module load,
-        #     which mkdir's os.path.dirname(DB_PATH). Default is /data/
-        #     which CI runners can't write to.
-        env:
-          DOWNLOAD_PATH: ${{ runner.temp }}/downloads
-          LIBRARY_PATH: ${{ runner.temp }}/library
-          DB_PATH: ${{ runner.temp }}/dictionary.db
+        # The env block at the job level covers DOWNLOAD_PATH / LIBRARY_PATH
+        # / DB_PATH for every step that imports backend.main. The mkdir
+        # here is just to make sure the dirs exist before any code under
+        # test exercises them.
         run: |
           mkdir -p "$DOWNLOAD_PATH" "$LIBRARY_PATH"
           pytest -c backend/pyproject.toml --junitxml=backend-test-results.xml --cov --cov-config=backend/pyproject.toml --cov-report=xml --cov-report=term
