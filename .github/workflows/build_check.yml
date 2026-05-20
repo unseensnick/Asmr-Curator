@@ -95,6 +95,12 @@ jobs:
         # block there; the `testpaths` setting picks up backend/tests/.
         run: pytest -c backend/pyproject.toml --junitxml=backend-test-results.xml
 
+      - name: Check API docs in sync
+        # Fails when a backend route exists without a matching row under
+        # README's `## API Reference`. Same script you can run locally —
+        # see .claude/rules/project-workflow.md.
+        run: python scripts/check_api_docs.py
+
       - name: Upload backend test results
         uses: actions/upload-artifact@v4
         if: success() || failure()
