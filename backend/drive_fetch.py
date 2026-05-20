@@ -1,34 +1,23 @@
 """Headless-Chromium scrape of a Google Drive viewer URL → cleaned playback URL → download.
 
-Drive's `videoplayback?...` URL only exists after the player iframe initialises
-and probes the file. Once the player has issued the request, the URL is signed
-(`sig=…&sparams=…`) and self-contained — stripping `ump` and `range` causes
-the server to return the full file in one response. Server-side requests with
-just the URL ID won't work for view-only files: we need the player to emit
-the URL.
+Drive's signed `videoplayback?...` URL only materialises once the player
+iframe initialises. Server-side requests with just the file ID don't work
+for view-only files — the player has to emit the URL. Once emitted, stripping
+`ump` + `range` returns the full file in one response.
 
-This module loads `drive.google.com/file/d/<id>/view` in headless Chromium,
-captures the first `videoplayback` request, cleans the URL, and downloads
-the file via **the same Playwright browser context** that captured the URL.
-We deliberately do not switch to httpx for the download — Drive's CDN
-fingerprints the cleaned URL against its originating session (TLS, HTTP/2,
-cookies, request shape) and silently sends zero body bytes to anything that
-doesn't match. Reusing `context.request.get(...)` makes the download look
-exactly like a follow-up media fetch from the same browser session.
+Downloads run through the **same Playwright BrowserContext** that captured
+the URL. Drive's CDN fingerprints the cleaned URL against its originating
+session (TLS, HTTP/2, cookies, request shape) and silently sends zero body
+bytes to anything that doesn't match — httpx-based reuse of the same URL
+returns nothing. `context.request.get(...)` reuses the live session.
 
-The Playwright dep is heavy (~200 MB Chromium). It is imported lazily inside
-`fetch_drive_audio` so anything else in the backend keeps working when the
-package is absent (e.g. running unrelated tests on a fresh venv).
+Playwright (~200 MB Chromium) is imported lazily inside `fetch_drive_audio`
+so the rest of the backend works when it's absent.
 
-Progress reporting
-------------------
-`fetch_drive_audio(..., on_progress=cb)` calls `cb(event_dict)` at every
-state transition: `launching_browser` → `loading_page` → `waiting_for_player`
-→ `captured` → `downloading` → `done`. Heartbeat `downloading` events are
-emitted every ~2 s while Playwright's atomic body fetch runs so the UI shows
-elapsed time even though we can't poll mid-flight bytes (Playwright's Python
-client doesn't expose APIResponse streaming). The route handler in
-`backend/main.py` reshapes these into a `text/event-stream` for the frontend.
+`fetch_drive_audio(on_progress=cb)` emits state-transition events
+(`launching_browser` → `loading_page` → … → `done`) and ~500 ms heartbeats
+during download. The `/api/patreon/ingest-drive-link` handler in
+`backend/main.py` reshapes these into SSE.
 """
 from __future__ import annotations
 
@@ -52,76 +41,47 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-# Type alias for the async progress callback. The caller hands us a callable
-# that takes an event dict and returns an awaitable (typically `queue.put`).
-# A None callback means "no progress reporting" — useful for tests and the
-# legacy non-SSE call path.
+# Async progress callback shape — `None` means "don't report".
 ProgressCallback = Callable[[dict], Awaitable[None]]
 
 
-# Minimum size threshold for the **extension's** in-browser capture. The
-# backend's Playwright scrape no longer uses this — every `videoplayback`
-# response on a Drive host is treated as the file's signed URL, regardless
-# of chunk size (see `_on_response`). Kept here so a future cross-module
-# import can find it; lib/url-clean.js holds the matching value for the
-# browser side.
+# Min-size threshold for the **extension's** in-browser capture (mirrored
+# in lib/url-clean.js). The backend treats every Drive-host `videoplayback`
+# response as the signed URL regardless of size — see `_on_response`.
 MIN_AUDIO_BYTES = 400_000
 
-# How long to wait for the player to emit any `videoplayback` request on a
-# recognised Drive host. Generous because the budget covers Playwright
-# cold-start (~3-5 s on first call) + page nav + iframe mount + play() +
-# the player's first probe.
+# Player-emit budget: cold Playwright start + nav + iframe mount + first probe.
 DEFAULT_PLAYER_WAIT_S = 90.0
 
-# Drive serves these files as two parallel streams: itag=140 is the audio
-# (m4a, AAC-LC ~128 kbps) and itag=134 is the video (mp4, ~360p — for
-# cover-art audio releases this is just the static image, multi-MB).
-# We want the audio. After the first eligible `videoplayback` URL is
-# captured, we wait up to AUDIO_PREFERENCE_GRACE_S for an itag=140 URL
-# to fire and swap to it. If the grace window expires (true video upload,
-# or some odd file with only the video itag), we fall back to whatever
-# fired first — same outcome as before this preference existed.
+# Drive serves audio (itag=140, m4a) and video (itag=134, mp4) as parallel
+# streams. After the first `videoplayback` URL fires, wait this long for the
+# audio itag and swap to it; fall back to whatever fired first otherwise.
 AUDIO_PREFERENCE_GRACE_S = 5.0
 _PREFERRED_AUDIO_ITAG = "140"
 
-# Heartbeat interval for `downloading` progress events. Bytes-received are
-# read live from CDP `Network.dataReceived` events into the heartbeat's
-# holder dicts, so a 500 ms tick gives the UI a visibly-progressing
-# percentage / MB counter without flooding the SSE stream.
+# Bytes-received come live from CDP `Network.dataReceived` events; the tick
+# rate just controls how often the UI sees an updated total.
 DOWNLOAD_HEARTBEAT_S = 0.5
 
-# Idle timeout for the shared Chromium browser. Closes after this many
-# seconds of no activity so Chromium isn't resident forever between batches
-# of downloads. Cancelled at scrape start, re-armed at scrape end (so a
-# 700 s download can't be idle-killed mid-stream by a 300 s timer).
+# Shared Chromium idle close. Cancelled at scrape start, re-armed at end so
+# a long download can't be idle-killed mid-stream by the timer.
 BROWSER_IDLE_TIMEOUT_S = float(os.environ.get("DRIVE_BROWSER_IDLE_TIMEOUT_S", "300"))
 
-# Maximum time we'll wait for the body fetch to complete before giving up
-# and raising a timeout. Default 4 hours covers a ~3-hour m4a (~170-250 MB)
-# on a sustained ~37 KB/s connection (the user's observed real-world floor
-# for Google Drive throughput from headless Chromium). The captured
-# videoplayback URL's own `expire=` parameter is typically ~6 hours from
-# emission, so raising this beyond ~5 hours is pointless — Drive will 403
-# the URL before the timeout fires. Override via `DRIVE_DOWNLOAD_TIMEOUT_S`
-# (seconds, float).
+# 4 h default covers a ~3 h m4a (~170-250 MB) at the observed ~37 KB/s
+# floor for Drive throughput from headless Chromium. The signed URL's own
+# `expire=` is ~6 h, so values >5 h are pointless — Drive will 403 first.
 DOWNLOAD_TIMEOUT_S = float(os.environ.get("DRIVE_DOWNLOAD_TIMEOUT_S", "14400"))
 
-# Drive's CDN serves the same playback URL non-deterministically: most
-# attempts return the full audio, but a fraction return only the m4a init
-# segment (~1 KB) — likely the player's service-worker cache or a CDN edge
-# probe response. Retrying the in-page fetch with the same cleaned URL
-# almost always works on the next try, so when we see a short body we
-# loop a few times before giving up. Each attempt re-issues `fetch(url)`
-# inside the same Playwright page (cookies, TLS fingerprint preserved);
-# we don't re-navigate or re-capture the URL.
+# Drive's CDN occasionally returns just the m4a init segment (~1 KB) instead
+# of the full body — likely a service-worker cache or edge-probe artefact.
+# Retrying the in-page `fetch(url)` (same cookies, TLS, no re-navigation)
+# almost always lands the real body on the next try.
 SHORT_BODY_THRESHOLD_BYTES = 50_000
 MAX_DOWNLOAD_ATTEMPTS = int(os.environ.get("DRIVE_DOWNLOAD_RETRIES", "4"))
 
 
-# User-agent string handed to the headless Chromium context. Drive sometimes
-# serves a degraded experience to unknown UAs; matching a recent stable
-# Chrome keeps parity with real sessions and avoids the videoplayback
-# fingerprint check that silently zero-bodied the previous httpx-based path.
+# Matching a recent stable Chrome avoids Drive's degraded UA path + the
+# videoplayback fingerprint check that zero-bodied the prior httpx route.
 _BROWSER_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
@@ -155,20 +115,12 @@ _SENSITIVE_QUERY_PARAMS = frozenset({
 
 # ─── Shared Chromium machinery ─────────────────────────────────────────────
 #
-# The browser AND its BrowserContext are kept alive across `fetch_drive_audio`
-# calls. The Page is per-request (one page per scrape, closed on exit).
-#
-# Why share the context, not just the browser: Google's `accounts.google.com/
-# RotateCookies` fires mid-playback and replaces the session cookies. Those
-# rotations land in the live context's cookie jar. If we threw the context
-# away after each scrape, the next queued scrape would `add_cookies()` from
-# the DB — those cookies have just been invalidated server-side by the
-# rotation that we discarded. With a persistent context the rotations
-# propagate naturally to subsequent scrapes, same as a real browser session.
-#
-# The Part-1 scrape semaphore (in main.py) guarantees one scrape runs at a
-# time, so the persistent context never sees concurrent rotations from
-# itself.
+# Browser AND BrowserContext are persistent across scrapes; the Page is
+# per-request. The context has to survive because Google's RotateCookies
+# fires mid-playback and replaces session cookies — re-creating the context
+# would discard those rotations and the next scrape would re-`add_cookies()`
+# values the server has already invalidated. The scrape semaphore in
+# main.py prevents the persistent context from racing itself.
 _pw: Optional["Playwright"] = None
 _browser: Optional["Browser"] = None
 _context: Optional["BrowserContext"] = None
@@ -180,12 +132,9 @@ _browser_idle_task: Optional[asyncio.Task] = None
 async def _get_context(cookies: list[dict]) -> "BrowserContext":
     """Lazily launch + return the shared BrowserContext.
 
-    Re-creates the browser if it died (e.g. crashed or was idle-closed) and
-    re-creates the context if it was marked stale by a cookie re-sync.
-    Resets the idle-close timer on every call so the browser stays alive
-    while we're actively scraping. The caller is expected to immediately
-    cancel the idle task for the duration of its scrape (see
-    `fetch_drive_audio`) so a long download isn't idle-killed mid-stream.
+    Re-creates browser/context if either was killed or marked stale, and
+    resets the idle-close timer. Callers cancel the idle task for the
+    duration of their scrape so a long download can't be idle-killed.
     """
     global _pw, _browser, _context, _context_stale
     async with _browser_lock:
@@ -286,13 +235,11 @@ async def close_shared_browser() -> None:
 
 
 def _redact_sensitive_url(url: str) -> str:
-    """Strip auth-token values from a URL before logging it.
+    """Strip auth-token *values* from a URL before logging.
 
-    Preserves the URL structure (host, path, param names) so it stays useful
-    for debugging — we want to see *that* `sig=` was present, not what its
-    value was. Values are replaced with `<redacted>`; everything else
-    passes through byte-identical via the same string-level approach used
-    in `audio_utils.strip_query_params`.
+    Param names are preserved so debug logs still show *that* a `sig=`
+    was present; values become `<redacted>`. Mirrors the byte-identical
+    string approach `audio_utils.strip_query_params` uses.
     """
     parts = urlparse(url)
     if not parts.query:
@@ -412,12 +359,9 @@ def _request_looks_like_audio(url: str) -> bool:
 
 
 def _itag_of(url: str) -> Optional[str]:
-    """Extract the `itag` query parameter from a videoplayback URL.
-
-    Drive identifies the stream variant via `itag` (140=m4a audio,
-    134=mp4 video, etc.). Returns None if the URL has no `itag` or fails
-    to parse — the caller treats that as "not the preferred audio
-    stream" rather than guessing.
+    """Extract the `itag` query parameter (e.g. 140=audio, 134=video) from a
+    videoplayback URL. Returns None for missing/unparseable — the caller
+    treats that as "not the preferred audio stream" rather than guessing.
     """
     try:
         query = urlparse(url).query or ""
@@ -443,27 +387,13 @@ def _is_google_request(url: str) -> bool:
 
 
 async def _dump_diagnostics(page, file_id: str, observed: list[str]) -> Optional[Path]:
-    """Save a viewport screenshot + final URL + observed Google-host requests
-    (URLs with auth tokens redacted) to `<DOWNLOAD_PATH>/.drive-debug/<file_id>-<ts>/`.
-    Returns the directory path, or None if writing failed.
+    """Dump triage artefacts to `<DOWNLOAD_PATH>/.drive-debug/<file_id>-<ts>/`
+    on playback-URL timeout. Returns the dir path, or None on write failure.
 
-    Called when the playback-URL listener times out. Screenshot is the
-    single highest-signal artefact: shows whether Drive is serving a login
-    page, a "preview not available" notice, the actual player, or something
-    else. URL list distinguishes "no probe at all" from "probe via a host
-    we don't filter on".
-
-    Security notes:
-      • Page HTML is **not** dumped. Inline scripts on Google pages can
-        carry short-lived auth tokens; the screenshot is enough for triage
-        and is one artefact the user can visually inspect before sharing.
-      • Query-string auth tokens (`sig`, `lsig`, OAuth bearers, API keys)
-        are redacted from every URL before write — see
-        `_SENSITIVE_QUERY_PARAMS`.
-      • Screenshot is viewport-only (`full_page=False`) so we don't render
-        off-screen Google account UI that might be scrolled below the fold.
-      • A README in the output dir warns the user that the screenshot may
-        still show signed-in account info in the page chrome.
+    Security: page HTML is **not** dumped (inline scripts can carry tokens);
+    URL query values get `_SENSITIVE_QUERY_PARAMS` redaction; screenshot is
+    viewport-only so off-screen account UI isn't captured; a README warns
+    the user the screenshot's page chrome may still show account info.
     """
     download_path = Path(os.environ.get("DOWNLOAD_PATH", ".")).resolve()
     debug_root = download_path / ".drive-debug"
@@ -514,43 +444,21 @@ async def _dump_diagnostics(page, file_id: str, observed: list[str]) -> Optional
 async def _trigger_play(page, wait_s: float = 15.0) -> bool:
     """Start media playback inside the loaded Drive viewer.
 
-    Drive embeds its player in a YouTube iframe sitting in *cued* state
-    (poster + big play button) until something tells it to play. Three
-    strategies, applied in sequence as defensive layers:
+    Three strategies, applied in sequence as defensive layers:
+      A. Playwright `.click()` on the YouTube iframe locator.
+      B. Raw page-level synthetic click at viewport centre (0.5 s after
+         A so the first click's events can propagate).
+      C. Direct media-element `.play()` across frames — fallback for
+         non-YouTube Drive previewers (some `.mp3` shapes).
 
-      A. **Click the iframe element.** Playwright `.click()` on the
-         iframe locator delivers a synthetic mouse click at the
-         iframe's centre — the click event reaches the iframe content
-         and the cued overlay starts playback.
+    Do **not** add a `postMessage({event:"command",func:"playVideo"})`
+    strategy: Drive's `hbenv=apps-elements` embed registers the handler
+    but its minified internal player throws `this.aa.playVideo is not
+    a function`, breaking the state machine so subsequent clicks
+    silently fail. Requires `onReady` wiring before it's safe.
 
-      B. **Mouse-click viewport centre.** Belt-and-braces — a raw
-         page-level synthetic click in case A was intercepted or raced
-         a DOM update. Drive's player area is centred so the click
-         lands on the same overlay. A 0.5 s settle separates this
-         from A so the first click's events can propagate.
-
-      C. **Direct media-element `.play()`** across frames. Final
-         fallback for non-YouTube Drive previewers (Drive uses a
-         different viewer for some `.mp3` shapes).
-
-    **What used to be Strategy A** (postMessage of `{event: "command",
-    func: "playVideo"}` to the embed iframe — YouTube's documented
-    IFrame Player API) is intentionally not here. Drive's
-    `hbenv=apps-elements` embed variant registers the command handler
-    but its internal player exposes `playVideo` via a minified
-    property the handler doesn't know about; the call lands on
-    `this.aa.playVideo`, which doesn't exist, throws, and breaks the
-    player's state machine. A diagnostic dump captured the resulting
-    `this.aa.playVideo is not a function` line going to Drive's
-    jserror endpoint. Subsequent clicks then run against a broken
-    player and never produce a `videoplayback` chunk. Do not put the
-    postMessage strategy back without first wiring up YouTube's
-    `onReady` callback so we only send commands once the player
-    confirms it's controllable.
-
-    Always returns True at the end. The `_on_response` listener is the
-    real "did it work" check; this function's return value is
-    informational only.
+    Return value is informational — the `_on_response` listener is the
+    real signal that playback actually started.
     """
     yt_selector = 'iframe[src*="youtube.googleapis.com/embed"]'
 
@@ -626,16 +534,12 @@ async def fetch_drive_audio(
 ) -> DriveFetchResult:
     """End-to-end: load Drive headlessly, capture playback URL, download to disk.
 
-    `cookies` must already be in Playwright-acceptable shape
-    (`{name, value, domain, path, …}`) — see `main._normalise_cookie_for_playwright`.
-
-    `fallback_stem` is used as the leading part of the filename when neither an
-    explicit override nor a `Content-Disposition` header is present (typically
-    the `post_id` so the file inherits the post-folder name).
-
-    `on_progress`, if supplied, is awaited with each state-transition event
-    so a server-sent-events caller can surface progress to the user. See
-    module docstring for the event shape.
+    `cookies` must already be in Playwright shape — see
+    `main._normalise_cookie_for_playwright`. `fallback_stem` is used when
+    neither `explicit_filename` nor `Content-Disposition` provides one
+    (typically the `post_id` so files inherit the post-folder name).
+    `on_progress`, if supplied, is awaited per state event — see module
+    docstring for the shape.
     """
     started = time.monotonic()
     file_id = drive_id_from_url(drive_url)
@@ -652,13 +556,9 @@ async def fetch_drive_audio(
     await _emit(on_progress, {"state": "launching_browser", "elapsed_s": _elapsed(started)})
 
     loop = asyncio.get_running_loop()
-    # Two futures, soft preference for the audio stream:
-    #   `audio_future` resolves only on itag=140 URLs.
-    #   `any_future`   resolves on the first eligible URL of any itag.
-    # The main flow waits on `any_future` for the player-emit timeout,
-    # then briefly waits on `audio_future` to see if the audio stream
-    # arrives within AUDIO_PREFERENCE_GRACE_S. See the constant comment
-    # for why this matters.
+    # `any_future` resolves on the first eligible URL; `audio_future` only on
+    # itag=140. Flow waits on `any_future` for player-emit, then briefly on
+    # `audio_future` (AUDIO_PREFERENCE_GRACE_S) to upgrade.
     audio_future: asyncio.Future[str] = loop.create_future()
     any_future: asyncio.Future[str] = loop.create_future()
     observed_google: list[str] = []
@@ -670,16 +570,9 @@ async def fetch_drive_audio(
         if not _request_looks_like_audio(url):
             return
 
-        # No size gate. Earlier rounds tried thresholds (Content-Length
-        # ≥ 400 KB, or a `clen=` URL fallback) but Drive serves some
-        # files in many small chunks — none of them individually exceed
-        # the threshold, even though each is a valid signed playback URL
-        # whose cleaned form (with `range`/`ump`/`srfvp` stripped)
-        # returns the full file. The < 50 KB sanity check on the
-        # downloaded body at the end of `fetch_drive_audio` is the real
-        # "did we get a real file" gate; if stripping ever fails to
-        # produce real content, that check fires and surfaces the URL
-        # via the diagnostic dump.
+        # No size gate at capture time. Some Drive files arrive in many
+        # sub-threshold chunks but each carries a valid signed URL; the
+        # post-download SHORT_BODY check is the real gate.
         itag = _itag_of(url)
         is_audio = itag == _PREFERRED_AUDIO_ITAG
         if is_audio and not audio_future.done():
@@ -726,13 +619,11 @@ async def fetch_drive_audio(
                 debug_dir=debug_dir,
             )
 
-        # Drive 302s unauthenticated sessions through accounts.google.com.
-        # Detect the redirect here and fail fast — otherwise we'd wait the
-        # full player-emit timeout (90 s) for a `videoplayback` request
-        # that will never fire from the sign-in page, then report a
-        # misleading generic timeout. Hostname comparison (not substring)
-        # because the URL also appears as a `?continue=` query value on
-        # legitimate pages.
+        # Drive 302s unauthenticated sessions to accounts.google.com. Fail
+        # fast here, otherwise we'd burn the full 90 s player-emit timeout
+        # waiting for a videoplayback that never fires from the sign-in
+        # page. Hostname compare, not substring — the URL also appears as
+        # a `?continue=` value on legitimate pages.
         final_host = (urlparse(page.url).hostname or "").lower()
         if final_host == "accounts.google.com" or final_host.endswith(".accounts.google.com"):
             debug_dir = await _dump_diagnostics(page, file_id, observed_google)
@@ -749,12 +640,7 @@ async def fetch_drive_audio(
             "state": "waiting_for_player",
             "elapsed_s": _elapsed(started),
         })
-        # Trigger play. `_trigger_play` polls every frame for the
-        # media element (Drive's YouTube embed mounts it asynchronously)
-        # then falls back to clicking the visible play overlay if no
-        # element appears in time. The response listener captures
-        # the first eligible URL either way — if Drive auto-plays
-        # before we get here, the trigger is a harmless no-op.
+        # No-op if Drive auto-plays; otherwise see `_trigger_play`.
         played = await _trigger_play(page)
         if not played:
             log.info(
@@ -776,11 +662,7 @@ async def fetch_drive_audio(
                 debug_dir=debug_dir,
             )
 
-        # Audio-stream preference. If the first capture was already
-        # itag=140, audio_future is done and we use it directly.
-        # Otherwise wait up to AUDIO_PREFERENCE_GRACE_S for the audio
-        # stream to show up alongside the video; fall back to the
-        # first URL if it doesn't.
+        # Upgrade to itag=140 if it arrives within the grace window.
         if audio_future.done():
             captured_url = audio_future.result()
         else:
@@ -808,23 +690,12 @@ async def fetch_drive_audio(
         })
 
         # ── Download via in-page fetch streamed through expose_function ───
-        #
-        # We trigger the download by issuing `fetch(url)` inside the page
-        # (so it routes through Chromium's network stack with the player's
-        # exact TLS, cookies, and origin — same fingerprint Drive's CDN
-        # minted the URL for). The Response body is a ReadableStream; the
-        # JS reader pumps chunks to Python via `window.__driveDownload`
-        # (a `page.expose_function`-bound async callback). Each chunk is
-        # base64-encoded over the Playwright bridge, decoded in Python,
-        # and written straight to the `.part` file. Memory stays bounded
-        # at chunk size (~16-64 KB typical fetch reads) regardless of
+        # In-page `fetch(url)` routes via Chromium's stack with the player's
+        # TLS/cookies/origin (the fingerprint the URL was minted for). The JS
+        # reader pumps chunks to Python through `window.__driveDownload`,
+        # base64'd over the Playwright bridge and written straight to the
+        # `.part` file — memory stays bounded at chunk size regardless of
         # total file size.
-        #
-        # We previously tried CDP `Network.takeResponseBodyAsStream` for
-        # this, but that method lives in the `Fetch` domain (not Network)
-        # and requires `Fetch.enable` request interception — too much
-        # additional surface area for a one-shot download. The
-        # expose_function pattern accomplishes the same goal in less code.
         bytes_holder: dict[str, int] = {"n": 0}
         total_holder: dict[str, int] = {"n": 0}
         download_state: dict[str, Any] = {
@@ -839,11 +710,10 @@ async def fetch_drive_audio(
         async def _on_drive_msg(payload):
             if not isinstance(payload, dict):
                 return
-            # Terminal-state guard: chunks may arrive after `done`/`error` has
-            # already set the event (the JS-side queue can dispatch concurrently
-            # with the Python-side coroutine that closes the .part file). Without
-            # this, a late chunk would try to write to a closed file handle and
-            # raise — harmless (caught below) but pollutes the error path.
+            # Terminal-state guard: a chunk can arrive after `done`/`error`
+            # has set the event (JS queue dispatches concurrently with the
+            # Python file-close coroutine). Writing to the closed handle is
+            # harmless but pollutes the error path.
             if download_done_evt.is_set():
                 return
             kind = payload.get("kind")
@@ -907,12 +777,8 @@ async def fetch_drive_audio(
 
         await page.expose_function("__driveDownload", _on_drive_msg)
 
-        # Retry loop: Drive sometimes serves the m4a init segment instead
-        # of the full body for a given playback URL, but the next attempt
-        # at the same cleaned URL almost always works. We loop up to
-        # MAX_DOWNLOAD_ATTEMPTS, treating any sub-threshold body as a
-        # retryable failure. State holders are mutated in-place so the
-        # _on_drive_msg closure stays valid across attempts.
+        # Sub-threshold body → retry. State holders are mutated in place
+        # so the _on_drive_msg closure stays valid across attempts.
         target: Optional[Path] = None
         part: Optional[Path] = None
         bytes_written = 0
@@ -950,13 +816,10 @@ async def fetch_drive_audio(
                 )
             )
 
-            # JS-side streaming reader. Note `String.fromCharCode` is
-            # called in a loop (not via spread) because fetch chunks can
-            # occasionally exceed the function-arg cap on some Chromium
-            # versions; the loop is robust across chunk sizes. `cache:
-            # 'no-store'` and a random query-string nonce defeat the
-            # player's service-worker / HTTP cache so each retry actually
-            # hits the network.
+            # JS streaming reader. `String.fromCharCode` is called in a loop
+            # (not via spread) because chunks can exceed the arg cap on some
+            # Chromiums. `cache: 'no-store'` + random query nonce defeat
+            # the player's service-worker cache so retries hit the network.
             fetch_task = asyncio.create_task(page.evaluate(
                 """
                 async (url) => {
@@ -1018,10 +881,8 @@ async def fetch_drive_audio(
                 if f is not None and not f.closed:
                     with contextlib.suppress(Exception):
                         f.close()
-                # Drain the JS task. If it's still running (timeout case),
-                # the page-close in the outer finally will cancel its
-                # in-flight fetch via AbortError; we just need to not leak
-                # the awaitable.
+                # Drain the JS task — outer page-close cancels the fetch
+                # via AbortError, we just don't leak the awaitable.
                 if not fetch_task.done():
                     fetch_task.cancel()
                     with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -1116,12 +977,10 @@ async def _download_heartbeat(
 ) -> None:
     """Periodic `downloading` event with live byte counters.
 
-    Reads `bytes_holder["n"]` (running total from `Network.dataReceived`
-    events) and `total_holder["n"]` (Content-Length from `Network.
-    responseReceived`) on each tick. Holder dicts are shared references —
-    they're mutated in the CDP event handlers and we observe the latest
-    values here. Cancelled by the caller once the download finishes;
-    exits cleanly on cancellation."""
+    Holder dicts are shared references mutated by CDP event handlers
+    (`bytes_holder["n"]` from `Network.dataReceived`, `total_holder["n"]`
+    from `Network.responseReceived`). Caller cancels on completion.
+    """
     if on_progress is None:
         return
     try:
