@@ -75,11 +75,18 @@ describe("parseTitleLine", () => {
     it("strips smart quotes / ellipsis / emoji so the title is ASCII-typographically clean", () => {
         // Generate strings that mix the unicode cleanups parseTitleLine
         // performs (smart quotes, ellipsis, variation selector, ZWJ)
-        // and verify none survive.
-        const noisyAscii = fc.stringOf(
-            fc.oneof(fc.constantFrom("‘", "’", "“", "”", "…", "️", "‍"), fc.char()),
-            { maxLength: 100 },
-        );
+        // with plain ASCII noise, and verify none of the targeted
+        // characters survive the parse. fast-check 4 collapsed
+        // `stringOf(unit, opts)` into `string({ unit, ... })` and
+        // dropped `fc.char()`; the per-character generator now lives
+        // under the `unit` option directly.
+        const noisyAscii = fc.string({
+            maxLength: 100,
+            unit: fc.oneof(
+                fc.constantFrom("‘", "’", "“", "”", "…", "️", "‍"),
+                fc.constantFrom("a", "b", "c", "d", "e", " ", "1", "2", "!", "."),
+            ),
+        });
         fc.assert(
             fc.property(noisyAscii, (raw) => {
                 const { title } = parseTitleLine(raw);
