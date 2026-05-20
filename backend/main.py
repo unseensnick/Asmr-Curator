@@ -140,8 +140,16 @@ def validate_under_root(rel_path: str, root: Path) -> Path:
 
     is_relative_to (Python 3.9+) so a sibling like /mnt/audio_evil doesn't
     satisfy a naive prefix check against /mnt/audio.
+
+    Null bytes + malformed inputs make `.resolve()` raise `ValueError` /
+    `OSError` from the OS layer — without this catch they'd surface as a
+    500 with a Python stack trace. Treat them as denials: a security
+    boundary doesn't owe the caller a stack trace.
     """
-    resolved = (root / rel_path.strip()).resolve()
+    try:
+        resolved = (root / rel_path.strip()).resolve()
+    except (ValueError, OSError):
+        raise HTTPException(403, "Access denied")
     root_resolved = root.resolve()
     if not resolved.is_relative_to(root_resolved):
         raise HTTPException(403, "Access denied")

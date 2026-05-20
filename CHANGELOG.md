@@ -11,6 +11,10 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
+### Fixes
+
+- **File-API path validators now return a clean 403 on malformed input** (null bytes, paths the OS refuses to resolve). Previously these surfaced as a 500 with a Python stack trace — defence-in-depth tightening, not a known exploit. Found by a property-based test added in the same release.
+
 ## [2.0.4]
 
 ### Changes
