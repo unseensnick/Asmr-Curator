@@ -39,7 +39,23 @@ jobs:
         # in transient dev deps. CVEs at high/critical are actionable
         # signal; tune by overriding the level here when an upstream
         # advisory needs a temporary hold.
-        run: npm audit --audit-level=high
+        #
+        # Retry loop: the npm registry occasionally returns 503 Service
+        # Unavailable on the audit endpoint and the job fails through no
+        # fault of ours. Three attempts with 30s backoff covers the
+        # transient case without masking real CVEs (which the registry
+        # returns deterministically).
+        run: |
+          for attempt in 1 2 3; do
+            if npm audit --audit-level=high; then
+              exit 0
+            fi
+            if [ $attempt -lt 3 ]; then
+              echo "npm audit attempt $attempt failed, retrying in 30s..."
+              sleep 30
+            fi
+          done
+          exit 1
 
       - name: Format check (Prettier)
         working-directory: frontend
@@ -131,7 +147,21 @@ jobs:
         # coverage.xml for the artifact + downstream tools; the `term`
         # reporter prints the per-file table to the CI log so a dipping
         # file is visible without downloading the artifact.
-        run: pytest -c backend/pyproject.toml --junitxml=backend-test-results.xml --cov --cov-config=backend/pyproject.toml --cov-report=xml --cov-report=term
+        #
+        # env: backend/main.py reads DOWNLOAD_PATH and LIBRARY_PATH at
+        # module import (the _require_env_path helper raises otherwise),
+        # so any test that imports backend.main at module level — e.g.
+        # tests/test_properties.py — needs both set before pytest's
+        # collection phase. The conftest session-scope autouse fixture
+        # runs AFTER collection, so it can't help here. Setting the
+        # vars at the workflow step mirrors local dev shells where
+        # they're already exported.
+        env:
+          DOWNLOAD_PATH: ${{ runner.temp }}/downloads
+          LIBRARY_PATH: ${{ runner.temp }}/library
+        run: |
+          mkdir -p "$DOWNLOAD_PATH" "$LIBRARY_PATH"
+          pytest -c backend/pyproject.toml --junitxml=backend-test-results.xml --cov --cov-config=backend/pyproject.toml --cov-report=xml --cov-report=term
 
       - name: Check API docs in sync
         # Fails when a backend route exists without a matching row under
