@@ -148,17 +148,21 @@ jobs:
         # reporter prints the per-file table to the CI log so a dipping
         # file is visible without downloading the artifact.
         #
-        # env: backend/main.py reads DOWNLOAD_PATH and LIBRARY_PATH at
-        # module import (the _require_env_path helper raises otherwise),
-        # so any test that imports backend.main at module level — e.g.
-        # tests/test_properties.py — needs both set before pytest's
-        # collection phase. The conftest session-scope autouse fixture
-        # runs AFTER collection, so it can't help here. Setting the
-        # vars at the workflow step mirrors local dev shells where
+        # env: three module-import-time side effects need writable paths
+        # before pytest's collection phase. The conftest session-autouse
+        # fixture runs AFTER collection, so it can't help here. Setting
+        # the vars at the workflow step mirrors local dev shells where
         # they're already exported.
+        #
+        #   - DOWNLOAD_PATH / LIBRARY_PATH: backend/main.py:_require_env_path
+        #     raises at module load when either is unset.
+        #   - DB_PATH: backend/database.py calls init_db() at module load,
+        #     which mkdir's os.path.dirname(DB_PATH). Default is /data/
+        #     which CI runners can't write to.
         env:
           DOWNLOAD_PATH: ${{ runner.temp }}/downloads
           LIBRARY_PATH: ${{ runner.temp }}/library
+          DB_PATH: ${{ runner.temp }}/dictionary.db
         run: |
           mkdir -p "$DOWNLOAD_PATH" "$LIBRARY_PATH"
           pytest -c backend/pyproject.toml --junitxml=backend-test-results.xml --cov --cov-config=backend/pyproject.toml --cov-report=xml --cov-report=term
