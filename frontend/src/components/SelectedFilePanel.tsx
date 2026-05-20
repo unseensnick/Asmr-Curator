@@ -44,37 +44,26 @@ const MAX_BYTES = 255;
 
 interface SelectedFilePanelProps {
     selected: FileEntry;
-    /** Which root the selected file lives under. Rename + convert stay in
-     *  the same root; move always targets `library`. */
+    /** Rename + convert stay in this root; move always targets `library`. */
     root: FileRoot;
-    /** Outputs from the title/tags generator, used as rename target. */
     outputDash: string;
     outputPipe: string;
-    /** Artist pre-fill from the screenshot/Patreon extract. */
     extractedArtist: string;
-    /** Shared conversion preferences (also used by the batch panel). */
     convertFormat: ConvertFormat;
     convertQuality: ConvertQuality;
     deleteOriginal: boolean;
-    /** Shared library-subdir position. The Move-to-library picker reads
-     *  and writes this so it stays in sync with the LibraryExplorerSheet
-     *  — filing multiple files into the same destination doesn't re-walk
-     *  the tree per file. */
+    /** Shared with LibraryExplorerSheet so the Move-to-library picker
+     *  doesn't re-walk the tree per file. */
     librarySubdir: string;
     onLibrarySubdirChange: (subdir: string) => void;
     onConvertFormatChange: (f: ConvertFormat) => void;
     onConvertQualityChange: (q: ConvertQuality) => void;
     onDeleteOriginalChange: (v: boolean) => void;
-    /** Called when the user closes the panel via the × button. */
     onDeselect: () => void;
-    /** Update the selected entry in place after a successful rename/convert. */
     onSelectedChange: (next: FileEntry) => void;
-    /** Reload the file list after rename/convert so it stays in sync. */
     onListReload: () => void;
-    /** Called after a successful move: parent switches FileBrowser to the
-     *  Library tab and selects the moved file at its new path. */
+    /** Parent switches FileBrowser to Library tab and selects the moved file. */
     onMovedToLibrary: (toPath: string, name: string) => void;
-    /** Surface fatal errors back up to the FileBrowser banner. */
     onError: (msg: string) => void;
 }
 

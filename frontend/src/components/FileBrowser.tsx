@@ -37,11 +37,8 @@ interface FileBrowserProps {
     outputPipe: string;
     extractedArtist: string;
     defaultOpen?: boolean;
-    /** Triggered by the Patreon panel's post-Apply bridge link. When set,
-     *  the FileBrowser opens, switches to the Downloads tab, selects the
-     *  named file (synthesising the entry from the bridge payload), and
-     *  scrolls itself into view. The parent should clear it via
-     *  `onBridgeConsumed` once the request has been handled. */
+    /** Patreon panel's post-Apply bridge: open + switch to Downloads + select
+     *  the named file + scroll into view. Parent clears via onBridgeConsumed. */
     bridgeRequest?: { path: string; filename: string } | null;
     onBridgeConsumed?: () => void;
 }
@@ -63,18 +60,9 @@ interface BatchProgress {
 }
 
 /**
- * File library shell. Two tabs: Library (browses LIBRARY_PATH, the user's
- * curated archive) and Downloads (browses DOWNLOAD_PATH, the ingest staging
- * tree). Each tab runs a server-backed flat search; the work area on the
- * right is shared (a SelectedFilePanel handles rename, convert, and the
- * optional Move-to-library step regardless of which tab the file came
- * from). Deferred-fetch until first expand so the walk doesn't tie up a
- * worker on page load.
- *
- * `defaultOpen` drives the initial collapsed/expanded state.
- *
- * Two-column layout on lg+ viewports: the searchable file list left, the
- * work area right. Stacks on smaller viewports.
+ * File library shell. Two tabs (Library = LIBRARY_PATH archive, Downloads =
+ * DOWNLOAD_PATH staging) share one right-hand SelectedFilePanel for rename
+ * / convert / move-to-library. Deferred-fetch until first expand.
  */
 export default function FileBrowser({
     outputDash,
@@ -92,24 +80,12 @@ export default function FileBrowser({
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [open, setOpen] = useState(defaultOpen);
-    // Files pending move from DOWNLOAD_PATH — refreshed on open, on tab
-    // switch, and after a successful move. Drives the badge on the
-    // Downloads tab so the user notices forgotten downloads at a glance.
+    // Drives the Downloads-tab badge; refreshed on open / tab switch / move.
     const [downloadsCount, setDownloadsCount] = useState<number | null>(null);
-    // Library explorer (right-side Sheet) — folder-tree navigation across
-    // LIBRARY_PATH, including a "+ New folder" affordance scoped to the
-    // currently-navigated subdir. Folder creation lives exclusively in the
-    // explorer Sheet now; the FileBrowser used to carry its own inline
-    // "+ New folder" button at LIBRARY_PATH root, but that was a less-
-    // capable duplicate (couldn't target a subdir) and reading two slightly
-    // different folder-creation affordances in one panel was confusing.
     const [explorerOpen, setExplorerOpen] = useState(false);
 
-    // Shared library-subdir state. The Sheet and the Move-to-library
-    // picker (inside SelectedFilePanel) are two views of the same position
-    // in LIBRARY_PATH — navigating one updates the other so batching
-    // multiple files into the same destination doesn't make the user re-
-    // walk the tree per file.
+    // Sheet + Move-to-library picker share this so navigating one updates
+    // the other — batch-filing into the same destination doesn't re-walk.
     const [librarySubdir, setLibrarySubdir] = useState("");
 
     // Conversion preferences, persist across sessions.
