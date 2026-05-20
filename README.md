@@ -6,6 +6,23 @@ Self-hosted tool for organising a local ASMR library. Pulls audio from Patreon (
 
 > **Provided as-is, no warranty, no liability.** Hobby project, MIT-licensed, run at your own risk. Personal use only — you are responsible for the terms of service of any platform you connect (Patreon, Google), and for not redistributing copyrighted content. Full text in [LICENSE](LICENSE) and the [License and responsible use](#license-and-responsible-use) section.
 
+---
+
+## Contents
+
+- [Migrating from `asmr-filename-gen`](#migrating-from-the-old-asmr-filename-gen-image) — if your `docker pull` is failing
+- [Quickstart](#quickstart) — copy-paste `docker-compose.yml`, ~60 seconds to running
+- [Stack](#stack)
+- [Workflows](#workflows) — the three ways audio gets into your library
+- [Features](#features) — file browser, conversion, tags, extension, UI
+- [Running locally (devcontainer)](#running-locally-devcontainer)
+- [API Reference](#api-reference)
+- [Configuration](#configuration) — env vars
+- [Backup & Restore](#backup--restore)
+- [Contributing](#contributing)
+- [License and responsible use](#license-and-responsible-use)
+- [Third-party licenses](#third-party-licenses)
+
 ## Migrating from the old `asmr-filename-gen` image
 
 **If your `docker pull` is failing with `denied` against `ghcr.io/unseensnick/asmr-filename-gen:<anything>`:** the image moved. The repo and GHCR package were renamed from `asmr-filename-gen` to `asmr-curator` in v2.0.4. The old package has been retired; the new image lives at `ghcr.io/unseensnick/asmr-curator`.
@@ -27,66 +44,141 @@ docker compose up -d
 
 **No data migration needed.** Your SQLite dictionary, the `LIBRARY_PATH` bind mount, and the `DOWNLOAD_PATH` bind mount are unchanged. Existing files, tags, settings, and cookies carry over as-is — only the image source changes.
 
+## Quickstart
+
+You don't need to clone the repo. Save the two files below to a fresh directory, edit the paths in `.env`, then `docker compose up -d`.
+
+**`docker-compose.yml`**
+
+```yaml
+services:
+  asmr-tool:
+    image: ghcr.io/unseensnick/asmr-curator:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data                       # SQLite dictionary
+      - ${LIBRARY_PATH}:/mnt/audio         # your curated archive
+      - ${DOWNLOAD_PATH}:/mnt/downloads    # ingest staging
+    environment:
+      - DB_PATH=/data/dictionary.db
+      - LIBRARY_PATH=/mnt/audio
+      - DOWNLOAD_PATH=/mnt/downloads
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5vl:7b}
+      - DRIVE_SCRAPE_CONCURRENCY=${DRIVE_SCRAPE_CONCURRENCY:-1}
+      - DRIVE_BROWSER_IDLE_TIMEOUT_S=${DRIVE_BROWSER_IDLE_TIMEOUT_S:-300}
+      - DRIVE_DOWNLOAD_TIMEOUT_S=${DRIVE_DOWNLOAD_TIMEOUT_S:-14400}
+    restart: unless-stopped
+```
+
+**`.env`**
+
+```dotenv
+# Host paths. Both required; must be different directories.
+LIBRARY_PATH=/home/you/Music/ASMR
+DOWNLOAD_PATH=/home/you/asmr-downloads
+
+# Optional — override only if Ollama runs somewhere other than the host
+# loopback, or you want a different vision model.
+# OLLAMA_BASE_URL=http://localhost:11434
+# OLLAMA_MODEL=qwen2.5vl:7b
+```
+
+Then:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+Open **http://localhost:8000**. The dictionary database is created and seeded automatically on first boot and persists in `./data/`.
+
+> **Want to skip the Screenshot workflow?** Ollama is only needed for workflow 3 (LLM extraction from screenshots). Workflows 1 + 2 (Patreon URL fetch + Drive download) work without it.
+
 ## Stack
 
-| Layer     | Tech                                           |
-| --------- | ---------------------------------------------- |
-| Frontend  | React 19, Vite, Tailwind CSS v4, shadcn/ui     |
-| Backend   | Python 3.12+, FastAPI, Uvicorn                 |
-| Database  | SQLite — single file, zero config              |
-| Drive scrape | Playwright + headless Chromium             |
-| LLM (optional) | Ollama (`qwen2.5vl:7b`) — runs outside the container |
-| Container | Docker + Compose                               |
+| Layer            | Tech                                                  |
+| ---------------- | ----------------------------------------------------- |
+| Frontend         | React 19, Vite, Tailwind CSS v4, shadcn/ui            |
+| Backend          | Python 3.12+, FastAPI, Uvicorn                        |
+| Database         | SQLite — single file, zero config                     |
+| Drive scrape     | Playwright + headless Chromium                        |
+| LLM (optional)   | Ollama (`qwen2.5vl:7b`) — runs outside the container  |
+| Container        | Docker + Compose                                      |
 
-## Who this is for
-
-**ASMR consumers (primary).** You buy or download a lot of ASMR audio from Patreon and want one local library with consistent filenames across creators. The Patreon-fetch and Drive-download workflows are built for this.
-
-**ASMR artists (secondary).** A few features carry over even if you make the content rather than collect it: the file browser + ID3/FLAC/MP4 metadata writer for organising your own released catalogue, the ffmpeg-driven audio conversion (mp3 / flac / ogg with quality presets), and the tag-dictionary workflow if you want consistent tagging across uploads. The Patreon-fetch and Drive-ingest features won't help with your own content.
-
-**Contributors.** See [`CLAUDE.md`](CLAUDE.md) and [`.claude/rules/`](.claude/rules/) for commit conventions, changelog discipline, release workflow, and what CI gates on. Quick orientation to run things locally is in **Running in the devcontainer** below.
+**Who it's for:** ASMR consumers organising audio purchased from Patreon (primary). A few features carry over for ASMR artists curating their own catalogue (file browser + metadata writer + ffmpeg conversion + tag dictionary) but workflows 1+2 don't help with self-created content.
 
 ## Workflows
 
-Three independent ways to get audio + metadata into your library. The first is the most accurate; reach for the others only when it doesn't apply.
+Three independent paths get audio + metadata into your library. Use #1 by default; reach for #2 / #3 when it doesn't apply.
+
+| # | Input | How it works | Best for |
+| - | ----- | ------------ | -------- |
+| 1 | Patreon post or creator URL | `patreon-dl` authenticates with your synced cookie, downloads the audio, reads structured metadata | Primary path — most accurate |
+| 2 | Drive link surfaced by workflow 1 | Headless Chromium opens the viewer, captures the playback URL, streams audio | When a creator links to Drive instead of uploading directly |
+| 3 | Screenshot (paste/drop image) | Local vision LLM reads title + tag chips off the page pixels | Fallback for posts you can't fetch (no subscription, public preview, old screenshot) |
 
 ### 1. Patreon URL → audio + metadata (primary)
 
-Paste a Patreon post or creator URL into the **Patreon URL** tab. The bundled [`patreon-dl`](https://github.com/patrickkfkan/patreon-dl) authenticates with your synced session cookie, downloads the audio into `DOWNLOAD_PATH/<creator>/<post_id> - <post_title>/<original_filename>`, and pre-fills title, tags, and artist from the post's API metadata. After Apply, an inline `Rename and move <file>` link jumps to the FileBrowser's Downloads tab with the file selected so you can rename and (optionally) move it into your curated library in one flow.
+Paste a Patreon post or creator URL into the **Patreon URL** tab. The bundled [`patreon-dl`](https://github.com/patrickkfkan/patreon-dl) downloads audio into `DOWNLOAD_PATH/<creator>/<post_id> - <post_title>/<original_filename>` and pre-fills title, tags, and artist from the post's API metadata. After Apply, an inline `Rename and move <file>` link jumps to the FileBrowser's Downloads tab with the file selected.
 
 - Creator URLs return every accessible post as a scrollable list with per-row Apply.
-- Filters: **Include** chips (Audio default / Video / Images / Attachments / Drive links), **Published between** date range, **Metadata only** (skip the audio download), **Dry run** (preview via the log tail without writing anything).
+- Filters: **Include** chips (Audio default / Video / Images / Attachments / Drive links), **Published between** date range, **Metadata only** (skip the audio download), **Dry run** (preview via log tail without writing anything).
 - Re-fetching a creator URL only pulls new posts since the last run (patreon-dl's `stop.on = previouslyDownloaded`).
-- Re-fetching a single-post URL with **Metadata only** checked serves the cached metadata instantly without spawning patreon-dl — useful for recovering UI state without re-running the full fetch.
+- Re-fetching a single-post URL with **Metadata only** checked serves cached metadata instantly without spawning patreon-dl — useful for recovering UI state without re-running the full fetch.
 
 ### 2. Drive download (for Drive-hosted audio)
 
-Some Patreon creators link to Google Drive instead of uploading audio directly. The Patreon fetch surfaces those links in an **External Links** collapsible on each post card, with a per-link **Download** button.
+Some Patreon creators link to Google Drive instead of uploading audio. The Patreon fetch surfaces those links in an **External Links** collapsible on each post card, with a per-link **Download** button.
 
-The backend launches headless Chromium (Playwright) with your synced Google session cookie, opens the Drive viewer, intercepts the playback URL, strips the chunked-streaming parameters (`ump`, `range`, `srfvp`), and streams the audio into `DOWNLOAD_PATH/<creator>/<post_id> - <title>/` (matches patreon-dl; falls back to legacy `<post_id>/` when no metadata is supplied). The row label shows real-time percentage. Multiple Download clicks on the same post are serialised one-at-a-time (Drive's mid-playback cookie rotation breaks concurrent scrapes); long files have a 4 h default timeout (override via `DRIVE_DOWNLOAD_TIMEOUT_S`). On expired-session redirects the request fails in ~1 s with a "re-sync your cookie" message rather than waiting for the player.
+The backend launches headless Chromium (Playwright) with your synced Google session cookie, opens the Drive viewer, intercepts the playback URL, strips the chunked-streaming parameters (`ump`, `range`, `srfvp`), and streams the audio into `DOWNLOAD_PATH/<creator>/<post_id> - <title>/` (matches patreon-dl; falls back to legacy `<post_id>/` when no metadata is supplied). Real-time percentage in the row label. Multiple Download clicks on the same post are serialised (Drive's mid-playback cookie rotation breaks concurrent scrapes); long files have a 4 h default timeout (override via `DRIVE_DOWNLOAD_TIMEOUT_S`). Expired-session redirects fail in ~1 s with a "re-sync your cookie" message.
 
-Saved filenames come from each link's visible anchor text (e.g. `[EXCLUSIVE] [27:23] Love Goddess | With Music | Soft Waves.m4a`) so multiple downloads from the same post stay distinct.
+Saved filenames come from each link's visible anchor text so multiple downloads from the same post stay distinct. Requires the browser extension for cookie sync — see [`extension/README.md`](extension/README.md).
 
-Requires the browser extension for the cookie sync — see [`extension/README.md`](extension/README.md).
+### 3. Screenshot → LLM extraction (fallback)
 
-### 3. Screenshot → LLM extraction (optional / fallback)
+For posts that can't be fetched via patreon-dl, drop or paste an image into the **Screenshot** tab. A local vision LLM (Ollama, `qwen2.5vl:7b` by default) reads the title and tag chips off the page pixels.
 
-For posts that can't be fetched via patreon-dl — a creator you don't subscribe to, a public preview, an embed elsewhere, an old screenshot you took before installing this — drop or paste an image into the **Screenshot** tab. A local vision LLM (Ollama, `qwen2.5vl:7b` by default) reads the title and tag chips off the page.
+**This is the fallback path; patreon-dl is more accurate when it's an option** (URL fetch reads structured metadata, screenshot path infers from pixels). Requires Ollama running separately on the host with the chosen model pulled.
 
-**This is the fallback path; patreon-dl is more accurate when it's an option** (the URL fetch reads structured metadata, the screenshot path infers from pixels). Requires Ollama running separately on the host with the chosen model pulled — see **Running in production** below.
+## Features
 
-## Other features
+### Library management
 
-- **File browser + rename** with embedded ID3 / FLAC / MP4 metadata. Two tabs: **Library** (your curated archive under `LIBRARY_PATH`) and **Downloads** (ingest staging under `DOWNLOAD_PATH`, with a pending-count badge so forgotten downloads don't sit unnoticed). Live search by filename, folder, or both inside the active tab. Direct rename only on `.mp3` / `.flac` / `.ogg` (formats with embeddable tags); other formats convert first.
-- **Move to library** (optional) — every selected file in the work area carries a `Move to library` collapsible with a folder-tree picker rooted at `LIBRARY_PATH`. Drill into subfolders, create new ones inline, optionally apply the generated filename during the move, then commit.
-- **Browse files** — the `Browse` button in the FileBrowser toolbar opens a right-side Sheet with a persistent left rail that switches between `LIBRARY_PATH` and `DOWNLOAD_PATH` in one click. Both roots share the same selection model: single-click selects, double-click activates (drill folder / open file), Shift- and Ctrl/Cmd-click extend, drag-select rubber-bands a rectangle (auto-scrolls near edges), Ctrl/Cmd+A selects every visible row; **F2** renames the hovered row, **Del** deletes (or the whole selection). In **Library**: **N** opens New folder, **Ctrl/Cmd+X** cuts the selection, **Ctrl/Cmd+V** pastes — folders included, with cycle protection and partial-success reporting via `POST /api/move/batch`. **Downloads** omits Cut/Paste and New folder by design — it's transient staging, not a target for new structure. Typing in the filter searches the current subtree recursively via `GET /api/files/search?subdir=…`; right-click anywhere brings up the Sheet's own context menu. The Sheet preserves its position (active root + current subfolder) across opens, and works in every deployment (host, devcontainer, Unraid / TrueNAS / Proxmox Docker) because it's an in-app component, not a subprocess into the host's file manager.
-- **Audio conversion** via `ffmpeg` to mp3 / flac / ogg with quality presets. Batch mode for multiple files at once.
-- **Tag vocabulary + suppressed terms** — persistent SQLite dictionary, with canonical forms and optional aliases. The full vocabulary is injected into the LLM prompt so the screenshot workflow uses your tag forms instead of inventing its own. Suppressed terms are dropped from output silently. Tag chips in the editor that aren't in the dictionary render with a warm-amber tint; right-click one to add it as a new canonical or as an alias of an existing entry without leaving the rename flow.
-- **Dictionary tester** — paste raw post text to preview how it'd be normalised against the current vocabulary; quick-add buttons for unrecognised tags. Uses the same Ollama backend as Workflow 3 — skip if you only use Workflows 1 + 2.
-- **Dual output formats** — dash separator (filesystem-safe) or pipe separator (for metadata / descriptions).
+- **Two-tab file browser.** **Library** (`LIBRARY_PATH`, your curated archive) and **Downloads** (`DOWNLOAD_PATH`, ingest staging, with a pending-count badge so forgotten downloads don't sit unnoticed). Live search by filename, folder, or both inside the active tab.
+- **Browse Sheet** — opens via the toolbar **Browse** button. Persistent left rail switches between Library and Downloads in one click. Both share the same selection model:
+  - Single-click selects, double-click activates (drill folder / open file)
+  - Shift-click and Ctrl/Cmd-click extend, drag-select rubber-bands a rectangle (auto-scrolls near edges)
+  - **Ctrl/Cmd+A** selects all visible rows
+  - **F2** renames hovered row, **Del** deletes the selection
+  - **Library only:** **N** opens New folder, **Ctrl/Cmd+X** cuts, **Ctrl/Cmd+V** pastes (folders included, cycle protection, partial-success reporting via `POST /api/move/batch`). Downloads omits Cut/Paste/New folder by design — it's transient staging.
+  - Type-to-filter searches the current subtree recursively.
+  - Position (active root + current subfolder) persists across opens.
+  - Works in every deployment (host, devcontainer, Unraid/TrueNAS/Proxmox Docker) because it's an in-app component, not a subprocess into the host's file manager.
+- **Move to library** — every selected file in the work area carries a `Move to library` collapsible with a folder-tree picker rooted at `LIBRARY_PATH`. Drill into subfolders, create new ones inline, optionally apply the generated filename during the move.
+
+### Audio operations
+
+- **Rename + metadata embed** on `.mp3` / `.flac` / `.ogg` (formats with embeddable ID3 / FLAC / MP4 tags). Other formats convert first.
+- **Audio conversion** via `ffmpeg` to mp3 / flac / ogg with quality presets (low / standard / high / best / lossless). Batch mode for multiple files at once.
+- **Dual filename separators** — dash (filesystem-safe) or pipe (for metadata / descriptions).
+
+### Tag system
+
+- **Persistent SQLite dictionary** with canonical forms and optional aliases. The full vocabulary is injected into the LLM prompt so the screenshot workflow uses your tag forms instead of inventing its own.
+- **Suppressed terms** — dropped from output silently.
+- **Unrecognised tag chips** render with a warm-amber tint; right-click to add as a new canonical or as an alias of an existing entry without leaving the rename flow.
+- **Dictionary tester** — paste raw post text, preview how it'd be normalised against the current vocabulary; quick-add buttons for unrecognised tags. (Uses Ollama like workflow 3 — skip if you only use workflows 1 + 2.)
+- **JSON import / export** of the whole dictionary.
+
+### Extension
+
+Optional MV3 browser extension (in [`extension/`](extension/)) for Chromium and Firefox 121+. One click syncs your Patreon and Google session cookies to the backend so `patreon-dl` and the headless-Chromium Drive scrape can authenticate. Replaces the manual DevTools copy/paste — that's the extension's entire job.
+
+### Interface
+
 - **Light / dark theme** — follows OS preference on first visit, persists user choice afterwards.
-- **Browser extension** (optional, in [`extension/`](extension/)) — MV3 for Chromium and Firefox 121+. One click syncs your Patreon and Google session cookies to the backend so `patreon-dl` and the headless-Chromium Drive scrape can authenticate. Replaces the manual DevTools copy/paste — that's the extension's entire job.
-- **Dictionary import / export** as portable JSON.
 
 ## Project structure
 
@@ -95,12 +187,14 @@ For posts that can't be fetched via patreon-dl — a creator you don't subscribe
 ├── .github/workflows/      # CI: build_check.yml (lint + build + tests), release.yml
 ├── .claude/                # Project rules, skills, agents, hooks (see CLAUDE.md)
 ├── backend/
-│   ├── main.py             # FastAPI routes + Ollama integration
+│   ├── main.py             # FastAPI app + shared helpers (validators, env paths)
+│   ├── routes/             # one module per domain: system, extract, files,
+│   │                       #                       convert, settings, patreon, dictionary
 │   ├── database.py         # SQLite schema, defaults, helpers (no ORM)
 │   ├── patreon_fetch.py    # subprocess wrapper around patreon-dl
 │   ├── drive_fetch.py      # Playwright-driven Drive ingest
 │   ├── audio_utils.py      # shared URL-clean + filename-derive helpers
-│   ├── tests/              # pytest suite (pure helpers)
+│   ├── tests/              # pytest suite (pure helpers + Hypothesis properties)
 │   ├── pyproject.toml
 │   └── requirements.txt
 ├── frontend/
@@ -108,9 +202,10 @@ For posts that can't be fetched via patreon-dl — a creator you don't subscribe
 │   │   ├── components/     # PatreonPanel, ScreenshotPanel, FileBrowser, …
 │   │   ├── hooks/
 │   │   ├── lib/            # api.ts, parser.ts, types.ts, audio-formats.json
-│   │   └── lib/__tests__/  # vitest suite
+│   │   └── lib/__tests__/  # vitest suite (+ fast-check properties)
 │   └── vite.config.ts
 ├── extension/              # optional MV3 browser extension
+├── scripts/                # check_api_docs.py (CI + local drift guard)
 ├── data/                   # SQLite db lives here on the host (git-ignored)
 ├── .env.example
 ├── dev.sh / dev.bat        # start both servers in parallel
@@ -118,140 +213,60 @@ For posts that can't be fetched via patreon-dl — a creator you don't subscribe
 └── docker-compose.yml
 ```
 
-## Running in production
+## Running locally (devcontainer)
 
-### Prerequisite: Ollama (only if using Workflow 3)
+Day-to-day development happens **inside the devcontainer** (`.devcontainer/devcontainer.json`), which reads the same `.env` at the repo root that production reads via `docker-compose.dev.yml`. Setup mirrors the production Quickstart: `cp .env.example .env`, edit `LIBRARY_PATH` and `DOWNLOAD_PATH` (both required, distinct paths), optionally override `OLLAMA_BASE_URL` / `OLLAMA_MODEL` / `DRIVE_*`. No personal data ends up in tracked files.
 
-The screenshot → LLM workflow needs Ollama running on the host with the vision model pulled. Workflows 1 and 2 don't touch Ollama; skip this if you only use Patreon URLs and Drive downloads.
+> **Opening the devcontainer:** install the VS Code [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers), open this folder, run **"Dev Containers: Reopen in Container"** from the command palette. VS Code brings up the `dev` service from `docker-compose.dev.yml` (which builds from `.devcontainer/Dockerfile`) and drops you into a shell inside the container.
 
-```bash
-# Install Ollama from https://ollama.com, then:
-ollama pull qwen2.5vl:7b
-```
+The dev compose defaults `OLLAMA_BASE_URL` to `http://host.docker.internal:11434` — reaches Ollama on the developer's workstation via Docker Desktop's host loopback (Win/Mac built-in, Linux via `extra_hosts`). Override in `.env` if your Ollama lives elsewhere on the LAN.
 
-### 1. Create a `.env`
+Frontend (Vite, port **5173**) and backend (Uvicorn, port **8000**) run as separate processes; Vite proxies `/api` to the backend.
 
-`docker-compose.yml` reads **two required host paths** from a `.env` file in the project root: `LIBRARY_PATH` (your curated audio archive) and `DOWNLOAD_PATH` (ingest staging where patreon-dl, Drive, and external-audio downloads land). Without them the bind mounts can't resolve and `docker compose up` fails. Copy the template and edit:
+**Starting the dev servers — pick one:**
 
 ```bash
-cp .env.example .env
-# then edit LIBRARY_PATH (curated archive) and DOWNLOAD_PATH (ingest staging)
-```
-
-Recommended split:
-
-```
-LIBRARY_PATH=/home/you/Music/ASMR
-DOWNLOAD_PATH=/home/you/asmr-downloads
-```
-
-Both paths are **required** and must point at **different** directories (the backend errors on startup if either is unset or they're the same path). The template lists every supported variable with defaults; only `LIBRARY_PATH` and `DOWNLOAD_PATH` are required.
-
-**Upgrading from a single-`LIBRARY_PATH` setup**: point `DOWNLOAD_PATH` at your old `LIBRARY_PATH` location (so existing downloads keep working as Downloads-tab content) and set `LIBRARY_PATH` to a fresh curated archive. Nothing is moved automatically; the Move-to-library flow inside the app is how you file existing downloads into the new structure.
-
-### 2. Run
-
-**Option A — build locally:**
-
-```bash
-docker compose up --build
-```
-
-**Option B — pull the published GHCR image:**
-
-Releases are published to `ghcr.io/unseensnick/asmr-curator:latest` (and `:<version>`). To run that image instead of building, set the `image:` key in `docker-compose.yml`:
-
-```yaml
-services:
-    asmr-tool:
-        image: ghcr.io/unseensnick/asmr-curator:latest
-        # remove the `build:` block
-```
-
-> Releases prior to v2.0.4 were published under the old repo slug at `ghcr.io/unseensnick/asmr-filename-gen` — those tags stay reachable but receive no new builds.
-
-Then:
-
-```bash
-docker compose pull
-docker compose up
-```
-
-Open **http://localhost:8000**. The dictionary database is created and seeded automatically on first boot and lives in `./data/` on your host — it survives rebuilds and restarts.
-
-## Running in the devcontainer
-
-The devcontainer reads the same `.env` at the repo root that production reads, via `docker-compose.dev.yml`. Setup is the same as production: `cp .env.example .env`, edit `LIBRARY_PATH` and `DOWNLOAD_PATH` (both required, distinct paths), optionally override `OLLAMA_BASE_URL` / `OLLAMA_MODEL` / `DRIVE_*`. No personal data ever ends up in tracked files.
-
-> **Opening the devcontainer**: install the VS Code [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers), then open this folder and run **"Dev Containers: Reopen in Container"** from the command palette (or click the floating notification VS Code shows on first open). VS Code brings up the `dev` service from `docker-compose.dev.yml` (which builds from `.devcontainer/Dockerfile`) and drops you into a shell inside the container. The commands below all assume you're inside it.
-
-The dev compose defaults `OLLAMA_BASE_URL` to `http://host.docker.internal:11434` — that reaches Ollama running on the developer's workstation via Docker Desktop's host loopback (Win/Mac built-in, Linux via `extra_hosts`). If your Ollama runs on a different LAN host, override `OLLAMA_BASE_URL` in `.env`.
-
-In dev mode the frontend (Vite, port **5173**) and backend (Uvicorn, port **8000**) run as separate processes. Vite proxies all `/api` requests to the backend automatically.
-
-### Option 1 — dev script (recommended)
-
-**Linux / Mac:**
-
-```bash
+# Linux / Mac (or inside the devcontainer):
 bash dev.sh
-```
 
-**Windows:**
-
-```bat
+# Windows (host-side, outside the devcontainer):
 dev.bat
 ```
 
-Both scripts start the Vite dev server and the FastAPI backend in parallel. `Ctrl+C` stops both.
+Both start Vite + Uvicorn in parallel. `Ctrl+C` stops both.
 
-### Option 2 — two terminals
-
-**Terminal 1 — frontend:**
-
-```bash
-cd frontend
-npm run dev
-```
-
-**Terminal 2 — backend:**
+<details>
+<summary><b>Or run the two processes in separate terminals</b></summary>
 
 ```bash
+# Terminal 1 — frontend:
+cd frontend && npm run dev
+
+# Terminal 2 — backend:
 uvicorn backend.main:app --reload
 ```
 
 Open **http://localhost:5173**. Changes to `frontend/src/` hot-reload instantly; changes to `backend/*.py` reload Uvicorn in ~1s.
+</details>
 
 ### Tests
 
 Both test suites run on every push via `.github/workflows/build_check.yml`. To run locally:
 
 ```bash
-cd frontend && npm test              # Vitest — parser.ts (the LLM-response parser)
+cd frontend && npm test              # Vitest — parser, selection helpers, semver
 pytest -c backend/pyproject.toml     # Pytest — backend pure-Python helpers
 ```
 
-Test scope is intentionally limited to pure functions — anything that needs a live Patreon API, Playwright browser, Ollama, or the LIBRARY_PATH bind-mount is out of scope. Adding a new pure helper? Drop a test under `backend/tests/test_*.py` or `frontend/src/lib/__tests__/`; the existing files are short and pattern-match.
+Test scope is intentionally limited to pure functions. Anything that needs a live Patreon API, Playwright browser, Ollama, or the `LIBRARY_PATH` bind-mount is out of scope. New pure helper? Drop a test under `backend/tests/test_*.py` or `frontend/src/lib/__tests__/`; the existing files are short and pattern-match.
 
-## Building the frontend
-
-The production Docker image runs only Uvicorn — it serves the pre-built Vite output from `frontend/dist/`. To build:
+### Building the production frontend
 
 ```bash
 cd frontend && npm run build
 ```
 
-The `docker-compose.yml` build step handles this automatically.
-
-## Contributing
-
-Contributions welcome. The full conventions live in [`CLAUDE.md`](CLAUDE.md) and the path-scoped rules under [`.claude/rules/`](.claude/rules/); the short version:
-
-- **Commits** follow conventional-commit format (`feat:` / `fix:` / `docs:` / `chore:` / `refactor:` / `build:`). No `Co-Authored-By` watermarks.
-- **CHANGELOG** — every code change adds a bullet under `## [Unreleased]` in `CHANGELOG.md` (categories: Additions, Changes, Fixes, Other). Lead with the user-visible effect; keep each bullet to 1–3 sentences.
-- **Tests** — see the Tests section above. Pure-helper coverage is expected for new helpers; integration-test infrastructure isn't part of the project.
-- **Line endings** — CRLF repo-wide (`.gitattributes`). LF exceptions for `dev.sh` and `.claude/hooks/*.sh` (Linux exec).
-- **CI gate** — `build_check.yml` runs lint + build + tests on every push. Green PRs only.
+The production Docker image runs only Uvicorn — it serves the pre-built Vite output from `frontend/dist/`. The `docker-compose.yml` build step handles this automatically.
 
 ## API Reference
 
@@ -271,16 +286,17 @@ Interactive docs at **http://localhost:8000/docs** (Swagger UI, auto-generated).
 | GET    | `/api/settings/patreon-cookie`  | Cookie status — `{ set: bool, length: number }`                                                       |
 | PUT    | `/api/settings/patreon-cookie`  | Save the Patreon cookie. Accepts `application/json` (`{"cookie":"..."}`) or raw `text/plain` body     |
 | POST   | `/api/patreon/fetch`            | Fetch a Patreon post or creator URL via `patreon-dl`. Request: `{ "url": "...", "metadata_only"?: false, "content_types"?: ["audio"], "published_after"?: "YYYY-MM-DD", "published_before"?: "YYYY-MM-DD", "dry_run"?: false }`. Response: `{ output_dir, count, metadata_only, dry_run, posts: [{post_id, title, tags, artist, post_dir, audio_path, external_links}] }`. `external_links` lists third-party file-host URLs (Drive / Mega / MediaFire / Dropbox) found in the post body. Audio files land at `DOWNLOAD_PATH/<creator>/<post_id> - <post_title>/<original_filename>` (flattened out of patreon-dl's nesting); patreon-dl's own tree + status DB stay isolated under `DOWNLOAD_PATH/.patreon-dl/`. Legacy `<post_id>/<file>` paths from before the layout change are still resolved by the cached-sidecar fast path. `content_types` defaults to `["audio"]`; allowed: `audio` / `video` / `image` / `attachment` / `external`. Both single-post and creator URLs in `metadata_only` mode short-circuit through a cached-sidecar fast path (creator matching uses the campaign vanity from the sidecar with a slugified-artist fallback) |
-| POST   | `/api/patreon/ingest-external-audio` | Download a signed third-party audio URL into `DOWNLOAD_PATH/<creator>/<post_id> - <title>/` when `artist` or `title` is supplied (legacy `<post_id>/` otherwise). Request: `{ "post_id": "12345", "source_url": "https://...", "filename"?: "optional.mp3", "title"?, "artist"?, "album"?, "album_artist"? }`. Streams via `httpx` to a `.part` temp file, renames on success |
+| POST   | `/api/patreon/ingest-external-audio` | Download a signed third-party audio URL into `DOWNLOAD_PATH/<creator>/<post_id> - <title>/` when `artist` or `title` is supplied (legacy `<post_id>/` otherwise). Request: `{ "post_id": "12345", "source_url": "https://...", "filename"?: "optional.mp3", "title"?, "artist"?, "album"?, "album_artist"? }`. Streams via `httpx` to a `.part` temp file, renames on success. Host resolution checked against private/loopback/link-local ranges to block SSRF |
 | POST   | `/api/patreon/ingest-drive-link` | **Server-side Drive scrape.** Returns a `text/event-stream` with progress events (`launching_browser` → `loading_page` → `waiting_for_player` → `captured` → `downloading` → `done`/`error`; contested requests get a `queued` stage with `ahead` count). Headless Chromium loads the Drive viewer with your synced Google cookie, captures the first `videoplayback?…` URL on a recognised Drive host, prefers `itag=140` (m4a audio) over `itag=134` (mp4 video) with a 5 s grace window, strips `ump`/`range`/`srfvp`, streams the body to disk in bounded-memory chunks. Sign-in redirects fail fast with `code="auth_expired"`. Request: `{ "post_id": "12345", "drive_url": "https://drive.google.com/file/d/<ID>/view", "filename"?: "optional.m4a" }`. Response: `{ audio_path, size, source_url, file_id }` |
 | GET    | `/api/settings/google-cookie`   | Status — `{ set: bool, count: number, length: number }` (never the values) |
 | PUT    | `/api/settings/google-cookie`   | Store a Google session cookie array. Body: `{ "cookies": [...] }` where each entry is a `chrome.cookies.getAll`-style object. Empty array clears |
 
-#### Setting the Patreon cookie
+<details>
+<summary><b>Setting the Patreon cookie</b> — three ways</summary>
 
 The Patreon URL panel and the `/api/patreon/fetch` endpoint both require a session cookie since `patreon-dl` is a cookie-driven scraper (no Patreon API key exists for this use case). Three ways to set it:
 
-- **Browser extension (easiest)** — install the MV3 extension from `extension/`, log into patreon.com (and google.com for Drive) in the same browser, and click the floating "Sync cookies" pill (or use the toolbar popup). See [`extension/README.md`](extension/README.md).
+- **Browser extension (easiest)** — install the MV3 extension from `extension/`, log into patreon.com (and google.com for Drive) in the same browser, click the floating "Sync cookies" pill (or use the toolbar popup). See [`extension/README.md`](extension/README.md).
 - **In the UI** — open the Settings dropdown → **Manage cookies** → paste the cookie value into the Patreon textarea → **Save cookie**. The Cookies modal includes a step-by-step DevTools walkthrough.
 - **Via curl** —
 
@@ -292,6 +308,7 @@ The Patreon URL panel and the `/api/patreon/fetch` endpoint both require a sessi
   ```
 
 The cookie is stored locally in `data/dictionary.db` and never sent anywhere except to Patreon itself by `patreon-dl`. It expires periodically — refresh when fetches start failing.
+</details>
 
 ### Dictionary
 
@@ -352,7 +369,7 @@ The full list is the single source of truth at [`frontend/src/lib/audio-formats.
 
 ## Configuration
 
-All runtime configuration is via environment variables. Production reads them from `.env` (gitignored) at the project root; docker-compose passes them through to the container. The devcontainer reads the same `.env` via `docker-compose.dev.yml` — see "Running in the devcontainer".
+All runtime configuration is via environment variables. Production reads them from `.env` (gitignored) at the project root; docker-compose passes them through to the container. The devcontainer reads the same `.env` via `docker-compose.dev.yml`.
 
 | Variable | Default | Required? | Purpose |
 | --- | --- | --- | --- |
@@ -368,6 +385,34 @@ All runtime configuration is via environment variables. Production reads them fr
 | `PATREON_DL_BIN` | `patreon-dl` | No | patreon-dl binary name / path. Almost never needs changing (installed globally in the Docker image). |
 
 To change any non-required setting in production, uncomment and edit the matching line in `.env`. The `${VAR:-default}` pattern in `docker-compose.yml` keeps the defaults applied when `.env` has no entry.
+
+### Pre-built image vs local build
+
+The Quickstart at the top uses `image: ghcr.io/unseensnick/asmr-curator:latest` to pull a pre-built image. If you'd rather build locally:
+
+```yaml
+services:
+  asmr-tool:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # ... rest as in Quickstart
+```
+
+> Releases prior to v2.0.4 were published under the old repo slug at `ghcr.io/unseensnick/asmr-filename-gen` — those tags stay reachable but receive no new builds.
+
+### Prerequisite: Ollama (only if using Workflow 3)
+
+The screenshot → LLM workflow needs Ollama running on the host with the vision model pulled. Workflows 1 and 2 don't touch Ollama; skip this if you only use Patreon URLs and Drive downloads.
+
+```bash
+# Install Ollama from https://ollama.com, then:
+ollama pull qwen2.5vl:7b
+```
+
+### Upgrading from a single-`LIBRARY_PATH` setup
+
+Versions before v2.0.1 used a single `LIBRARY_PATH`. Now both paths are required and must be distinct. To upgrade: point `DOWNLOAD_PATH` at your old `LIBRARY_PATH` location (so existing downloads keep working as Downloads-tab content) and set `LIBRARY_PATH` to a fresh curated archive. Nothing is moved automatically; the Move-to-library flow inside the app is how you file existing downloads into the new structure.
 
 ## Backup & Restore
 
@@ -387,6 +432,16 @@ The **File to Rename** section lets you:
 4. Preview the new filename with byte-length indicator (255-byte limit enforced)
 5. Click **Rename File** to apply the change on the server
 
+## Contributing
+
+Contributions welcome. The full conventions live in [`CLAUDE.md`](CLAUDE.md) and the path-scoped rules under [`.claude/rules/`](.claude/rules/); the short version:
+
+- **Commits** follow conventional-commit format (`feat:` / `fix:` / `docs:` / `chore:` / `refactor:` / `build:`). No `Co-Authored-By` watermarks.
+- **CHANGELOG** — every code change adds a bullet under `## [Unreleased]` in `CHANGELOG.md` (categories: Additions, Changes, Fixes, Other). Lead with the user-visible effect; keep each bullet to 1–3 sentences.
+- **Tests** — pure-helper coverage is expected for new helpers; integration-test infrastructure isn't part of the project.
+- **Line endings** — CRLF repo-wide (`.gitattributes`). LF exceptions for `dev.sh` and `.claude/hooks/*.sh` (Linux exec).
+- **CI gate** — `build_check.yml` runs lint + build + tests + dep audits + API-docs drift check + secret scan on every push. Green PRs only.
+
 ## License and responsible use
 
 ASMR Curator is released under the [MIT License](LICENSE). The notes below are plain-English context for the legal text; they aren't additional terms.
@@ -397,9 +452,13 @@ ASMR Curator is released under the [MIT License](LICENSE). The notes below are p
 
 **Don't redistribute copyrighted content.** Personal-use downloads of content you've paid for are generally fair use; sharing those files publicly is infringement. The tool helps you organise *your own* library; what you do with the files after that is on you.
 
-**No warranty.** This is a homelab tool maintained by one person in their spare time. It may break. It may have bugs. It will not page anyone if it does. Run it because it's useful to you, not because anyone promises it will keep working. The full legal disclaimer from the MIT license:
+**No warranty.** This is a homelab tool maintained by one person in their spare time. It may break. It may have bugs. It will not page anyone if it does. Run it because it's useful to you, not because anyone promises it will keep working.
+
+<details>
+<summary>Full MIT no-warranty clause</summary>
 
 > THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+</details>
 
 ## Third-party licenses
 
