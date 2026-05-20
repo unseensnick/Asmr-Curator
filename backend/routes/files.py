@@ -225,18 +225,30 @@ def debug_files(root: str = "library"):
 # different volumes).
 
 
-def _validate_folder_name(name: str) -> str:
-    """Reject names that would escape the validator or create dotfiles the
-    FileBrowser hides."""
+def _validate_name(name: str, *, max_bytes: int | None = None) -> str:
+    """Reject names that would escape path validation or create dotfiles the
+    FileBrowser hides. Shared between mkdir + the rename endpoints.
+
+    Strips whitespace and rejects: empty, contains `/` or `\\`, equals
+    `.` or `..`, starts with `.`. When `max_bytes` is set, also rejects
+    names whose UTF-8 byte length exceeds the cap (Linux filesystem limit
+    is 255; callers pass that when relevant).
+    """
     name = name.strip()
     if not name:
-        raise HTTPException(400, "Folder name cannot be empty.")
+        raise HTTPException(400, "Name cannot be empty.")
     if "/" in name or "\\" in name:
         raise HTTPException(400, "Names can't contain `/` or `\\`.")
     if name in (".", ".."):
-        raise HTTPException(400, "Invalid folder name.")
+        raise HTTPException(400, "Invalid name.")
     if name.startswith("."):
-        raise HTTPException(400, "Folder names can't start with a dot.")
+        raise HTTPException(400, "Names can't start with a dot.")
+    if max_bytes is not None:
+        name_bytes = len(name.encode("utf-8"))
+        if name_bytes > max_bytes:
+            raise HTTPException(
+                422, f"Name too long: {name_bytes} bytes (max {max_bytes})."
+            )
     return name
 
 
@@ -250,7 +262,7 @@ def make_directory(body: MkdirIn):
     """Create a single subfolder under `LIBRARY_PATH/<parent>/`. Scoped to
     LIBRARY_PATH only — DOWNLOAD_PATH is transient staging the user doesn't
     curate. 409 on collision matches the rename + Patreon-fetch idiom."""
-    subdir = _validate_folder_name(body.subdir)
+    subdir = _validate_name(body.subdir)
     parent_rel = (body.parent or "").strip()
     target_rel = f"{parent_rel}/{subdir}" if parent_rel else subdir
     target = validate_under_library(target_rel)
@@ -594,20 +606,7 @@ def rename_path(body: RenamePathIn):
     if not src.exists():
         raise HTTPException(404, "Path does not exist.")
 
-    new_name = body.new_name.strip()
-    if not new_name or "/" in new_name or "\\" in new_name:
-        raise HTTPException(400, "Names can't contain `/` or `\\`.")
-    if new_name in (".", ".."):
-        raise HTTPException(400, "Invalid name.")
-    if new_name.startswith("."):
-        raise HTTPException(400, "Names can't start with a dot.")
-
-    name_bytes = len(new_name.encode("utf-8"))
-    if name_bytes > 255:
-        raise HTTPException(
-            422,
-            f"Name too long: {name_bytes} bytes (max 255).",
-        )
+    new_name = _validate_name(body.new_name, max_bytes=255)
 
     if new_name == src.name:
         # No-op rename — short-circuit so we don't bounce a 409 off
