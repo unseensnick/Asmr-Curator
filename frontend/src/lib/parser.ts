@@ -90,14 +90,28 @@ export function parseLlmJson(raw_text: string): LlmResponse {
  * Does NOT normalise against the dictionary — callers handle that.
  */
 export function parseTitleLine(raw: string): { title: string; embeddedTags: string[] } {
+    // Emoji handling: use Unicode property escapes instead of hand-picked
+    // ranges. The previous logic ([\u{1F000}-\u{1FFFF}] + [\u{2600}-\u{27BF}])
+    // missed Misc Symbols & Arrows (U+2B00 to U+2BFF \u2014 stars and shapes),
+    // Misc Technical (U+2300 to U+23FF \u2014 clocks and hourglasses), and
+    // emoji-shaped punctuation in lower blocks.
+    //
+    //   - \p{Extended_Pictographic} is the spec-canonical set for
+    //     emoji-shaped characters; the standard "is this an emoji" check.
+    //   - \p{Regional_Indicator} covers the paired regional-indicator
+    //     points that compose country flags.
+    //   - Variation selectors (FE00-FE0F) and ZWJ (200D) are joiner code
+    //     points used inside multi-codepoint emoji sequences.
+    //   - Tag characters (E0020-E007F) compose subdivision flags. Strip
+    //     them so no orphan joiners survive a partial sequence.
     const clean = raw
         .replace(/[\u2018\u2019]/g, "'")
         .replace(/[\u201c\u201d]/g, '"')
         .replace(/\u2026/g, "...")
-        .replace(/[\u{1F000}-\u{1FFFF}]/gu, "")
-        .replace(/[\u{2600}-\u{27BF}]/gu, "")
-        .replace(/\uFE0F/g, "")
+        .replace(/[\p{Extended_Pictographic}\p{Regional_Indicator}]/gu, "")
+        .replace(/[\uFE00-\uFE0F]/g, "")
         .replace(/\u200D/g, "")
+        .replace(/[\u{E0020}-\u{E007F}]/gu, "")
         .replace(/\s{2,}/g, " ")
         .trim();
 
