@@ -105,12 +105,18 @@ jobs:
     # Any step that imports backend.main hits these — pytest, scripts/
     # check_api_docs.py, and any future tooling that walks the FastAPI app.
     # Hoisting to the job env keeps every step covered without per-step
-    # duplication. The conftest fixture's os.environ.setdefault is a no-op
-    # when these are already set, so local tests behave identically.
+    # duplication.
+    #
+    # Hardcoded /tmp paths instead of ${{ runner.temp }}: the runner context
+    # only populates at step level, so a job-level env that references it
+    # parses as empty and the workflow fails to start. Hosted runners give
+    # us a writable /tmp; using fixed paths there is the cleanest answer.
+    # The conftest fixture's os.environ.setdefault is a no-op when these
+    # are already set, so local tests behave identically.
     env:
-      DOWNLOAD_PATH: ${{ runner.temp }}/downloads
-      LIBRARY_PATH: ${{ runner.temp }}/library
-      DB_PATH: ${{ runner.temp }}/dictionary.db
+      DOWNLOAD_PATH: /tmp/curator-ci-downloads
+      LIBRARY_PATH: /tmp/curator-ci-library
+      DB_PATH: /tmp/curator-ci-dictionary.db
 
     steps:
       - name: Clone repo
