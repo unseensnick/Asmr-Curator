@@ -7,6 +7,59 @@ paths:
 
 # Architecture Reference
 
+## System overview
+
+```mermaid
+flowchart LR
+    subgraph Clients
+        UI["React SPA<br/>(frontend/src/)"]
+        EXT["Chrome extension<br/>(extension/)"]
+    end
+
+    subgraph FastAPI["FastAPI · backend/"]
+        MAIN["main.py<br/>app + shared helpers"]
+        ROUTES["routes/<br/>system · extract · files ·<br/>convert · dictionary ·<br/>settings · patreon"]
+        DBMOD["database.py"]
+        PFETCH["patreon_fetch.py<br/>(subprocess)"]
+        DFETCH["drive_fetch.py<br/>(Playwright)"]
+        AUDIO["audio_utils.py"]
+    end
+
+    subgraph External
+        OLLAMA["Ollama<br/>vision LLM"]
+        PATREON["Patreon"]
+        DRIVE["Google Drive"]
+        FFMPEG["ffmpeg subprocess"]
+    end
+
+    subgraph Storage["Bind-mounted storage"]
+        SQLITE[("SQLite<br/>DB_PATH")]
+        LIB[("LIBRARY_PATH<br/>curated archive")]
+        DL[("DOWNLOAD_PATH<br/>ingest staging")]
+    end
+
+    UI -->|/api/*| MAIN
+    EXT -->|cookie sync| MAIN
+    MAIN --- ROUTES
+
+    ROUTES --> OLLAMA
+    ROUTES --> DBMOD
+    ROUTES --> FFMPEG
+    ROUTES --> PFETCH
+    ROUTES --> DFETCH
+    PFETCH --> AUDIO
+    DFETCH --> AUDIO
+
+    PFETCH --> PATREON
+    DFETCH --> DRIVE
+
+    DBMOD --> SQLITE
+    PFETCH --> DL
+    DFETCH --> DL
+    ROUTES --> LIB
+    ROUTES --> DL
+```
+
 ## Request flow
 
 1. User pastes/uploads a Patreon screenshot in the React UI.
