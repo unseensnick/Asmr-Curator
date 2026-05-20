@@ -1,10 +1,10 @@
 import {
+    type MouseEvent as ReactMouseEvent,
+    type MutableRefObject,
     useCallback,
     useEffect,
     useRef,
     useState,
-    type MouseEvent as ReactMouseEvent,
-    type MutableRefObject,
 } from "react";
 
 import { selectionFromDragHits } from "@/lib/explorerSelection";

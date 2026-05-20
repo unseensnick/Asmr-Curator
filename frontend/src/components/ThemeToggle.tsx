@@ -1,5 +1,6 @@
-import { Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Moon, Sun } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { applyTheme, getInitialTheme, setStoredTheme, type ThemeMode } from "@/lib/theme";
 

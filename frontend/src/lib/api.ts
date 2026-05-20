@@ -117,7 +117,7 @@ export function buildQueryString(
     return s ? `?${s}` : "";
 }
 
-export { apiGet, apiPost, apiDelete, apiPut, apiPatch };
+export { apiDelete, apiGet, apiPatch, apiPost, apiPut };
 
 // ── Patreon helpers ──────────────────────────────────────────────────────────
 // JSON.stringify handles the inner `"` chars in `g_state` etc. correctly, so

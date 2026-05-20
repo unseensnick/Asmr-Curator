@@ -1,5 +1,6 @@
-import { clsx, type ClassValue } from "clsx";
+import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+
 import type { AppDict } from "./types";
 
 export function cn(...inputs: ClassValue[]) {

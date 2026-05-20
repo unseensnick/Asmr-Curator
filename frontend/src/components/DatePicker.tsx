@@ -1,6 +1,7 @@
+import { useEffect, useMemo, useRef } from "react";
 import { format, parseISO } from "date-fns";
 import { Calendar as CalendarIcon, X } from "lucide-react";
-import { useMemo } from "react";
+
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -73,14 +74,46 @@ export default function DatePicker({
                 </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                    mode="single"
+                <CalendarWithInitialFocus
                     selected={selected}
                     onSelect={(d) => onChange(d ? format(d, "yyyy-MM-dd") : "")}
-                    autoFocus
                 />
             </PopoverContent>
         </Popover>
+    );
+}
+
+/**
+ * Mounts the Calendar inside a wrapper that, after mount, programmatically
+ * focuses the first focusable day button. This replaces the now-banned
+ * `<Calendar autoFocus />` JSX prop (jsx-a11y/no-autofocus) while preserving
+ * the same UX: opening the date popover lands keyboard focus inside the grid
+ * so the user can arrow-navigate immediately.
+ */
+function CalendarWithInitialFocus({
+    selected,
+    onSelect,
+}: {
+    selected: Date | undefined;
+    onSelect: (date: Date | undefined) => void;
+}) {
+    const wrapperRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const root = wrapperRef.current;
+        if (!root) return;
+        const target =
+            root.querySelector<HTMLButtonElement>("button[data-selected='true']") ??
+            root.querySelector<HTMLButtonElement>("button[data-today='true']") ??
+            root.querySelector<HTMLButtonElement>(".rdp-day:not([disabled])") ??
+            root.querySelector<HTMLButtonElement>("button:not([disabled])");
+        target?.focus();
+    }, []);
+
+    return (
+        <div ref={wrapperRef}>
+            <Calendar mode="single" selected={selected} onSelect={onSelect} />
+        </div>
     );
 }
 

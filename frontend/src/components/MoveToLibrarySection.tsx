@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
     Check,
     ChevronDown,
@@ -8,7 +9,6 @@ import {
     Send,
     X,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -75,6 +75,14 @@ export default function MoveToLibrarySection({
     const [newFolderOpen, setNewFolderOpen] = useState(false);
     const [newFolderName, setNewFolderName] = useState("");
     const [newFolderBusy, setNewFolderBusy] = useState(false);
+    const newFolderInputRef = useRef<HTMLInputElement | null>(null);
+
+    // Programmatic focus on the inline new-folder input when its row
+    // appears. Replaces `<Input autoFocus />` (jsx-a11y/no-autofocus)
+    // while preserving the type-immediately UX.
+    useEffect(() => {
+        if (newFolderOpen) newFolderInputRef.current?.focus();
+    }, [newFolderOpen]);
 
     // useCallback so the effect's deps can include loadSubdir cleanly
     // (without it, the function ref churns every render and the
@@ -253,7 +261,7 @@ export default function MoveToLibrarySection({
                                 className="text-muted-foreground shrink-0"
                             />
                             <Input
-                                autoFocus
+                                ref={newFolderInputRef}
                                 value={newFolderName}
                                 onChange={(e) => setNewFolderName(e.target.value)}
                                 onKeyDown={(e) => {
