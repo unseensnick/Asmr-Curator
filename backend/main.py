@@ -1,3 +1,14 @@
+"""FastAPI app construction + shared backend helpers.
+
+This module assembles the app (lifespan, SPA fallback, router registration)
+and exposes the dependencies every route module pulls in: path validators
+(`validate_under_*`), env-resolved roots (`LIBRARY_PATH`, `DOWNLOAD_PATH`),
+metadata-writer (`_write_metadata`), audio-format tables, subprocess-timeout
+constants, and the small validation helpers (`require_non_empty`,
+`require_file`, `reject_if_exists`, `root_for`). Route handlers themselves
+live under `backend/routes/`.
+"""
+
 import json
 import logging
 import os
