@@ -415,6 +415,14 @@ function VocabEntryEditor({ entry, vocabulary, onSave, onCancel }: VocabEntryEdi
     const [canonical, setCanonical] = useState(entry.canonical);
     const [aliases, setAliases] = useState<string[]>(entry.aliases);
     const [newAlias, setNewAlias] = useState("");
+    const canonicalInputRef = useRef<HTMLInputElement | null>(null);
+
+    // Focus the canonical input when the editor mounts. Replaces the
+    // jsx-a11y-banned `autoFocus` JSX prop; preserves the
+    // open-row-and-type-immediately UX.
+    useEffect(() => {
+        canonicalInputRef.current?.focus();
+    }, []);
 
     // Live conflict surface: as the user types an alias that already exists
     // (as another entry's canonical OR as another entry's alias), flag which
@@ -456,7 +464,7 @@ function VocabEntryEditor({ entry, vocabulary, onSave, onCancel }: VocabEntryEdi
             {/* Canonical input + save/cancel */}
             <div className="flex gap-2 items-center">
                 <Input
-                    autoFocus
+                    ref={canonicalInputRef}
                     value={canonical}
                     onChange={(e) => setCanonical(e.target.value)}
                     onKeyDown={(e) => {

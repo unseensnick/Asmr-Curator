@@ -97,10 +97,10 @@ function ContextMenuLabel({
 
 export {
     ContextMenu,
-    ContextMenuTrigger,
-    ContextMenuPortal,
     ContextMenuContent,
     ContextMenuItem,
-    ContextMenuSeparator,
     ContextMenuLabel,
+    ContextMenuPortal,
+    ContextMenuSeparator,
+    ContextMenuTrigger,
 };

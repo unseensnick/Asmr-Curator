@@ -1,4 +1,15 @@
 import {
+    type ComponentType,
+    memo,
+    type MouseEvent as ReactMouseEvent,
+    type ReactNode,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
+import {
     BookMarked,
     Check,
     ChevronRight,
@@ -16,17 +27,6 @@ import {
     Trash2,
     X,
 } from "lucide-react";
-import {
-    memo,
-    useCallback,
-    useEffect,
-    useMemo,
-    useRef,
-    useState,
-    type ComponentType,
-    type MouseEvent as ReactMouseEvent,
-    type ReactNode,
-} from "react";
 
 import {
     AlertDialog,
@@ -49,7 +49,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { useDragSelect } from "@/hooks/useDragSelect";
-import { API, apiGet, apiPost, buildQueryString, moveBatchStream, type FileRoot } from "@/lib/api";
+import { API, apiGet, apiPost, buildQueryString, type FileRoot, moveBatchStream } from "@/lib/api";
 import { METADATA_COMPATIBLE_EXTS, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
 import { selectAll, selectionFromClick } from "@/lib/explorerSelection";
 import type { FileEntry, ListedDirResponse } from "@/lib/types";
@@ -229,6 +229,7 @@ export default function LibraryExplorerSheet({
     const renamePathRef = useRef<string | null>(null);
     const menuTargetRef = useRef<Entry | null>(null);
     const newFolderOpenRef = useRef(false);
+    const newFolderInputRef = useRef<HTMLInputElement | null>(null);
     const rootRef = useRef<FileRoot>("library");
     const selectedPathsRef = useRef<Set<string>>(new Set());
     const anchorPathRef = useRef<string | null>(null);
@@ -243,6 +244,11 @@ export default function LibraryExplorerSheet({
     }, [menuTarget]);
     useEffect(() => {
         newFolderOpenRef.current = newFolderOpen;
+        // Auto-focus the inline input when the new-folder row opens.
+        // Replaces `<Input autoFocus />` (jsx-a11y/no-autofocus); the
+        // behaviour — type immediately after clicking "New folder" — is
+        // preserved.
+        if (newFolderOpen) newFolderInputRef.current?.focus();
     }, [newFolderOpen]);
     useEffect(() => {
         rootRef.current = root;
@@ -297,7 +303,11 @@ export default function LibraryExplorerSheet({
         setMenuTarget(list.find((en) => en.path === path) ?? null);
     }, []);
 
-    const handleBodyMouseOver = useCallback((e: ReactMouseEvent) => {
+    // Resolves the "hovered/focused row" for keyboard + pointer users. The
+    // body div binds this to both onMouseOver (pointer) and onFocus
+    // (keyboard) so Tab navigation across rows tracks the same target the
+    // mouse would.
+    const handleBodyMouseOver = useCallback((e: { target: EventTarget | null }) => {
         const row = (e.target as HTMLElement | null)?.closest?.("[data-entry-path]");
         if (!row) {
             hoverRef.current = null;
@@ -1141,6 +1151,8 @@ export default function LibraryExplorerSheet({
                                     onContextMenu={resolveMenuTarget}
                                     onMouseOver={handleBodyMouseOver}
                                     onMouseLeave={handleBodyMouseLeave}
+                                    onFocus={handleBodyMouseOver}
+                                    onBlur={handleBodyMouseLeave}
                                 >
                                     {/* Action row: filter input + New folder + Refresh. Stays
                                      *  one line at every width thanks to flex-1 on the filter. */}
@@ -1321,7 +1333,7 @@ export default function LibraryExplorerSheet({
                                                 className="text-muted-foreground shrink-0"
                                             />
                                             <Input
-                                                autoFocus
+                                                ref={newFolderInputRef}
                                                 value={newFolderName}
                                                 onChange={(e) => setNewFolderName(e.target.value)}
                                                 onKeyDown={(e) => {
@@ -1396,6 +1408,7 @@ export default function LibraryExplorerSheet({
                                         className="flex-1 min-h-0 overflow-y-auto relative"
                                         data-explorer-list
                                         role="listbox"
+                                        tabIndex={0}
                                         aria-multiselectable={true}
                                         aria-busy={isSearching ? searchBusy : loading}
                                         aria-label={`${rootLabel(root)} contents`}
@@ -1839,6 +1852,7 @@ function EntryRow({
             <div
                 className={baseClass + " bg-accent/40"}
                 data-entry-path={entry.path}
+                role="presentation"
                 onClick={(e) => e.stopPropagation()}
             >
                 <EntryIcon type={entry.type} ext={ext} needsConversion={!!entry.needs_conversion} />

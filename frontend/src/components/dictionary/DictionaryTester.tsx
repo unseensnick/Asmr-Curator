@@ -1,5 +1,5 @@
-import { ChevronDown, FlaskConical, Info, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { ChevronDown, FlaskConical, Info, Loader2 } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";

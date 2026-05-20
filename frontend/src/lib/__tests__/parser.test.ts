@@ -6,6 +6,7 @@
 // the most-critical client-side logic in the project.
 
 import { describe, expect, it } from "vitest";
+
 import { parseLlmJson, parseTitleLine } from "../parser";
 
 // ── parseLlmJson ─────────────────────────────────────────────────────────────

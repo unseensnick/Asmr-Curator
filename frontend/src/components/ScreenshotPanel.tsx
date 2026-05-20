@@ -303,12 +303,18 @@ interface PreviewProps {
 function Preview({ previewUrl, onOpenLightbox, onReplace, onRemove }: PreviewProps) {
     return (
         <div className="flex-1 min-h-44 relative rounded-lg overflow-hidden bg-muted/40 border border-border">
-            <img
-                src={previewUrl}
-                alt="Screenshot preview"
-                className="absolute inset-0 w-full h-full object-contain object-top cursor-zoom-in hover:opacity-90 transition-opacity"
+            <button
+                type="button"
                 onClick={onOpenLightbox}
-            />
+                aria-label="Open screenshot in lightbox"
+                className="absolute inset-0 w-full h-full cursor-zoom-in hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+            >
+                <img
+                    src={previewUrl}
+                    alt="Screenshot preview"
+                    className="w-full h-full object-contain object-top"
+                />
+            </button>
             <div className="absolute top-2 right-2 flex gap-1.5 z-10">
                 <button
                     type="button"
@@ -399,22 +405,39 @@ interface LightboxProps {
 }
 
 function Lightbox({ previewUrl, onClose }: LightboxProps) {
+    // Window-level Escape handler so the lightbox dismisses on keyboard
+    // even when initial focus hasn't moved into the close button yet.
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") onClose();
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [onClose]);
+
     return (
         <div
             role="dialog"
             aria-label="Screenshot preview"
             aria-modal="true"
-            className="fixed inset-0 z-50 bg-background/90 backdrop-blur-md flex items-center justify-center p-6 cursor-zoom-out animate-in fade-in duration-150"
-            onClick={onClose}
+            className="fixed inset-0 z-50 bg-background/90 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in duration-150"
         >
-            <div
-                className="relative max-w-205 w-full cursor-default animate-in zoom-in-95 duration-150"
-                onClick={(e) => e.stopPropagation()}
-            >
+            {/* Backdrop click-target: a sibling button covers the full
+             *  viewport so click-to-dismiss has interactive semantics
+             *  (button + Enter/Space), while the dialog itself stays
+             *  semantically a dialog without interaction handlers. */}
+            <button
+                type="button"
+                onClick={onClose}
+                tabIndex={-1}
+                aria-label="Close preview"
+                className="absolute inset-0 w-full h-full cursor-zoom-out focus-visible:outline-none"
+            />
+            <div className="relative max-w-205 w-full cursor-default animate-in zoom-in-95 duration-150">
                 <button
                     type="button"
                     onClick={onClose}
-                    className="absolute -top-3.5 -right-3.5 size-8 rounded-full bg-card border border-border text-muted-foreground flex items-center justify-center hover:text-foreground hover:border-muted-foreground/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                    className="absolute -top-3.5 -right-3.5 size-8 rounded-full bg-card border border-border text-muted-foreground flex items-center justify-center hover:text-foreground hover:border-muted-foreground/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 z-10"
                     aria-label="Close preview"
                 >
                     <X size={14} aria-hidden />
@@ -422,7 +445,7 @@ function Lightbox({ previewUrl, onClose }: LightboxProps) {
                 <img
                     src={previewUrl}
                     alt="Screenshot preview"
-                    className="w-full rounded-xl block shadow-2xl ring-1 ring-border"
+                    className="w-full rounded-xl block shadow-2xl ring-1 ring-border relative"
                 />
             </div>
         </div>

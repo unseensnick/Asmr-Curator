@@ -175,8 +175,12 @@ export default function RenameSection(props: RenameSectionProps) {
                     disabled={linkArtists}
                 />
                 <div className="sm:col-start-2">
-                    <label className="flex items-center gap-2 cursor-pointer select-none w-fit">
+                    <label
+                        htmlFor="meta-link-artists"
+                        className="flex items-center gap-2 cursor-pointer select-none w-fit"
+                    >
                         <Checkbox
+                            id="meta-link-artists"
                             checked={linkArtists}
                             onCheckedChange={(v) => onLinkArtistsChange(v === true)}
                         />
