@@ -17,6 +17,13 @@ app — the backend does the scraping server-side using the cookies the
 extension synced. The extension does not watch network traffic, does
 not auto-capture URLs, and does not need `webRequest`.
 
+> **Versioned independently from the app.** The extension's `manifest.json`
+> version (currently `1.0.0`) is decoupled from the FastAPI app's version
+> (`2.0.4`). The extension ships its own [`CHANGELOG.md`](CHANGELOG.md)
+> and its own GitHub release asset (`asmr-curator-companion-vX.Y.Z.zip`).
+> The cookie-sync API contract is the boundary; both sides bump only when
+> their own behaviour changes.
+
 ## Install
 
 The extension is unpacked-load only (not on the Chrome Web Store / AMO).
