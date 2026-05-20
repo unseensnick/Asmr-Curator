@@ -35,3 +35,8 @@ export const FILEBROWSER_SEARCH_DEBOUNCE_MS = 300;
  *  than the FileBrowser because the user expects in-place filter feel,
  *  not a search box round-trip. */
 export const LIBRARY_FILTER_DEBOUNCE_MS = 200;
+
+/** Cap on rows the TagChip alias-picker shows for a single query.
+ *  The picker is a quick-add affordance, not a browse surface — the
+ *  Dictionary modal handles full vocabulary editing. */
+export const ALIAS_PICKER_MAX_MATCHES = 30;

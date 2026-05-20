@@ -11,7 +11,9 @@ import {
 } from "@/components/ui/context-menu";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
+import { ALIAS_PICKER_MAX_MATCHES } from "@/lib/constants";
 import type { VocabEntry } from "@/lib/types";
+import { deferToNextMacrotask } from "@/lib/utils";
 
 interface TagChipProps {
     label: string;
@@ -239,14 +241,14 @@ export default function TagChip({
                     <ContextMenuItem
                         disabled={!onPromoteToAlias || promoting || vocabulary.length === 0}
                         onSelect={() => {
-                            // setTimeout(0) — runs in the next macrotask,
-                            // after the click event finishes bubbling. rAF
-                            // would fire before that and let the trailing
-                            // click reach the popover as outside-interaction.
-                            setTimeout(() => {
+                            // Defer past the click cycle so the popover
+                            // doesn't see the trailing pointer events as
+                            // outside-interaction. See deferToNextMacrotask's
+                            // own docstring for the full rationale.
+                            deferToNextMacrotask(() => {
                                 aliasPickerOpenedAtRef.current = performance.now();
                                 setAliasPickerOpen(true);
-                            }, 0);
+                            });
                         }}
                     >
                         <Plus aria-hidden />
@@ -383,9 +385,7 @@ function AliasPicker({ label, vocabulary, onPick }: AliasPickerProps) {
                       v.aliases.some((a) => a.toLowerCase().includes(q)),
               )
             : vocabulary;
-        // Cap at 30 matches — the picker is a quick-add affordance, not a
-        // browse surface. The Dictionary modal exists for full editing.
-        return list.slice(0, 30);
+        return list.slice(0, ALIAS_PICKER_MAX_MATCHES);
     }, [query, vocabulary]);
 
     return (

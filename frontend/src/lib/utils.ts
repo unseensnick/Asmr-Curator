@@ -53,6 +53,21 @@ export function normalizeTag(
     return opts?.titleCase ? trimmed.replace(/\b\w/g, (c) => c.toUpperCase()) : trimmed;
 }
 
+/** Run `fn` in the next macrotask — after the current event-loop tick
+ *  completes (including any propagating click / pointer events). Returns
+ *  a cancel function for use in useEffect cleanups; ignore it for
+ *  fire-and-forget cases.
+ *
+ *  Used to break races between state changes and browser event dispatch:
+ *  opening an overlay from inside a Radix menu item, or letting Radix's
+ *  own portal cleanup settle before sweeping stuck aria attributes. The
+ *  comment used to live in each call site; one home keeps them consistent.
+ */
+export function deferToNextMacrotask(fn: () => void): () => void {
+    const id = window.setTimeout(fn, 0);
+    return () => window.clearTimeout(id);
+}
+
 /** Run a list of raw tag strings through `normalizeTag` (with titleCase),
  *  drop empties / suppressed entries, and dedupe by lowercase form (first
  *  occurrence wins). Both extraction surfaces (Patreon URL fetch +
