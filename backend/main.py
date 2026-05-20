@@ -265,6 +265,40 @@ def _write_metadata(path: Path, title: str, artist: str, album: str, album_artis
         audio.save()
 
 
+def _clear_metadata(path: Path, fields: list[str]) -> None:
+    """Remove the given tag fields entirely from a metadata-compatible file.
+
+    Distinct from `_write_metadata`'s skip-on-empty-value semantics: that
+    treats `""` as 'leave existing alone'; this drops the frame outright.
+    Used by /api/files/bulk-write when the user explicitly asks to blank
+    a shared field (artist / album_artist / album) across the selection.
+    """
+    ext = path.suffix.lower()
+    if ext == ".mp3":
+        try:
+            audio = ID3(str(path))
+        except ID3NoHeaderError:
+            return
+        for field in fields:
+            tag_id, _ = _MP3_TAGS[field]
+            audio.delall(tag_id)
+        audio.save(str(path))
+    elif ext in (".flac", ".ogg"):
+        audio = FLAC(str(path)) if ext == ".flac" else OggVorbis(str(path))
+        for field in fields:
+            key = _VORBIS_TAGS[field]
+            if key in audio:
+                del audio[key]
+        audio.save()
+    elif ext in (".m4a", ".aac"):
+        audio = MP4(str(path))
+        for field in fields:
+            key = _M4A_TAGS[field]
+            if key in audio:
+                del audio[key]
+        audio.save()
+
+
 # ── Audio-format catalogue (file browser + convert + rename ext gating) ──────
 
 METADATA_COMPATIBLE_EXTS = set(_FORMATS_CONFIG["metadataCompatibleExts"])

@@ -18,6 +18,7 @@ from backend.main import (
     AUDIO_EXTS,
     METADATA_COMPATIBLE_EXTS,
     NEEDS_CONVERSION_EXTS,
+    _clear_metadata,
     _write_metadata,
     log,
     reject_if_exists,
@@ -283,6 +284,234 @@ def load_cached_metadata(body: LoadCachedMetadataIn):
         items.append(entry)
 
     return {"items": items}
+
+
+# ── Bulk write (BulkEditSheet "Preview changes → Commit") ────────────────────
+
+
+_BULK_SHARED_FIELDS = ("artist", "album_artist", "album")
+
+
+class BulkWriteItem(BaseModel):
+    path: str
+    # Per-file ID3 TIT2 / equivalent. Empty string = leave existing title
+    # alone (matches _write_metadata's skip-on-empty behaviour).
+    title: str = ""
+    # Pre-composed canonical filename WITH extension. The frontend owns
+    # the composition rules (brackets-in-filename, dash join, sanitize)
+    # so they live in one place; the backend treats this as opaque and
+    # only validates shape / length / collision.
+    new_name: str = ""
+
+
+class BulkWriteShared(BaseModel):
+    artist: str = ""
+    album_artist: str = ""
+    album: str = ""
+    # Subset of `_BULK_SHARED_FIELDS` — fields to BLANK on every item.
+    # Distinct from the empty-string default, which means 'leave existing'.
+    clear: list[str] = []
+
+
+class BulkWriteIn(BaseModel):
+    items: list[BulkWriteItem]
+    shared: BulkWriteShared = BulkWriteShared()
+    rename: bool = False
+    root: str = "library"
+
+
+def _validate_bulk_rename_name(name: str) -> str | None:
+    """Same rule set as /api/rename (no /, no \\, not . / .., no leading
+    dot, ≤255 UTF-8 bytes) but collects instead of raising so phase 1 can
+    surface every offending file in one response."""
+    name = name.strip()
+    if not name:
+        return "Filename cannot be empty."
+    if "/" in name or "\\" in name:
+        return "Filename can't contain `/` or `\\`."
+    if name in (".", ".."):
+        return "Invalid filename."
+    if name.startswith("."):
+        return "Filename can't start with a dot."
+    name_bytes = len(name.encode("utf-8"))
+    if name_bytes > 255:
+        return f"Filename too long: {name_bytes} bytes (max 255)."
+    return None
+
+
+@router.patch("/api/files/bulk-write")
+def bulk_write(body: BulkWriteIn):
+    """Apply bulk metadata + optional canonical rename across the selection.
+
+    **Two-phase commit.** Phase 1 walks every item and validates path
+    resolution, file existence, metadata-compatible extension, rename
+    target shape + length + collision (both on-disk and against other
+    items in the same batch). If ANY item fails, the whole batch aborts
+    with 422 and disk state is untouched — the response includes per-item
+    `ok: false` for both the actual offenders and the would-have-been-fine
+    items so the UI can show the failed ones in context.
+
+    Phase 2 applies each item independently — rename first, then write
+    per-file title + shared fields (`_write_metadata` skips blank values)
+    + any explicit clears (`_clear_metadata` drops the frame). A mutagen
+    or OS error here is per-item `{ok: false, error}`; we don't try to
+    unwind successfully-committed earlier items because filesystem
+    rollback is unreliable.
+
+    The frontend pre-composes `new_name` so the canonical-format rules
+    (brackets-kept-in-filename, dash join, sanitize) stay in one place;
+    the backend treats `new_name` as opaque and only enforces shape.
+    """
+    root_path = root_for(body.root)
+
+    invalid_clear = [f for f in body.shared.clear if f not in _BULK_SHARED_FIELDS]
+    if invalid_clear:
+        raise HTTPException(
+            400,
+            f"clear[] contains unknown field(s): {sorted(invalid_clear)}. "
+            f"Allowed: {list(_BULK_SHARED_FIELDS)}.",
+        )
+
+    # ── Phase 1: validate every item, no writes ──────────────────────────────
+    planned: list[dict] = []
+    errors: list[dict] = []
+    proposed_dests: set[Path] = set()
+
+    for item in body.items:
+        try:
+            src = validate_under_root(item.path, root_path)
+        except HTTPException as e:
+            errors.append({"path": item.path, "ok": False, "error": str(e.detail)})
+            continue
+        if not src.exists():
+            errors.append({"path": item.path, "ok": False, "error": "File not found."})
+            continue
+        if not src.is_file():
+            errors.append({"path": item.path, "ok": False, "error": "Path is not a file."})
+            continue
+        if src.suffix.lower() not in METADATA_COMPATIBLE_EXTS:
+            errors.append(
+                {
+                    "path": item.path,
+                    "ok": False,
+                    "error": (
+                        f"Cannot tag {src.suffix} files — convert to a metadata-compatible "
+                        "format first (MP3, FLAC, AAC, or OGG)."
+                    ),
+                },
+            )
+            continue
+
+        dest: Path | None = None
+        if body.rename and item.new_name and item.new_name.strip() != src.name:
+            err = _validate_bulk_rename_name(item.new_name)
+            if err is not None:
+                errors.append({"path": item.path, "ok": False, "error": err})
+                continue
+            new_name_clean = item.new_name.strip()
+            dest_rel = str(src.parent.relative_to(root_path.resolve()) / new_name_clean)
+            try:
+                dest_candidate = validate_under_root(dest_rel, root_path)
+            except HTTPException as e:
+                errors.append({"path": item.path, "ok": False, "error": str(e.detail)})
+                continue
+            if dest_candidate.exists():
+                errors.append(
+                    {"path": item.path, "ok": False, "error": "Target name already exists."},
+                )
+                continue
+            if dest_candidate in proposed_dests:
+                # Two items in the same batch picked the same new name.
+                # Without this check phase 2 would race — the first wins,
+                # the second fails with a collision — but the user sees
+                # an order-dependent error. Catching here means both
+                # affected items show in the validation response.
+                errors.append(
+                    {
+                        "path": item.path,
+                        "ok": False,
+                        "error": "Another item in this batch targets the same new name.",
+                    },
+                )
+                continue
+            proposed_dests.add(dest_candidate)
+            dest = dest_candidate
+
+        planned.append({"item": item, "src": src, "dest": dest})
+
+    if errors:
+        # All-or-nothing on validation. Tag the not-actually-broken items
+        # so the UI can dim them without highlighting them as offenders.
+        aborted = [
+            {
+                "path": plan["item"].path,
+                "ok": False,
+                "error": "Aborted — other items failed validation.",
+            }
+            for plan in planned
+        ]
+        raise HTTPException(
+            status_code=422,
+            detail={"ok": False, "results": errors + aborted},
+        )
+
+    # ── Phase 2: apply each item, best-effort ────────────────────────────────
+    results: list[dict] = []
+    for plan in planned:
+        item: BulkWriteItem = plan["item"]
+        src: Path = plan["src"]
+        dest: Path | None = plan["dest"]
+        new_path_rel: str | None = None
+
+        try:
+            if dest is not None:
+                src.rename(dest)
+                target = dest
+                new_path_rel = str(dest.relative_to(root_path.resolve()))
+            else:
+                target = src
+
+            _write_metadata(
+                target,
+                item.title,
+                body.shared.artist,
+                body.shared.album,
+                body.shared.album_artist,
+            )
+
+            # Clears come after sets so a same-batch "set artist AND clear
+            # album_artist" runs as written. clear[] never overlaps with
+            # the set fields because the UI uses one-or-the-other per
+            # field, but order keeps the semantic crisp.
+            if body.shared.clear:
+                _clear_metadata(target, body.shared.clear)
+        except OSError as e:
+            log.error("bulk-write OSError on %s: %s", src.name, e)
+            results.append(
+                {
+                    "path": item.path,
+                    "ok": False,
+                    "error": "Filesystem error. Check the server log.",
+                },
+            )
+            continue
+        except Exception as e:
+            log.error("bulk-write tag-write error on %s: %s", src.name, e)
+            results.append(
+                {
+                    "path": item.path,
+                    "ok": False,
+                    "error": "Tag write failed. Check the server log.",
+                },
+            )
+            continue
+
+        entry: dict = {"path": item.path, "ok": True}
+        if new_path_rel is not None:
+            entry["new_path"] = new_path_rel
+        results.append(entry)
+
+    return {"ok": True, "results": results}
 
 
 # ── Folder creation + cross-root move ────────────────────────────────────────
