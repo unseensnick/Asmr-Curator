@@ -4,6 +4,9 @@
  */
 (function () {
   const browserApi = window.browser || window.chrome;
+  // lib/storage.js (loaded before this script in popup.html) populates
+  // window.AsmrExt with the shared repo-slug constants.
+  const { RELEASES_LATEST_URL } = window.AsmrExt;
 
   const uiElements = {
     syncBtn: document.getElementById("sync-cookie"),
@@ -25,8 +28,7 @@
     if (!res || !res.ok || !res.hasUpdate) return;
     uiElements.updateBannerVersion.textContent = `v${res.latest}`;
     uiElements.updateBannerMeta.textContent = `installed v${res.installed}`;
-    uiElements.updateBannerLink.href =
-      "https://github.com/unseensnick/Asmr-Curator/releases/latest";
+    uiElements.updateBannerLink.href = RELEASES_LATEST_URL;
     uiElements.updateBanner.classList.add("show");
   }
 

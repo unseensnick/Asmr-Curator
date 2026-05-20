@@ -15,8 +15,13 @@ if (typeof importScripts === "function") {
 }
 
 const browserApi = self.browser || self.chrome;
-const { compareSemver, getBackendUrl, getLatestExtensionInfo, setLatestExtensionInfo } =
-  self.AsmrExt;
+const {
+  RELEASES_API_URL,
+  compareSemver,
+  getBackendUrl,
+  getLatestExtensionInfo,
+  setLatestExtensionInfo,
+} = self.AsmrExt;
 
 // ── Update check ──────────────────────────────────────────────────────────────
 //
@@ -27,14 +32,12 @@ const { compareSemver, getBackendUrl, getLatestExtensionInfo, setLatestExtension
 
 const UPDATE_CHECK_ALARM = "check-extension-update";
 const UPDATE_CHECK_INTERVAL_MIN = 24 * 60;
-const RELEASES_URL =
-  "https://api.github.com/repos/unseensnick/Asmr-Curator/releases?per_page=10";
 const EXT_ASSET_RE =
   /^asmr-curator-companion-v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\.zip$/;
 
 async function checkForUpdate() {
   try {
-    const response = await fetch(RELEASES_URL, {
+    const response = await fetch(RELEASES_API_URL, {
       headers: { Accept: "application/vnd.github+json" },
     });
     if (!response.ok) return;
