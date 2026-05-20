@@ -66,9 +66,7 @@ def list_files(subdir: str = "", root: str = "library"):
             "name": name,
             "type": "file" if is_file else "dir",
             "ext": ext if is_file else None,
-            "path": str(target.relative_to(root_path) / name)
-            if target != root_path
-            else name,
+            "path": str(target.relative_to(root_path) / name) if target != root_path else name,
             "needs_conversion": is_file and ext in NEEDS_CONVERSION_EXTS,
         }
         for is_file, name, ext in snapshot
