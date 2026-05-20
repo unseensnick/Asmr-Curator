@@ -51,6 +51,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import { useDragSelect } from "@/hooks/useDragSelect";
 import { API, apiGet, apiPost, buildQueryString, type FileRoot, moveBatchStream } from "@/lib/api";
 import { METADATA_COMPATIBLE_EXTS, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
+import { LIBRARY_FILTER_DEBOUNCE_MS } from "@/lib/constants";
 import { selectAll, selectionFromClick } from "@/lib/explorerSelection";
 import type { FileEntry, ListedDirResponse } from "@/lib/types";
 import { getErrorMessage } from "@/lib/utils";
@@ -403,7 +404,7 @@ export default function LibraryExplorerSheet({
             } finally {
                 if (!stale) setSearchBusy(false);
             }
-        }, 200);
+        }, LIBRARY_FILTER_DEBOUNCE_MS);
         return () => {
             stale = true;
             clearTimeout(timer);

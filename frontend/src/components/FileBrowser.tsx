@@ -20,6 +20,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { API, apiGet, apiPost, buildQueryString, type FileRoot } from "@/lib/api";
 import { FORMAT_EXT, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
+import { FILEBROWSER_SEARCH_DEBOUNCE_MS } from "@/lib/constants";
 import type { ConvertFormat, ConvertQuality, FileEntry, SearchMode } from "@/lib/types";
 import { getErrorMessage } from "@/lib/utils";
 
@@ -162,7 +163,10 @@ export default function FileBrowser({
     function handleQueryChange(val: string) {
         setQuery(val);
         if (debounceRef.current) clearTimeout(debounceRef.current);
-        debounceRef.current = setTimeout(() => loadFiles(val, searchMode, root), 300);
+        debounceRef.current = setTimeout(
+            () => loadFiles(val, searchMode, root),
+            FILEBROWSER_SEARCH_DEBOUNCE_MS,
+        );
     }
 
     function handleModeChange(mode: SearchMode) {

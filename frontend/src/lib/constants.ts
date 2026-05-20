@@ -25,3 +25,13 @@ export const TITLE_VALIDATION_FLASH_MS = 1200;
  *  LibrarySettingsSheet's JSON export. The download dialog has fully
  *  consumed the URL by then on every browser we support. */
 export const OBJECT_URL_REVOKE_MS = 3000;
+
+/** Debounce window for the FileBrowser tab's search input. Longer than
+ *  the Library Sheet's inline filter because the file browser hits the
+ *  network and the typical query is filename-shaped (longer typing). */
+export const FILEBROWSER_SEARCH_DEBOUNCE_MS = 300;
+
+/** Debounce window for the LibraryExplorerSheet's inline filter. Tighter
+ *  than the FileBrowser because the user expects in-place filter feel,
+ *  not a search box round-trip. */
+export const LIBRARY_FILTER_DEBOUNCE_MS = 200;
