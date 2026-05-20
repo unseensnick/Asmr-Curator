@@ -28,6 +28,36 @@ interface PerFileEdit {
 
 const EMPTY_EDIT: PerFileEdit = { title: "", tags: "" };
 
+/**
+ * Shared values written to every selected file in one stroke. The three
+ * ID3-backed fields (artist, album_artist, album) flow into the backend's
+ * `shared` block on `PATCH /api/files/bulk-write`; the suffix is
+ * filename-composition only and stays client-side (phase 7 will splice it
+ * into the canonical `new_name`).
+ */
+type SharedIdField = "artist" | "album_artist" | "album";
+
+const SHARED_ID_FIELDS = [
+    "artist",
+    "album_artist",
+    "album",
+] as const satisfies readonly SharedIdField[];
+
+const SHARED_FIELD_LABELS: Record<SharedIdField, string> = {
+    artist: "Artist",
+    album_artist: "Album artist",
+    album: "Album",
+};
+
+interface SharedMetadata {
+    artist: string;
+    album_artist: string;
+    album: string;
+    suffix: string;
+}
+
+const EMPTY_SHARED: SharedMetadata = { artist: "", album_artist: "", album: "", suffix: "" };
+
 interface BulkEditSheetProps {
     open: boolean;
     onClose: () => void;
@@ -77,6 +107,60 @@ export default function BulkEditSheet({ open, onClose, files, root: _root }: Bul
 
     function editFor(path: string): PerFileEdit {
         return edits[path] ?? EMPTY_EDIT;
+    }
+
+    // Shared apply-to-all metadata + the explicit-clear set. Empty values
+    // mean "leave the field as-is on each file" (the backend's skip-on-
+    // empty rule); `clearFields` is the only path that writes a blank ID3
+    // frame across the selection.
+    const [shared, setShared] = useState<SharedMetadata>(EMPTY_SHARED);
+    const [clearFields, setClearFields] = useState<Set<SharedIdField>>(new Set());
+
+    // Populated by phase 6's load-from-cache step: a field belongs to
+    // this set when the loaded per-file metadata for it differs across
+    // the selection. MP3Tag-style `<Mixed values>` placeholder fires off
+    // the same set. In phase 5 nothing populates it yet, so the
+    // placeholder branch is reachable structurally but never fires in
+    // practice — wired here so the apply-to-all form is feature-complete
+    // before its data source lands.
+    const mixedFields = new Set<SharedIdField>();
+
+    function toggleClear(field: SharedIdField) {
+        const willClear = !clearFields.has(field);
+        setClearFields((prev) => {
+            const next = new Set(prev);
+            if (willClear) next.add(field);
+            else next.delete(field);
+            return next;
+        });
+        // Entering clear mode blanks the input so there's no stale value
+        // sitting behind the disabled state. Exiting just restores typing
+        // — the input was empty under the disabled overlay anyway.
+        if (willClear) {
+            setShared((prev) => ({ ...prev, [field]: "" }));
+        }
+    }
+
+    function patchShared<K extends keyof SharedMetadata>(field: K, value: SharedMetadata[K]) {
+        setShared((prev) => ({ ...prev, [field]: value }));
+        // Typing anything cancels a pending clear on that field — the
+        // user clearly wants to set, not blank.
+        if (field !== "suffix" && value) {
+            const idField = field as SharedIdField;
+            if (clearFields.has(idField)) {
+                setClearFields((prev) => {
+                    const next = new Set(prev);
+                    next.delete(idField);
+                    return next;
+                });
+            }
+        }
+    }
+
+    function placeholderForShared(field: SharedIdField): string {
+        if (clearFields.has(field)) return "Will clear on apply";
+        if (mixedFields.has(field)) return "<Mixed values>";
+        return "";
     }
 
     const count = files.length;
@@ -218,7 +302,68 @@ export default function BulkEditSheet({ open, onClose, files, root: _root }: Bul
 
                     <section aria-label="Apply to all" className="flex flex-col gap-3">
                         <SectionLabel>Apply to all</SectionLabel>
-                        {/* phase 5: shared artist / album artist / album / suffix form */}
+                        <p className="text-xs text-muted-foreground/80 leading-relaxed -mt-1">
+                            Empty leaves the field as-is on each file. Use Clear to blank it across
+                            the selection.
+                        </p>
+                        <div className="flex flex-col gap-2.5">
+                            {SHARED_ID_FIELDS.map((field) => {
+                                const isCleared = clearFields.has(field);
+                                const inputId = `bulk-shared-${field}`;
+                                return (
+                                    <div key={field} className="flex items-center gap-2">
+                                        <label
+                                            htmlFor={inputId}
+                                            className="w-28 shrink-0 text-sm text-muted-foreground"
+                                        >
+                                            {SHARED_FIELD_LABELS[field]}
+                                        </label>
+                                        <Input
+                                            id={inputId}
+                                            value={shared[field]}
+                                            onChange={(e) => patchShared(field, e.target.value)}
+                                            disabled={isCleared}
+                                            placeholder={placeholderForShared(field)}
+                                            className="flex-1 font-mono text-sm"
+                                        />
+                                        <Button
+                                            type="button"
+                                            variant={isCleared ? "secondary" : "ghost"}
+                                            size="sm"
+                                            onClick={() => toggleClear(field)}
+                                            aria-pressed={isCleared}
+                                            aria-label={
+                                                isCleared
+                                                    ? `Cancel clearing ${SHARED_FIELD_LABELS[field]}`
+                                                    : `Clear ${SHARED_FIELD_LABELS[field]} on all files`
+                                            }
+                                            className="shrink-0"
+                                        >
+                                            {isCleared ? "Clearing" : "Clear"}
+                                        </Button>
+                                    </div>
+                                );
+                            })}
+                            {/* Suffix is filename-composition only — no ID3 write,
+                                so no Clear toggle. Sits below the three ID3 rows
+                                with extra top padding to mark the grouping
+                                without a horizontal rule. */}
+                            <div className="flex items-center gap-2 pt-2">
+                                <label
+                                    htmlFor="bulk-shared-suffix"
+                                    className="w-28 shrink-0 text-sm text-muted-foreground"
+                                >
+                                    Suffix
+                                </label>
+                                <Input
+                                    id="bulk-shared-suffix"
+                                    value={shared.suffix}
+                                    onChange={(e) => patchShared("suffix", e.target.value)}
+                                    placeholder="F4A"
+                                    className="flex-1 font-mono text-sm"
+                                />
+                            </div>
+                        </div>
                     </section>
 
                     <section aria-label="Rename" className="flex flex-col gap-3">
