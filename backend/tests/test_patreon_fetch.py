@@ -310,6 +310,79 @@ class TestWalkProseMirrorNodes:
         _walk_prosemirror_nodes(None, sink)  # type: ignore[arg-type]
         assert sink == []
 
+    def test_collects_all_three_attrs_keys(self):
+        # The walker checks href, url, src — confirm each key contributes a
+        # separate ExternalLink when present together. Belt-and-braces against
+        # a future refactor that accidentally short-circuits on the first hit.
+        node = {
+            "type": "embed",
+            "attrs": {
+                "href": "https://a.example/",
+                "url": "https://b.example/",
+                "src": "https://c.example/",
+            },
+        }
+        sink: list[ExternalLink] = []
+        _walk_prosemirror_nodes(node, sink)
+        urls = sorted(link.url for link in sink)
+        assert urls == ["https://a.example/", "https://b.example/", "https://c.example/"]
+
+    def test_skips_whitespace_only_url_values(self):
+        node = {"type": "image", "attrs": {"src": "   "}}
+        sink: list[ExternalLink] = []
+        _walk_prosemirror_nodes(node, sink)
+        assert sink == []
+
+    def test_tolerates_non_dict_marks_in_list(self):
+        # A malformed mark entry shouldn't crash the walk — Patreon's JSON
+        # comes from untrusted user-edited posts.
+        node = {
+            "type": "text",
+            "text": "label",
+            "marks": [
+                "not a dict",
+                {"type": "link", "attrs": {"href": "https://example.com/"}},
+                None,
+            ],
+        }
+        sink: list[ExternalLink] = []
+        _walk_prosemirror_nodes(node, sink)
+        assert len(sink) == 1
+        assert sink[0].url == "https://example.com/"
+
+    def test_tolerates_non_list_content_field(self):
+        # `content` should be a list; when it's a string or dict (malformed
+        # input), the walker shouldn't recurse or raise.
+        node = {"type": "doc", "content": "not a list"}
+        sink: list[ExternalLink] = []
+        _walk_prosemirror_nodes(node, sink)
+        assert sink == []
+
+
+class TestExtractExternalLinksCrossSource:
+    def test_dedupes_url_present_in_both_content_and_embed(self):
+        # Same URL surfaces in two of the three sources — dedup keeps the
+        # first occurrence (the anchor with text), drops the embed copy.
+        attrs = {
+            "content": '<a href="https://drive.google.com/file/d/X/">labelled</a>',
+            "embed": {"url": "https://drive.google.com/file/d/X/"},
+        }
+        result = _extract_external_links(attrs)
+        assert len(result) == 1
+        assert result[0].url == "https://drive.google.com/file/d/X/"
+        assert result[0].text == "labelled"
+
+    def test_handles_malformed_content_json_string(self):
+        # ProseMirror source is JSON-parsed inside _extract_external_links;
+        # broken JSON shouldn't crash the call.
+        attrs = {
+            "content_json_string": "not json at all",
+            "embed": {"url": "https://drive.google.com/file/d/Y/"},
+        }
+        result = _extract_external_links(attrs)
+        assert len(result) == 1
+        assert result[0].url == "https://drive.google.com/file/d/Y/"
+
 
 # ── _find_cached_post ──────────────────────────────────────────────────────
 
