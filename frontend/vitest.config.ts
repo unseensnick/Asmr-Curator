@@ -23,5 +23,22 @@ export default defineConfig({
             "src/**/__tests__/**/*.{test,spec}.{ts,tsx}",
             "src/**/*.{test,spec}.{ts,tsx}",
         ],
+        coverage: {
+            // v8 (built-in to Node) over istanbul — faster, no Babel pass.
+            provider: "v8",
+            // `text` for the CI log table; `html` for human browsing;
+            // `lcov` so CI artifact consumers (Codecov etc.) can ingest it
+            // later without re-running tests.
+            reporter: ["text", "html", "lcov"],
+            reportsDirectory: "./coverage",
+            // Scope to the app source; tests + config files don't count
+            // toward the denominator.
+            include: ["src/**/*.{ts,tsx}"],
+            exclude: [
+                "src/**/__tests__/**",
+                "src/**/*.{test,spec}.{ts,tsx}",
+                "src/main.tsx", // entry — runs once at boot, not test-meaningful
+            ],
+        },
     },
 });
