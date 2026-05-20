@@ -572,7 +572,7 @@ def _iter_cached_posts(output_dir: Path):
     for api_file in output_dir.rglob("post-api.json"):
         try:
             data = json.loads(api_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except OSError, json.JSONDecodeError:
             continue
         parsed = _parse_post_api(data)
         if parsed is None:
@@ -693,7 +693,7 @@ def _collect_posts(
         post_dir = api_file.parent.parent
         try:
             data = json.loads(api_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except OSError, json.JSONDecodeError:
             continue
         parsed = _parse_post_api(data)
         if parsed is None:

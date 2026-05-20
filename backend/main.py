@@ -177,7 +177,7 @@ def validate_under_root(rel_path: str, root: Path) -> Path:
     """
     try:
         resolved = (root / rel_path.strip()).resolve()
-    except (ValueError, OSError):
+    except ValueError, OSError:
         raise HTTPException(403, "Access denied")
     root_resolved = root.resolve()
     if not resolved.is_relative_to(root_resolved):
