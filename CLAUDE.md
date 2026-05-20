@@ -1,29 +1,27 @@
 # CLAUDE.md
 
-Self-hosted tool that turns Patreon screenshots into standardised ASMR filenames via a local vision LLM. React/Vite frontend, FastAPI backend, SQLite dictionary, optional Chrome extension.
+Self-hosted tool for organising a local ASMR library. Pulls audio from Patreon (including Drive-hosted files) and writes consistent filenames against a tag dictionary you control. React/Vite frontend, FastAPI backend, SQLite dictionary, optional Chrome extension.
 
 ## Commands
 
 ```bash
-# Dev (both servers, parallel)
-bash dev.sh                       # Linux/devcontainer
-dev.bat                           # Windows host
+# Dev (inside devcontainer)
+bash dev.sh                       # Linux/devcontainer (or dev.bat on Windows host)
 
-# Or separately
-cd frontend && npm run dev        # Vite on :5173
-uvicorn backend.main:app --reload # FastAPI on :8000 (docs at /docs)
-
-# Build & lint
-cd frontend && npm run build      # tsc -b + Vite production build
-cd frontend && npm run lint       # ESLint
-
-# Tests (CI runs both on every push)
-cd frontend && npm test           # Vitest — parser.ts (add more as you go)
-pytest -c backend/pyproject.toml  # Pytest — backend pure-Python helpers
+# Lint / format / build / test
+cd frontend && npm run lint && npm run format:check && npm run build && npm test
+ruff check backend --config backend/pyproject.toml
+ruff format --check backend --config backend/pyproject.toml
+pytest -c backend/pyproject.toml
 
 # Production (host-side, not in devcontainer)
 docker compose up --build         # Serves everything on :8000
 ```
+
+## Source map
+
+- Backend routes: `backend/routes/{system,extract,files,convert,settings,patreon,dictionary}.py` (registered by `backend/main.py`).
+- Frontend shared logic: `frontend/src/lib/` (`parser.ts`, `api.ts`, `types.ts`, `audio-formats.json`). Components are one-per-file under `frontend/src/components/`.
 
 ## Critical project-specific rules
 
