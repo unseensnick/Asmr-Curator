@@ -33,6 +33,14 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Audit npm deps for known CVEs
+        working-directory: frontend
+        # --audit-level=high filters out low/moderate noise that's common
+        # in transient dev deps. CVEs at high/critical are actionable
+        # signal; tune by overriding the level here when an upstream
+        # advisory needs a temporary hold.
+        run: npm audit --audit-level=high
+
       - name: Format check (Prettier)
         working-directory: frontend
         run: npm run format:check
@@ -90,6 +98,15 @@ jobs:
 
       - name: Install test + lint dependencies
         run: pip install pytest pytest-asyncio pytest-cov "ruff>=0.8.0"
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit Python deps for known CVEs
+        # Env mode — scans every installed package (runtime + dev). Exits
+        # non-zero on a published CVE matching a pinned version; use
+        # `--ignore-vuln <id>` per advisory if a known-safe one shows up.
+        run: pip-audit
 
       - name: Ruff lint
         run: ruff check backend --config backend/pyproject.toml

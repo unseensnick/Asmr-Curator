@@ -43,6 +43,7 @@ If you're not sure whether a detail belongs: imagine a Patreon-creator user read
 After any change that alters user-visible behavior, env vars, file paths, or API surface, scan `README.md` and other docs for stale references and update them in the same change. Describe current behavior, not the journey to it — no "we tried X then switched to Y" notes.
 
 - **After adding or renaming a backend route**, run `backend/.venv/bin/python scripts/check_api_docs.py` (inside the devcontainer) and add a row under the matching `### <Group>` table in README's `## API Reference` if the check reports drift. CI runs the same check on every push — running it locally avoids finding out at release time.
+- **Before pushing a dep bump**, run `pip-audit` (backend, inside the devcontainer via `uv tool run pip-audit --requirement requirements.txt`) and `npm audit --audit-level=high` (frontend). Same checks CI runs — local catches a known CVE before it surfaces as a red PR.
 
 ## Versioning
 
