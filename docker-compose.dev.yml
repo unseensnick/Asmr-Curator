@@ -42,6 +42,7 @@ services:
             - DRIVE_SCRAPE_CONCURRENCY=${DRIVE_SCRAPE_CONCURRENCY:-1}
             - DRIVE_BROWSER_IDLE_TIMEOUT_S=${DRIVE_BROWSER_IDLE_TIMEOUT_S:-300}
             - DRIVE_DOWNLOAD_TIMEOUT_S=${DRIVE_DOWNLOAD_TIMEOUT_S:-14400}
+            - DRIVE_DOWNLOAD_RETRIES=${DRIVE_DOWNLOAD_RETRIES:-4}
         ports:
             - "8000:8000"   # FastAPI / Uvicorn
             - "5173:5173"   # Vite dev server
