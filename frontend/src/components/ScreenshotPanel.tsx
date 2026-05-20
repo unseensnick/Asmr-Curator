@@ -32,8 +32,7 @@ type Status = { type: "success" | "error" | "info"; msg: string };
 /**
  * Screenshot to filename. Drop / paste / pick an image, send it to the
  * vision LLM, get title + tags back. Fallback path when patreon-dl can't
- * fetch the post directly. Sibling of PatreonPanel and built on the same
- * Penthouse Reading Nook surface conventions.
+ * fetch the post directly. Sibling of PatreonPanel.
  */
 export default function ScreenshotPanel({
     dict,

@@ -55,13 +55,13 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* ── The Penthouse Reading Nook palette ──────────────────────────────────────
-   Dimly lit reading corner in a modern penthouse, looking out over the city
-   skyline at night. Cool slate room (deep night sky outside the glass), one
-   confident teal-cyan accent (the brushed metal face of a hi-fi amplifier
-   lit from below). All cool-side hues for cohesion; the foreground is the
-   only warm element, like the cream-tone reflection of an interior lamp on
-   page. */
+/* ── Cool-room palette ───────────────────────────────────────────────────────
+   Cool slate surfaces (hue 265, low chroma) carry the room; one teal-cyan
+   accent (hue 195) is the single chromatic interest; warm cream foreground
+   (hue 85) is the only warm element. The warm/cool tension is the signature
+   and is what keeps the system out of Spotify/Linear/DAW lanes — break it
+   (warm surface, cool foreground, second saturated accent) and the
+   architectural feel goes. Same palette mechanics across light + dark. */
 :root {
     --background: oklch(0.974 0.006 85);
     --foreground: oklch(0.2 0.022 265);
@@ -74,7 +74,12 @@
     --secondary: oklch(0.94 0.01 265);
     --secondary-foreground: oklch(0.24 0.022 265);
     --muted: oklch(0.942 0.008 265);
-    --muted-foreground: oklch(0.5 0.02 265);
+    /* Light-mode muted-foreground sits a touch darker than the default
+       muted token would suggest. Secondary copy on tinted surfaces
+       (`bg-muted/40`, code-block previews, log tails) was borderline
+       against WCAG AA at L=0.5; L=0.46 keeps the warm-cool axis intact
+       while clearing the contrast floor. Dark mode already had headroom. */
+    --muted-foreground: oklch(0.46 0.02 265);
     --accent: oklch(0.912 0.028 195);
     --accent-foreground: oklch(0.36 0.08 195);
     --destructive: oklch(0.56 0.16 30);
