@@ -78,7 +78,7 @@ flowchart TD
 
 ## Backend route groups (under `backend/routes/`)
 
-Routes are split by domain into `backend/routes/*.py`. Each module exports an `APIRouter`; `backend/main.py` constructs the app, holds the shared helpers (validators, metadata writer, cookie normalisation, ingest path builder, Drive-scrape semaphore) + module-level state, and registers the routers via `app.include_router(...)`. Route modules import shared helpers from `backend.main`.
+Routes are split by domain into `backend/routes/*.py`. Each module exports an `APIRouter`; `backend/main.py` constructs the app, holds the shared helpers (validators, metadata writer, ingest path builder) + module-level state, and registers the routers via `app.include_router(...)`. Route modules import shared helpers from `backend.main`. The Drive-scrape semaphore lives next to its only caller in `backend/routes/patreon.py`.
 
 - `/api/extract`, `/api/preview-tags` — Ollama integration (vision LLM).
 - `/api/dictionary`, `/api/vocabulary/*`, `/api/suppressed/*` — dictionary CRUD.
@@ -93,10 +93,10 @@ Routes are split by domain into `backend/routes/*.py`. Each module exports an `A
 
 ## Module responsibilities
 
-- **`backend/main.py`** — FastAPI app construction, lifespan, SPA fallback, shared dependencies (validators, env paths, helpers, Drive-scrape semaphore), router registration. Route handlers live under `backend/routes/`.
+- **`backend/main.py`** — FastAPI app construction, lifespan, SPA fallback, shared dependencies (validators, env paths, helpers), router registration. Route handlers live under `backend/routes/`.
 - **`backend/routes/`** — one module per domain (`system`, `extract`, `files`, `convert`, `dictionary`, `settings`, `patreon`). Each exports an `APIRouter` named `router`. Imports shared helpers from `backend.main`.
 - **`backend/database.py`** — SQLite schema, seeding (`DEFAULT_VOCABULARY`, `DEFAULT_SUPPRESSED`), all CRUD helpers. No ORM. Stores the Patreon session cookie under `PATREON_COOKIE_KEY`.
-- **`backend/patreon_fetch.py`** — subprocess wrapper around `patreon-dl`; reads cookie from the DB. After patreon-dl writes into its nested tree under `DOWNLOAD_PATH/.patreon-dl/`, `_flatten_audio` moves each post's audio out to `DOWNLOAD_PATH/<creator>/<post_id> - <title>/<file>` (path built by `audio_utils.flatten_dest_parts`, also used by the Drive + external-audio ingest endpoints in `main.py` so all writers land in the same shape). Legacy `<post_id>/<file>` from earlier runs is still recognised by the cached-sidecar lookup so re-fetches don't miss it.
+- **`backend/patreon_fetch.py`** — subprocess wrapper around `patreon-dl`; reads cookie from the DB. After patreon-dl writes into its nested tree under `DOWNLOAD_PATH/.patreon-dl/`, `_flatten_audio` moves each post's audio out to `DOWNLOAD_PATH/<creator>/<post_id> - <title>/<file>` (path built by `audio_utils.flatten_dest_parts`, also used by the Drive + external-audio ingest endpoints in `backend/routes/patreon.py` so all writers land in the same shape). Legacy `<post_id>/<file>` from earlier runs is still recognised by the cached-sidecar lookup so re-fetches don't miss it.
 - **`backend/drive_fetch.py`** — Playwright-driven Drive scrape behind `/api/patreon/ingest-drive-link`. Loads the Drive viewer with the synced Google cookie, intercepts the playback URL, streams the audio. Serialises per-account via a semaphore — Google's mid-stream cookie rotation can't be raced.
 - **`backend/audio_utils.py`** — pure helpers shared between the FastAPI handlers and `drive_fetch.py`: URL cleaning, filename derivation, audio-stream preference. Lives separately so the Playwright module imports it without a circular dependency back into FastAPI.
 - **`frontend/src/App.tsx`** — root layout, dark mode, global state (dict, extracted tags, selected file), orchestrates all panels. No state library.
@@ -114,6 +114,13 @@ Routes are split by domain into `backend/routes/*.py`. Each module exports an `A
 | `DB_PATH`         | `/data/dictionary.db`    | SQLite database location                                      |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server endpoint                                        |
 | `OLLAMA_MODEL`    | `qwen2.5vl:7b`           | Vision model for extraction                                   |
+| `DRIVE_SCRAPE_CONCURRENCY`    | `1`            | Concurrent Drive scrapes per account. Default serialises so Google's mid-stream cookie rotation can't be raced. |
+| `DRIVE_BROWSER_IDLE_TIMEOUT_S`| `300`          | How long the shared Chromium stays alive between Drive scrapes. |
+| `DRIVE_DOWNLOAD_TIMEOUT_S`    | `14400`        | Max time per Drive download (4 h). Google's signed-URL expiry caps the useful range around 6 h. |
+| `DRIVE_DOWNLOAD_RETRIES`      | `4`            | Retry attempts per Drive download. |
+| `PATREON_DL_BIN`              | `patreon-dl`   | patreon-dl binary name / path. |
+
+The full README's `Configuration` table is authoritative for user-facing copy; the table above is the short reference for contributors.
 
 In Docker, both paths are bind-mounted via `LIBRARY_PATH` + `DOWNLOAD_PATH` in `.env` (host) → `/mnt/audio` + `/mnt/downloads` (container). The devcontainer mounts them at the same container paths and runs as `devuser` in `/workspaces/asmr-curator`. The two host paths must be distinct directories.
 

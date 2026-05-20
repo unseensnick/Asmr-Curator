@@ -352,7 +352,7 @@ The full list is the single source of truth at [`frontend/src/lib/audio-formats.
 
 ## Configuration
 
-All runtime configuration is via environment variables. Production reads them from `.env` (gitignored) at the project root; docker-compose passes them through to the container. The devcontainer reads its own values from `.devcontainer/devcontainer.json` (also gitignored — see "Running in the devcontainer").
+All runtime configuration is via environment variables. Production reads them from `.env` (gitignored) at the project root; docker-compose passes them through to the container. The devcontainer reads the same `.env` via `docker-compose.dev.yml` — see "Running in the devcontainer".
 
 | Variable | Default | Required? | Purpose |
 | --- | --- | --- | --- |
@@ -363,6 +363,7 @@ All runtime configuration is via environment variables. Production reads them fr
 | `DRIVE_SCRAPE_CONCURRENCY` | `1` | No | How many concurrent Drive scrapes are allowed per Google account. Default `1` serialises them to dodge Google's mid-playback cookie rotation; raise only if you're scraping different accounts and accept that concurrent rotations may corrupt downloads. |
 | `DRIVE_BROWSER_IDLE_TIMEOUT_S` | `300` (5 min) | No | How long the shared Chromium stays alive between Drive scrapes before being idle-closed. Longer = faster repeat scrapes, more RAM held. |
 | `DRIVE_DOWNLOAD_TIMEOUT_S` | `14400` (4 h) | No | Max time per Drive download. Default covers a 3-hour file at ~37 KB/s. Raising above ~5 h is pointless: Drive's signed-URL expiry kicks in around 6 h regardless. |
+| `DRIVE_DOWNLOAD_RETRIES` | `4` | No | How many times the Drive scrape retries the playback-URL → file step before surfacing an error. Each retry re-launches the Chromium tab. Drop to `1` for fail-fast behaviour during debugging. |
 | `DB_PATH` | `/data/dictionary.db` (container) / `<repo>/data/dictionary.db` (Windows host) | No | SQLite location. Don't change unless you also adjust the corresponding bind-mount in `docker-compose.yml` — overriding alone puts the DB at a non-persisted path. |
 | `PATREON_DL_BIN` | `patreon-dl` | No | patreon-dl binary name / path. Almost never needs changing (installed globally in the Docker image). |
 

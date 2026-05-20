@@ -67,8 +67,10 @@ you next visit.
 | -------------------------------- | ------------------------------------------------------------------------- |
 | `cookies` + patreon.com host     | Read Patreon session cookies to forward to the local backend.             |
 | `cookies` + google.com host      | Read Google session cookies to forward to the local backend.              |
-| `storage`                        | Persist the backend URL (sync storage).                                   |
-| `http://localhost/*`             | POST cookies to the local backend.                                        |
+| `storage`                        | Persist the backend URL (sync storage) + cache the daily update-check result. |
+| `alarms`                         | Schedule the once-a-day GitHub release check for an updated extension zip. |
+| `api.github.com`                 | Fetch the project's releases listing to surface "new version available" hints. |
+| `http://*/*` + `https://*/*`     | POST cookies to the local backend on any host/port you've configured (homelab IPs, reverse proxies). The host pattern needs to be broad because the backend URL is user-configurable in Options. |
 
 No data leaves your machine except the requests you explicitly make to
 your own backend.
@@ -78,12 +80,13 @@ your own backend.
 ```
 extension/
 ├── manifest.json
-├── background.js          ← service worker: cookie sync handlers
+├── background.js          ← service worker: cookie sync + daily update check
 ├── content_script.js      ← Sync-cookies pill injected on patreon.com
 ├── popup.html / popup.js  ← toolbar popup UI (single Sync button)
 ├── options.html / options.js   ← backend URL setting
 └── lib/
-    └── storage.js         ← backendUrl persistence
+    ├── storage.js         ← backendUrl + cached update-check info
+    └── semver.js          ← compareSemver for the update check
 ```
 
 ## Backend endpoints used
