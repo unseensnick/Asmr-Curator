@@ -48,9 +48,11 @@ jobs:
       - name: Unit tests (vitest)
         working-directory: frontend
         # `--reporter=junit` emits a JUnit XML alongside the default reporter
-        # so the report-publisher job picks it up. `|| true` is NOT used —
-        # a failing test fails this job and the PR check.
-        run: npm test -- --reporter=default --reporter=junit --outputFile.junit=test-results.xml
+        # so the report-publisher job picks it up. `--coverage` emits v8
+        # coverage (text + html + lcov) into frontend/coverage/ per the
+        # vitest.config.ts coverage block. `|| true` is NOT used — a
+        # failing test fails this job and the PR check.
+        run: npm test -- --reporter=default --reporter=junit --outputFile.junit=test-results.xml --coverage
 
       - name: Upload frontend test results
         uses: actions/upload-artifact@v4
@@ -58,6 +60,14 @@ jobs:
         with:
           name: frontend-test-results
           path: frontend/test-results.xml
+          if-no-files-found: warn
+
+      - name: Upload frontend coverage
+        uses: actions/upload-artifact@v4
+        if: success() || failure()
+        with:
+          name: frontend-coverage
+          path: frontend/coverage
           if-no-files-found: warn
 
   backend:
@@ -79,7 +89,7 @@ jobs:
         run: pip install -r backend/requirements.txt
 
       - name: Install test + lint dependencies
-        run: pip install pytest pytest-asyncio "ruff>=0.8.0"
+        run: pip install pytest pytest-asyncio pytest-cov "ruff>=0.8.0"
 
       - name: Ruff lint
         run: ruff check backend --config backend/pyproject.toml
@@ -93,7 +103,14 @@ jobs:
       - name: Unit tests (pytest)
         # `-c backend/pyproject.toml` points pytest at the [tool.pytest.ini_options]
         # block there; the `testpaths` setting picks up backend/tests/.
-        run: pytest -c backend/pyproject.toml --junitxml=backend-test-results.xml
+        # --cov writes coverage data; --cov-config points pytest-cov at
+        # the [tool.coverage.*] blocks in backend/pyproject.toml (needed
+        # because pytest-cov looks for coverage config in the cwd, not
+        # alongside the pytest -c file). --cov-report=xml emits
+        # coverage.xml for the artifact + downstream tools; the `term`
+        # reporter prints the per-file table to the CI log so a dipping
+        # file is visible without downloading the artifact.
+        run: pytest -c backend/pyproject.toml --junitxml=backend-test-results.xml --cov --cov-config=backend/pyproject.toml --cov-report=xml --cov-report=term
 
       - name: Check API docs in sync
         # Fails when a backend route exists without a matching row under
@@ -107,6 +124,14 @@ jobs:
         with:
           name: backend-test-results
           path: backend-test-results.xml
+          if-no-files-found: warn
+
+      - name: Upload backend coverage
+        uses: actions/upload-artifact@v4
+        if: success() || failure()
+        with:
+          name: backend-coverage
+          path: coverage.xml
           if-no-files-found: warn
 
   publish-test-results:

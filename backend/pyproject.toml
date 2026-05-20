@@ -22,6 +22,7 @@ dependencies = [
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
+    "pytest-cov>=5.0.0",
     "ruff>=0.8.0",
 ]
 
@@ -88,3 +89,23 @@ asyncio_mode = "auto"
 # does not, and without this entry pytest collection fails with
 # `ModuleNotFoundError: No module named 'backend'`.
 pythonpath = [".."]
+
+[tool.coverage.run]
+# Measure the backend package; tests + __pycache__ are excluded from the
+# scope so the report reflects production-code coverage, not test-file
+# self-coverage. `source` is relative to where pytest is invoked (repo
+# root in both local devcontainer + CI).
+source = ["backend"]
+omit = [
+    "backend/tests/*",
+    "backend/__pycache__/*",
+    "backend/.venv/*",
+]
+
+[tool.coverage.report]
+# `skip_covered = false` keeps every file in the terminal table so dips
+# are obvious. `precision = 1` because integer percentages hide small
+# regressions when the codebase is small.
+precision = 1
+show_missing = true
+skip_covered = false
