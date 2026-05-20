@@ -246,9 +246,7 @@ def _validate_name(name: str, *, max_bytes: int | None = None) -> str:
     if max_bytes is not None:
         name_bytes = len(name.encode("utf-8"))
         if name_bytes > max_bytes:
-            raise HTTPException(
-                422, f"Name too long: {name_bytes} bytes (max {max_bytes})."
-            )
+            raise HTTPException(422, f"Name too long: {name_bytes} bytes (max {max_bytes}).")
     return name
 
 
