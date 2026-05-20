@@ -17,6 +17,7 @@ from backend.main import (
     METADATA_COMPATIBLE_EXTS,
     NEEDS_CONVERSION_EXTS,
     _write_metadata,
+    log,
     reject_if_exists,
     require_file,
     root_for,
@@ -146,7 +147,8 @@ def search_files(
             if truncated:
                 break
     except PermissionError as e:
-        raise HTTPException(500, f"Permission error scanning files: {e}")
+        log.error("search PermissionError under %s: %s", root, e)
+        raise HTTPException(500, "Permission error scanning files. Check the server log.")
 
     results.sort(key=lambda r: (r["folder"].lower(), r["name"].lower()))
 
@@ -239,7 +241,8 @@ def make_directory(body: MkdirIn):
     try:
         target.mkdir(parents=True, exist_ok=False)
     except OSError as e:
-        raise HTTPException(500, f"Couldn't create folder: {e}")
+        log.error("mkdir failed for %s: %s", target.name, e)
+        raise HTTPException(500, "Couldn't create folder. Check the server log.")
     return {
         "created": True,
         "path": str(target.relative_to(_main.LIBRARY_PATH.resolve())),
@@ -333,7 +336,8 @@ def move_file(body: MoveIn):
     try:
         shutil.move(str(src), str(dest))
     except OSError as e:
-        raise HTTPException(500, f"Move failed: {e}")
+        log.error("move failed (%s -> %s): %s", src.name, dest.name, e)
+        raise HTTPException(500, "Move failed. Check the server log.")
 
     # Optional metadata embed. Folder moves and non-tag-compatible files
     # skip silently. Failures here surface as a partial-success warning,
@@ -490,7 +494,8 @@ def delete_path(body: DeleteIn):
         try:
             target.unlink()
         except OSError as e:
-            raise HTTPException(500, f"Delete failed: {e}")
+            log.error("unlink failed for %s: %s", target.name, e)
+            raise HTTPException(500, "Delete failed. Check the server log.")
         return {"deleted": True, "kind": "file", "path": rel}
 
     if not target.is_dir():
@@ -521,7 +526,8 @@ def delete_path(body: DeleteIn):
     try:
         shutil.rmtree(target)
     except OSError as e:
-        raise HTTPException(500, f"Recursive delete failed: {e}")
+        log.error("rmtree failed for %s: %s", target.name, e)
+        raise HTTPException(500, "Recursive delete failed. Check the server log.")
     return {"deleted": True, "kind": "folder_recursive", "path": rel}
 
 
@@ -591,7 +597,8 @@ def rename_path(body: RenamePathIn):
     except OSError as e:
         if e.errno == 36:  # ENAMETOOLONG
             raise HTTPException(422, "Name too long for the filesystem.")
-        raise HTTPException(500, f"Rename failed: {e}")
+        log.error("rename-path failed (%s -> %s): %s", src.name, dest.name, e)
+        raise HTTPException(500, "Rename failed. Check the server log.")
 
     return {
         "renamed": True,
@@ -645,7 +652,8 @@ def rename_file(body: RenameIn):
             raise HTTPException(
                 422, f"Filename too long ({len(new_name)} chars). Remove some tags to shorten it."
             )
-        raise HTTPException(500, f"Rename failed: {e}")
+        log.error("rename failed (%s -> %s): %s", src.name, dest.name, e)
+        raise HTTPException(500, "Rename failed. Check the server log.")
 
     metadata_error: str | None = None
     if body.metadata and any(

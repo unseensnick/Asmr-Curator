@@ -651,7 +651,7 @@ async def fetch_drive_audio(
                 "Google session expired or not synced. Open the browser "
                 "extension and click 'Sync cookie' (sign into Google in "
                 "the same browser first if you've been signed out), then "
-                f"retry. Drive redirected to: {page.url[:120]}",
+                f"retry. Drive redirected to: {_redact_sensitive_url(page.url)[:120]}",
                 code="auth_expired",
                 debug_dir=debug_dir,
             )

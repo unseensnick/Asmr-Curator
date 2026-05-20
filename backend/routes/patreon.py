@@ -10,10 +10,13 @@
 
 import asyncio
 import contextlib
+import ipaddress
 import json
 import os
+import socket
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -197,6 +200,49 @@ class IngestExternalAudioIn(BaseModel):
     album_artist: str | None = None
 
 
+_MAX_EXTERNAL_REDIRECTS = 5
+
+
+async def _validate_url_routable(url: str) -> None:
+    """Reject URLs that resolve to non-routable addresses (loopback, RFC1918,
+    link-local, multicast, reserved). Defence against SSRF probes via the
+    external-audio ingest endpoint — without this an attacker who reaches
+    `/api/patreon/ingest-external-audio` could pivot to internal services
+    (Ollama at localhost:11434, cloud metadata at 169.254.169.254, RFC1918
+    hosts on the same LAN).
+
+    Called at the initial URL *and* after each redirect because httpx's
+    follow_redirects mode would otherwise transparently land us on a
+    private IP. DNS-rebinding race conditions remain a theoretical residual
+    risk; the threat model here is single-user-on-LAN, not multi-tenant.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(400, "Only http(s) URLs are allowed")
+    hostname = parsed.hostname
+    if not hostname:
+        raise HTTPException(400, "URL is missing a hostname")
+    try:
+        addr_infos = await asyncio.to_thread(socket.getaddrinfo, hostname, None)
+    except socket.gaierror:
+        raise HTTPException(400, "Hostname could not be resolved")
+    for info in addr_infos:
+        ip_str = info[4][0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            continue
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            raise HTTPException(403, "URL resolves to a non-routable address")
+
+
 @router.post("/api/patreon/ingest-external-audio")
 async def ingest_external_audio(body: IngestExternalAudioIn):
     post_id = require_non_empty(body.post_id, "post_id")
@@ -215,42 +261,62 @@ async def ingest_external_audio(body: IngestExternalAudioIn):
     dest_dir = _ingest_dest_dir(post_id, body.artist, body.title)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
+    # Follow redirects manually so _validate_url_routable runs at every
+    # hop — httpx's follow_redirects=True would auto-follow a 302 into
+    # a private-IP target before we got a chance to block it.
+    target: Path | None = None
+    bytes_written = 0
+    content_length: str | None = None
     try:
         async with httpx.AsyncClient(
-            timeout=EXTERNAL_AUDIO_HTTPX_TIMEOUTS, follow_redirects=True
+            timeout=EXTERNAL_AUDIO_HTTPX_TIMEOUTS, follow_redirects=False
         ) as client:
-            async with client.stream("GET", cleaned_url) as response:
-                if response.status_code >= 400:
-                    raise HTTPException(
-                        502,
-                        f"External host returned {response.status_code} — URL may have expired",
+            current_url = cleaned_url
+            for _ in range(_MAX_EXTERNAL_REDIRECTS + 1):
+                await _validate_url_routable(current_url)
+                async with client.stream("GET", current_url) as response:
+                    if 300 <= response.status_code < 400:
+                        location = response.headers.get("location")
+                        if not location:
+                            raise HTTPException(502, "Redirect missing Location header")
+                        current_url = str(httpx.URL(current_url).join(location))
+                        continue
+                    if response.status_code >= 400:
+                        raise HTTPException(
+                            502,
+                            f"External host returned {response.status_code} — URL may have expired",
+                        )
+
+                    content_disposition = response.headers.get("content-disposition")
+                    content_type = response.headers.get("content-type")
+                    content_length = response.headers.get("content-length")
+
+                    filename = audio_utils.derive_filename(
+                        explicit=body.filename,
+                        content_disposition=content_disposition,
+                        content_type=content_type,
+                        fallback_stem=post_id,
                     )
-
-                content_disposition = response.headers.get("content-disposition")
-                content_type = response.headers.get("content-type")
-                content_length = response.headers.get("content-length")
-
-                filename = audio_utils.derive_filename(
-                    explicit=body.filename,
-                    content_disposition=content_disposition,
-                    content_type=content_type,
-                    fallback_stem=post_id,
-                )
-                target = audio_utils.unique_destination(dest_dir / filename)
-                part = target.with_suffix(target.suffix + ".part")
-                try:
-                    bytes_written = 0
-                    with part.open("wb") as f:
-                        async for chunk in response.aiter_bytes(chunk_size=64 * 1024):
-                            if chunk:
-                                f.write(chunk)
-                                bytes_written += len(chunk)
-                    part.rename(target)
-                except Exception:
-                    part.unlink(missing_ok=True)
-                    raise
+                    target = audio_utils.unique_destination(dest_dir / filename)
+                    part = target.with_suffix(target.suffix + ".part")
+                    try:
+                        with part.open("wb") as f:
+                            async for chunk in response.aiter_bytes(chunk_size=64 * 1024):
+                                if chunk:
+                                    f.write(chunk)
+                                    bytes_written += len(chunk)
+                        part.rename(target)
+                    except Exception:
+                        part.unlink(missing_ok=True)
+                        raise
+                    break
+            else:
+                raise HTTPException(502, "Too many redirects following source_url")
     except httpx.HTTPError as e:
         raise HTTPException(502, f"Failed to fetch source_url: {e}")
+
+    if target is None:  # exhausted the redirect loop without a body — shouldn't happen
+        raise HTTPException(502, "External fetch produced no response")
 
     # Best-effort metadata embed. Any failure here is non-fatal — the file
     # is on disk either way.
@@ -330,7 +396,11 @@ async def ingest_drive_link(body: IngestDriveLinkIn):
         if not isinstance(cookies, list):
             raise ValueError("expected JSON array")
     except (ValueError, json.JSONDecodeError) as e:
-        raise HTTPException(500, f"Google cookie in settings is malformed: {e}")
+        log.error("Google cookie in settings is malformed: %s", e)
+        raise HTTPException(
+            500,
+            "Google cookie in settings is malformed — re-sync via the extension.",
+        )
 
     dest_dir = _ingest_dest_dir(post_id, body.artist, body.title)
     dest_dir.mkdir(parents=True, exist_ok=True)

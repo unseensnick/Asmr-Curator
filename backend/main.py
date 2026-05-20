@@ -18,6 +18,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from mutagen.flac import FLAC
@@ -52,6 +53,23 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="ASMR Curator API", lifespan=lifespan)
+
+# CORS — restrictive by default; expand only the dev Vite origin so the
+# `npm run dev` proxy keeps working. In production the SPA is served from
+# the same origin as the API (port 8000), so no cross-origin requests are
+# expected — meaning *any* cross-origin Origin header is suspicious and
+# should be rejected. Without this middleware a malicious page the user
+# visits could PUT /api/settings/patreon-cookie with `text/plain` and
+# overwrite their stored cookie (PUT triggers preflight, which CORS then
+# blocks). Defence in depth, per .claude/rules/security.md.
+_DEV_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_DEV_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allow_headers=["Content-Type"],
+)
 
 
 # Resolve frontend dist path — built output from `cd frontend && npm run build`.
