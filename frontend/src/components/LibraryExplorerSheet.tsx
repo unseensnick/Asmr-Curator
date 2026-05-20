@@ -51,10 +51,14 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import { useDragSelect } from "@/hooks/useDragSelect";
 import { API, apiGet, apiPost, buildQueryString, type FileRoot, moveBatchStream } from "@/lib/api";
 import { METADATA_COMPATIBLE_EXTS, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
-import { LIBRARY_FILTER_DEBOUNCE_MS } from "@/lib/constants";
 import { selectAll, selectionFromClick } from "@/lib/explorerSelection";
 import type { FileEntry, ListedDirResponse } from "@/lib/types";
 import { deferToNextMacrotask, getErrorMessage } from "@/lib/utils";
+
+/** Debounce window for the inline filter input. Tighter than the
+ *  FileBrowser tab's search because the user expects in-place filter
+ *  feel, not a search-box round-trip. */
+const LIBRARY_FILTER_DEBOUNCE_MS = 200;
 
 interface LibraryExplorerSheetProps {
     open: boolean;

@@ -18,9 +18,13 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { API, apiGet, apiPost, apiPut } from "@/lib/api";
-import { OBJECT_URL_REVOKE_MS } from "@/lib/constants";
 import type { AppDict, DictionaryApiResponse } from "@/lib/types";
 import { buildDictDerived, dictFromApiResponse } from "@/lib/types";
+
+/** Delay before revoking the `URL.createObjectURL` blob in the JSON export.
+ *  The download dialog has fully consumed the URL by then on every browser
+ *  we support. */
+const OBJECT_URL_REVOKE_MS = 3000;
 
 type DictTab = "vocabulary" | "suppressed" | "test";
 

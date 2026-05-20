@@ -20,9 +20,12 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { API, apiGet, apiPost, buildQueryString, type FileRoot } from "@/lib/api";
 import { FORMAT_EXT, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
-import { FILEBROWSER_SEARCH_DEBOUNCE_MS } from "@/lib/constants";
 import type { ConvertFormat, ConvertQuality, FileEntry, SearchMode } from "@/lib/types";
 import { getErrorMessage } from "@/lib/utils";
+
+/** Debounce window for the tab's search input. Longer than the Library
+ *  Sheet's inline filter because this hits the network. */
+const FILEBROWSER_SEARCH_DEBOUNCE_MS = 300;
 
 interface FileBrowserProps {
     outputDash: string;

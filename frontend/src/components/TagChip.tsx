@@ -11,9 +11,13 @@ import {
 } from "@/components/ui/context-menu";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
-import { ALIAS_PICKER_MAX_MATCHES } from "@/lib/constants";
 import type { VocabEntry } from "@/lib/types";
 import { deferToNextMacrotask } from "@/lib/utils";
+
+/** Cap on rows the alias picker shows for a single query. The picker is
+ *  a quick-add affordance, not a browse surface — the Dictionary modal
+ *  handles full vocabulary editing. */
+const ALIAS_PICKER_MAX_MATCHES = 30;
 
 interface TagChipProps {
     label: string;
