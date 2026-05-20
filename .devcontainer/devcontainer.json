@@ -13,6 +13,7 @@
   ],
 
   "postCreateCommand": "sudo chown -R devuser:devuser /workspaces/asmr-curator && sudo chmod -R u+rw /workspaces/asmr-curator",
+  "// postStartCommand pins": "node + patreon-dl versions duplicate the production Dockerfile (`volta install node@25` + `npm install -g patreon-dl@${PATREON_DL_VERSION}`, ARG default 3.9.0). Keep these two pinned-version strings in sync — devcontainer.json can't read Docker ARGs at runtime, so the duplication is by design. Bump both files together.",
   "postStartCommand": "uv pip install --python /home/devuser/.venv/bin/python -r /workspaces/asmr-curator/backend/requirements.txt -q && volta install node@25 && npm install -g patreon-dl@3.9.0",
 
   "customizations": {
