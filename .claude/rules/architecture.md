@@ -10,54 +10,60 @@ paths:
 ## System overview
 
 ```mermaid
-flowchart LR
-    subgraph Clients
-        UI["React SPA<br/>(frontend/src/)"]
-        EXT["Chrome extension<br/>(extension/)"]
+flowchart TD
+    classDef client fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e,stroke-width:1.5px
+    classDef api    fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:1.5px
+    classDef svc    fill:#fef3c7,stroke:#d97706,color:#78350f,stroke-width:1.5px
+    classDef ext    fill:#ffe4e6,stroke:#e11d48,color:#881337,stroke-width:1.5px
+    classDef store  fill:#f3f4f6,stroke:#4b5563,color:#111827,stroke-width:1.5px
+
+    subgraph CLI["&nbsp;Clients&nbsp;"]
+        direction LR
+        UI["React SPA"]
+        EXT["Chrome extension"]
     end
 
-    subgraph FastAPI["FastAPI · backend/"]
-        MAIN["main.py<br/>app + shared helpers"]
-        ROUTES["routes/<br/>system · extract · files ·<br/>convert · dictionary ·<br/>settings · patreon"]
-        DBMOD["database.py"]
-        PFETCH["patreon_fetch.py<br/>(subprocess)"]
-        DFETCH["drive_fetch.py<br/>(Playwright)"]
-        AUDIO["audio_utils.py"]
+    subgraph BE["&nbsp;FastAPI &middot; backend/&nbsp;"]
+        direction TB
+        MAIN["main.py<br/><i>app + shared helpers</i>"]
+        ROUTES["routes/*.py<br/><i>system &middot; extract &middot; files &middot; convert<br/>dictionary &middot; settings &middot; patreon</i>"]
+        DB["database.py"]
+        PF["patreon_fetch.py<br/><i>patreon-dl subprocess</i>"]
+        DF["drive_fetch.py<br/><i>Playwright</i>"]
     end
 
-    subgraph External
-        OLLAMA["Ollama<br/>vision LLM"]
+    subgraph EX["&nbsp;External services&nbsp;"]
+        direction LR
+        OLLAMA["Ollama<br/><i>vision LLM</i>"]
+        FFMPEG["ffmpeg"]
         PATREON["Patreon"]
         DRIVE["Google Drive"]
-        FFMPEG["ffmpeg subprocess"]
     end
 
-    subgraph Storage["Bind-mounted storage"]
+    subgraph ST["&nbsp;Bind-mounted volumes&nbsp;"]
+        direction LR
         SQLITE[("SQLite<br/>DB_PATH")]
-        LIB[("LIBRARY_PATH<br/>curated archive")]
-        DL[("DOWNLOAD_PATH<br/>ingest staging")]
+        LIB[("LIBRARY_PATH")]
+        DL[("DOWNLOAD_PATH")]
     end
 
-    UI -->|/api/*| MAIN
-    EXT -->|cookie sync| MAIN
-    MAIN --- ROUTES
+    UI    -->|"/api/*"| MAIN
+    EXT   -->|"cookie sync"| MAIN
+    MAIN  --> ROUTES
+    ROUTES --> DB & PF & DF
+    ROUTES --> OLLAMA & FFMPEG
+    ROUTES --> LIB & DL
+    PF --> PATREON
+    DF --> DRIVE
+    PF --> DL
+    DF --> DL
+    DB --> SQLITE
 
-    ROUTES --> OLLAMA
-    ROUTES --> DBMOD
-    ROUTES --> FFMPEG
-    ROUTES --> PFETCH
-    ROUTES --> DFETCH
-    PFETCH --> AUDIO
-    DFETCH --> AUDIO
-
-    PFETCH --> PATREON
-    DFETCH --> DRIVE
-
-    DBMOD --> SQLITE
-    PFETCH --> DL
-    DFETCH --> DL
-    ROUTES --> LIB
-    ROUTES --> DL
+    class UI,EXT client
+    class MAIN,ROUTES api
+    class DB,PF,DF svc
+    class OLLAMA,FFMPEG,PATREON,DRIVE ext
+    class SQLITE,LIB,DL store
 ```
 
 ## Request flow
