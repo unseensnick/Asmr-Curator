@@ -3,7 +3,7 @@ name = "asmr-curator"
 version = "2.0.4"
 description = "Self-hosted ASMR Curator: vision LLM extraction, tag dictionary, file rename + ID3, audio conversion"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "fastapi==0.130.0",
     # Pinned explicitly to patch CVE-2025-54121 + CVE-2025-62727 — fastapi
@@ -32,7 +32,7 @@ dev = [
 ]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py314"
 line-length = 100
 
 [tool.ruff.lint]

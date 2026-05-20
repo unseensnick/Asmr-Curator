@@ -97,7 +97,7 @@ def get_google_cookie():
     try:
         parsed = json.loads(value)
         count = len(parsed) if isinstance(parsed, list) else 0
-    except (ValueError, json.JSONDecodeError):
+    except ValueError, json.JSONDecodeError:
         count = 0
     return {"set": True, "count": count, "length": len(value)}
 
