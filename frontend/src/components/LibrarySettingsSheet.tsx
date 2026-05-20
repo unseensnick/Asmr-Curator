@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { API, apiGet, apiPost, apiPut } from "@/lib/api";
+import { OBJECT_URL_REVOKE_MS } from "@/lib/constants";
 import type { AppDict, DictionaryApiResponse } from "@/lib/types";
 import { buildDictDerived, dictFromApiResponse } from "@/lib/types";
 
@@ -113,7 +114,7 @@ export default function LibrarySettingsSheet({
         a.href = url;
         a.download = "asmr-tag-dictionary.json";
         a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 3000);
+        setTimeout(() => URL.revokeObjectURL(url), OBJECT_URL_REVOKE_MS);
     }
 
     const importRef = useRef<HTMLInputElement>(null);

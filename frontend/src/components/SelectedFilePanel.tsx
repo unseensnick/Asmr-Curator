@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 
 import { API, apiPost, type FileRoot } from "@/lib/api";
 import { FORMAT_EXT, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
+import { FILE_ACTION_FEEDBACK_MS } from "@/lib/constants";
 import type { ConvertFormat, ConvertQuality, FileEntry, RenameSep } from "@/lib/types";
 import { getErrorMessage, sanitizeFilename } from "@/lib/utils";
 
@@ -185,7 +186,7 @@ export default function SelectedFilePanel({
             });
             setRenamed(true);
             if (renamedTimerRef.current) clearTimeout(renamedTimerRef.current);
-            renamedTimerRef.current = setTimeout(() => setRenamed(false), 2500);
+            renamedTimerRef.current = setTimeout(() => setRenamed(false), FILE_ACTION_FEEDBACK_MS);
             // Surface the partial-success path: rename committed, metadata
             // embed didn't. The file is on disk under the new name, but the
             // user expected tags written too.
@@ -222,7 +223,10 @@ export default function SelectedFilePanel({
             });
             setConverted(true);
             if (convertedTimerRef.current) clearTimeout(convertedTimerRef.current);
-            convertedTimerRef.current = setTimeout(() => setConverted(false), 2500);
+            convertedTimerRef.current = setTimeout(
+                () => setConverted(false),
+                FILE_ACTION_FEEDBACK_MS,
+            );
             onListReload();
         } catch (e) {
             onError("Conversion failed: " + getErrorMessage(e));

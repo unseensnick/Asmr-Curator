@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import CopyButton from "@/components/CopyButton";
 import { Checkbox } from "@/components/ui/checkbox";
+import { OUTPUT_PULSE_MS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 interface OutputPanelProps {
@@ -84,7 +85,7 @@ function OutputRow({ labelId, label, separator, value, emptyText }: OutputRowPro
     useEffect(() => {
         if (value && value !== prev.current) {
             setPulsing(true);
-            const t = window.setTimeout(() => setPulsing(false), 600);
+            const t = window.setTimeout(() => setPulsing(false), OUTPUT_PULSE_MS);
             prev.current = value;
             return () => window.clearTimeout(t);
         }
