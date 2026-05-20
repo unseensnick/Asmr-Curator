@@ -1,0 +1,29 @@
+# Dependabot — security-only mode.
+#
+# `open-pull-requests-limit: 0` disables routine version-bump PRs.
+# Security-update PRs flow through regardless of that limit because
+# they're managed separately under Settings → Code security and
+# analysis → "Dependabot security updates" (default on for public
+# repos). Turn that toggle off to silence security PRs too.
+#
+# To turn routine version bumps back on later, raise the limit on a
+# specific ecosystem (e.g. `open-pull-requests-limit: 5`).
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 0
