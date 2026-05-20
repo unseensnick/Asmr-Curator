@@ -461,10 +461,14 @@ async def move_batch(body: MoveBatchIn):
                     },
                 }
             except OSError as e:
+                log.error("batch-move failed for %s: %s", item.from_path, e)
                 entry = {
                     "from_path": item.from_path,
                     "ok": False,
-                    "error": {"code": "other", "message": f"Move failed: {e}"},
+                    "error": {
+                        "code": "other",
+                        "message": "Move failed. Check the server log.",
+                    },
                 }
             results.append(entry)
             yield (
