@@ -5,6 +5,7 @@ import asyncio
 import errno
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from backend.main import (
     validate_under_library,
     validate_under_root,
 )
+from backend.patreon_fetch import _iter_cached_posts
 
 # LIBRARY_PATH accessed via `_main.LIBRARY_PATH` (attribute lookup) rather
 # than a top-level import binding so the test suite's monkeypatch on
@@ -215,6 +217,72 @@ def debug_files(root: str = "library"):
         "top_level_entries": top_level,
         "top_level_count": len(top_level),
     }
+
+
+# ── Cached Patreon metadata lookup (bulk-edit "Load from cache") ─────────────
+
+
+# Patreon post IDs are numeric. The flattened ingest layout names each post
+# folder `<post_id> - <title>`; the legacy layout was just `<post_id>`. The
+# folder name is the only stable signal we have for tying a file back to its
+# sidecar without re-parsing every cached `post-api.json` per path.
+_POST_ID_FOLDER_RE = re.compile(r"^(\d+)(?: - .+)?$")
+
+
+def _post_id_from_folder(name: str) -> str | None:
+    match = _POST_ID_FOLDER_RE.match(name)
+    return match.group(1) if match else None
+
+
+class LoadCachedMetadataIn(BaseModel):
+    paths: list[str]
+    root: str = "downloads"
+
+
+@router.post("/api/files/load-cached-metadata")
+def load_cached_metadata(body: LoadCachedMetadataIn):
+    """For each selected file, return cached Patreon title / artist / tags
+    when the file lives under a post folder whose name carries a post_id.
+
+    Sidecars live at `DOWNLOAD_PATH/.patreon-dl/.../post_info/post-api.json`
+    regardless of where the audio ended up after `_flatten_audio` or a
+    Move-to-library. The lookup is parent-folder-name driven, so files
+    under `<creator>/<post_id> - <title>/` resolve in both DOWNLOAD_PATH
+    and LIBRARY_PATH; files outside that naming pattern come back with no
+    metadata fields (the bulk-edit UI surfaces this as "no cached info").
+
+    The cache is walked once per request rather than per path — a 100-file
+    selection is one `rglob`, not 100.
+    """
+    root_path = root_for(body.root)
+
+    patreon_dir = _main.DOWNLOAD_PATH.resolve() / ".patreon-dl"
+    cache: dict[str, object] = {}
+    if patreon_dir.is_dir():
+        for post, _, _ in _iter_cached_posts(patreon_dir):
+            cache[post.post_id] = post
+
+    items: list[dict] = []
+    for rel in body.paths:
+        try:
+            target = validate_under_root(rel, root_path)
+        except HTTPException:
+            # Bad path in a bulk request doesn't fail the whole request —
+            # surface as an empty entry so the UI can show the user that
+            # this file has no cached info, same as a path that simply
+            # doesn't match a post-folder name.
+            items.append({"path": rel})
+            continue
+        post_id = _post_id_from_folder(target.parent.name)
+        cached = cache.get(post_id) if post_id else None
+        entry: dict = {"path": rel}
+        if cached is not None:
+            entry["title"] = cached.title
+            entry["artist"] = cached.artist
+            entry["tags"] = list(cached.tags)
+        items.append(entry)
+
+    return {"items": items}
 
 
 # ── Folder creation + cross-root move ────────────────────────────────────────
