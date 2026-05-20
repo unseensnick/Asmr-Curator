@@ -168,7 +168,7 @@ describe("parseTitleLine — unicode + emoji handling", () => {
     });
 
     it("strips emoji from title", () => {
-        // \u{1F495} = 💕 (in the U+1F000-U+1FFFF range stripped by the parser)
+        // \u{1F495} = 💕 (an Extended_Pictographic codepoint in plane 1)
         const { title } = parseTitleLine("Love \u{1F495} Title");
         expect(title).not.toContain("\u{1F495}");
         // Whitespace collapse means "Love  Title" becomes "Love Title"
@@ -176,9 +176,70 @@ describe("parseTitleLine — unicode + emoji handling", () => {
     });
 
     it("strips dingbats from title", () => {
-        // ✨ = ✨ (in the U+2600-U+27BF dingbat range)
+        // ✨ U+2728 — Extended_Pictographic from the Dingbats block.
         const { title } = parseTitleLine("✨ Sparkles");
         expect(title).not.toContain("✨");
+    });
+
+    it("strips stars and shapes from the Misc Symbols and Arrows block", () => {
+        // ⭐ U+2B50 and ⬛ U+2B1B sit outside the old 1F000-1FFFF / 2600-27BF
+        // ranges and previously survived. They're Extended_Pictographic.
+        const { title } = parseTitleLine("⭐ Featured ⬛ Title ⬜");
+        expect(title).not.toMatch(/[⭐⬛⬜]/u);
+        expect(title).toBe("Featured Title");
+    });
+
+    it("strips clocks and hourglasses from the Misc Technical block", () => {
+        // ⌛ U+231B and ⏰ U+23F0 — Extended_Pictographic but outside the old
+        // hand-picked ranges.
+        const { title } = parseTitleLine("⌛ Long Sleep ⏰ Now");
+        expect(title).not.toMatch(/[⌛⏰]/u);
+        expect(title).toBe("Long Sleep Now");
+    });
+
+    it("strips country-flag emoji built from regional indicators", () => {
+        // 🇺🇸 = U+1F1FA + U+1F1F8 — paired regional indicators, not covered by
+        // Extended_Pictographic alone.
+        const { title } = parseTitleLine("English 🇺🇸 ASMR");
+        expect(title).not.toMatch(/[\u{1F1E6}-\u{1F1FF}]/u);
+        expect(title).toBe("English ASMR");
+    });
+
+    it("strips ZWJ-joined emoji sequences without leaving orphan joiners", () => {
+        // Family emoji: 👨‍👩‍👧 = man + ZWJ + woman + ZWJ + girl.
+        const { title } = parseTitleLine("Family 👨‍👩‍👧 Story");
+        // Alternation (not a character class) because ‍ is a joiner;
+        // putting joiners and pictographs in one [] confuses ESLint's
+        // no-misleading-character-class rule.
+        expect(title).not.toMatch(/\p{Extended_Pictographic}|‍/u);
+        expect(title).toBe("Family Story");
+    });
+
+    it("strips emoji with variation selectors cleanly", () => {
+        // ❤️ = U+2764 + U+FE0F (heart + VS-16 for emoji presentation).
+        const { title } = parseTitleLine("Soft ❤️ Words");
+        expect(title).not.toMatch(/❤|️/u);
+        expect(title).toBe("Soft Words");
+    });
+
+    it("strips ZWJ sequences whose joined components span multiple Unicode blocks", () => {
+        // 🐈‍⬛ = U+1F408 (cat) + U+200D (ZWJ) + U+2B1B (black large square).
+        // The 2B1B half lives in Misc Symbols and Arrows, which the old
+        // hand-picked ranges missed — the sequence would have left a stray
+        // ⬛ behind. Now the whole sequence collapses to nothing.
+        const { title } = parseTitleLine("Pet 🐈‍⬛ ASMR");
+        expect(title).not.toMatch(/\u{1F408}|\u{2B1B}|‍/u);
+        expect(title).toBe("Pet ASMR");
+    });
+
+    it("strips a dense run of mixed emoji from a real-world Patreon-style title", () => {
+        // Pulled from a real post header. Combines: plane-1 face/animal/heart
+        // emoji, the 1FA00–1FAFF Symbols and Pictographs Extended-A block
+        // (🩺 stethoscope U+1FA7A, 🩵 light-blue-heart U+1FA75), and a ZWJ
+        // sequence with VS-16 (🧘‍♀️ = lotus + ZWJ + female sign + VS-16).
+        const dense = "🦊💋😏🧘‍♀️🛌🩺🩵💤💖🌹🐈‍⬛";
+        const { title } = parseTitleLine(`Bedtime ${dense} Story`);
+        expect(title).toBe("Bedtime Story");
     });
 
     it("collapses multiple spaces into one", () => {
