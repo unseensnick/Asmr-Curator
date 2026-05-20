@@ -97,7 +97,11 @@ jobs:
         run: pip install -r backend/requirements.txt
 
       - name: Install test + lint dependencies
-        run: pip install pytest pytest-asyncio pytest-cov "ruff>=0.8.0"
+        # Mirrors backend/pyproject.toml's [dependency-groups].dev — the
+        # subset CI needs for lint + tests + coverage. hypothesis is
+        # required by tests/test_properties.py; new dev deps that show
+        # up in test files must be added here too.
+        run: pip install pytest pytest-asyncio pytest-cov hypothesis "ruff>=0.8.0"
 
       - name: Install pip-audit
         run: pip install pip-audit
