@@ -114,8 +114,9 @@ def ext_from_content_type(content_type: str | None) -> str:
 
 def unique_destination(target: Path) -> Path:
     """Return `target`, or `target` with `_2`/`_3`/… if it already exists.
-    Mirrors patreon_fetch._unique_path so external-ingest collisions follow
-    the same pattern as patreon-dl-ingested audio."""
+    Shared by every writer under DOWNLOAD_PATH (patreon-dl flatten step +
+    external-audio ingest + Drive scrape) so collisions follow the same
+    pattern across all ingest paths."""
     if not target.exists():
         return target
     stem, suffix, parent = target.stem, target.suffix, target.parent
