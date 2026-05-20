@@ -1,13 +1,19 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 import CookiesSheet from "@/components/CookiesSheet";
 import FileBrowser from "@/components/FileBrowser";
 import Header from "@/components/Header";
-import LibrarySettingsSheet from "@/components/LibrarySettingsSheet";
 import OutputPanel from "@/components/OutputPanel";
 import PatreonPanel from "@/components/PatreonPanel";
 import ScreenshotPanel from "@/components/ScreenshotPanel";
 import TagsEditor from "@/components/TagsEditor";
+
+// LibrarySettingsSheet is heavy (Dictionary modal + Vocabulary/Suppressed
+// panes + DictionaryTester) and only renders when the user opens it via
+// the Header. React.lazy moves it out of the initial chunk; Suspense
+// fallback is null because the Sheet's open animation already covers
+// the brief load.
+const LibrarySettingsSheet = lazy(() => import("@/components/LibrarySettingsSheet"));
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { API, apiGet, apiPatch, apiPost } from "@/lib/api";
 import type { AppDict, DictionaryApiResponse, VocabEntry } from "@/lib/types";
@@ -293,12 +299,16 @@ export default function App() {
                 </div>
             </section>
 
-            <LibrarySettingsSheet
-                open={libraryOpen}
-                onClose={() => setLibraryOpen(false)}
-                dict={dict}
-                onDictChange={setDict}
-            />
+            <Suspense fallback={null}>
+                {libraryOpen && (
+                    <LibrarySettingsSheet
+                        open={libraryOpen}
+                        onClose={() => setLibraryOpen(false)}
+                        dict={dict}
+                        onDictChange={setDict}
+                    />
+                )}
+            </Suspense>
             <CookiesSheet open={cookiesOpen} onClose={() => setCookiesOpen(false)} />
         </div>
     );
