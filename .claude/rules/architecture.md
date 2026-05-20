@@ -53,7 +53,7 @@ paths:
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server endpoint                                        |
 | `OLLAMA_MODEL`    | `qwen2.5vl:7b`           | Vision model for extraction                                   |
 
-In Docker, both paths are bind-mounted via `LIBRARY_PATH` + `DOWNLOAD_PATH` in `.env` (host) → `/mnt/audio` + `/mnt/downloads` (container). The devcontainer mounts them at the same container paths and runs as `devuser` in `/workspaces/asmr-filename-gen`. The two host paths must be distinct directories.
+In Docker, both paths are bind-mounted via `LIBRARY_PATH` + `DOWNLOAD_PATH` in `.env` (host) → `/mnt/audio` + `/mnt/downloads` (container). The devcontainer mounts them at the same container paths and runs as `devuser` in `/workspaces/asmr-curator`. The two host paths must be distinct directories.
 
 ## Dev vs. production
 
