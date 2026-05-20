@@ -30,15 +30,10 @@ with _FORMATS_CONFIG_PATH.open() as _f:
     _FORMATS_CONFIG = json.load(_f)
 AUDIO_EXTS = set(_FORMATS_CONFIG["metadataCompatibleExts"]) | set(_FORMATS_CONFIG["needsConversionExts"])
 
-# patreon-dl's media-type vocabulary, as accepted by `content.media` and
-# `posts.with.media.type` — plus our synthetic `external` flag.
-#
-# `external` is NOT a patreon-dl media type. Including it in `content_types`
-# is the wrapper's signal to widen patreon-dl's walk to every accessible post
-# (drop the `posts.with.media.type` filter) so posts whose only "audio" is a
-# Drive URL in the body actually surface in the result. `_write_config`
-# translates the flag into config-file shape — patreon-dl never sees the
-# literal string `external`.
+# patreon-dl's media-type vocabulary plus our synthetic `external` flag.
+# `external` signals `_write_config` to drop the `posts.with.media.type`
+# filter so posts whose only audio is a Drive URL still surface — patreon-dl
+# never sees the literal string.
 ALLOWED_CONTENT_TYPES = ("audio", "video", "image", "attachment", "external")
 
 
@@ -46,11 +41,10 @@ class PatreonFetchError(RuntimeError):
     """Raised when patreon-dl fails or returns no usable content."""
 
 
-# Hosts whose links inside a post body the user is likely to want to capture
-# audio from via the browser extension. Surfaced in FetchedPost.external_links
-# so the frontend can flag the post for "open this in the browser to grab the
-# audio". Audio-URL interception in the extension itself is gated to a smaller
-# subset (Google hosts) because the UMP/range cleaning trick is host-specific.
+# File-host links surfaced on FetchedPost.external_links so the frontend
+# can flag the post for the per-link Download flow. Drive-only auto-capture
+# happens server-side via `backend.drive_fetch`; the others surface as
+# plain links the user opens manually.
 EXTERNAL_HOST_ALLOWLIST = (
     "drive.google.com",
     "mega.nz",
@@ -58,11 +52,9 @@ EXTERNAL_HOST_ALLOWLIST = (
     "dropbox.com",
 )
 
-# Single-post Patreon URL → numeric post ID. Used by the metadata-only
-# re-fetch fallback in `fetch()` to find a specific post's cached sidecar
-# when patreon-dl's status cache made it skip the re-write. Creator URLs
-# (`patreon.com/<creator-name>`) don't match — they have no `/posts/`
-# segment — and the fallback only fires for single-post URLs.
+# Single-post URL → numeric ID, used by the metadata-only fast-path to
+# look up the cached sidecar when status.cache made patreon-dl skip the
+# re-write. Creator URLs lack `/posts/` so they don't match.
 _POST_URL_ID_RE = re.compile(
     r"patreon\.com/posts/[^/?#]*?(\d+)(?:[/?#]|$)",
     re.IGNORECASE,
@@ -84,14 +76,10 @@ _RESERVED_VANITY_PATHS = frozenset({
     "messages", "api", "policy", "about", "help", "creators", "auth",
 })
 
-# Patterns for pulling URLs out of a post's `attributes.content` HTML.
-# patreon-dl preserves Patreon's markup verbatim there. Creators store links
-# in several shapes; we scan all of them and let EXTERNAL_HOST_ALLOWLIST
-# filter the candidates.
-# Full anchor match: captures both the URL and the inner HTML so we can
-# extract the visible link text (used as a per-download filename hint —
-# see `_extract_external_links`). Falls back gracefully when an `<a>` has
-# no inner content.
+# URL patterns for `attributes.content` HTML. Creators store links in
+# several shapes; we scan all of them and let EXTERNAL_HOST_ALLOWLIST
+# filter the candidates. The anchor regex captures both URL and inner
+# HTML so the visible text becomes a per-download filename hint.
 _ANCHOR_RE = re.compile(
     r"""<a\s+[^>]*?href\s*=\s*['"]([^'"]+)['"][^>]*>(.*?)</a>""",
     re.IGNORECASE | re.DOTALL,
@@ -210,21 +198,11 @@ def fetch(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Metadata-only fast path: skip the patreon-dl subprocess entirely
-    # when the requested info is already on disk. With `use.status.cache`
-    # (default 1) patreon-dl would just hit its cache and exit without
-    # writing anything new, so the result would be identical to what's
-    # already cached. Avoiding the subprocess removes ~all the latency
-    # (network round-trip + Node startup + db.sqlite touch) for what is
-    # otherwise a pure filesystem read.
-    #
-    # Two flavors:
-    #   • Single post URL  → look up one cached sidecar by post id.
-    #   • Creator URL      → walk every cached sidecar whose campaign
-    #     vanity matches the URL, apply the same date filter
-    #     patreon-dl would apply server-side, return all matches.
-    #
-    # First-time fetches (no sidecars) fall through to the normal flow.
+    # Metadata-only fast path: skip the patreon-dl subprocess when the
+    # info is already on disk (patreon-dl's status cache would emit the
+    # same result minus a network round-trip + Node startup). Single-post
+    # URL → one sidecar; creator URL → all matching sidecars + date
+    # filter. First-time fetches fall through to the normal flow.
     if metadata_only:
         cached_post_id = _post_id_from_url(url)
         if cached_post_id:
@@ -261,13 +239,9 @@ def fetch(
     )
     config_path = _write_config(opts)
 
-    # Track when this fetch starts so _collect_posts can filter out stale
-    # sidecars from previous fetches. patreon-dl's use.status.cache means a
-    # re-fetch of the same URL writes nothing new on disk for posts it's
-    # already pulled — but the OLD post-api.json files still sit in the
-    # output tree and we'd otherwise surface them as "results" for this run.
-    # Tiny pre-roll on the threshold (-2 s) to absorb filesystem mtime
-    # resolution differences between Linux and the bind-mounted host.
+    # `_collect_posts` filters sidecars by mtime > fetch_started_at so a
+    # re-fetch doesn't re-surface already-cached posts. -2 s pre-roll
+    # absorbs filesystem mtime resolution on bind-mounted hosts.
     fetch_started_at = time.time() - 2
 
     # Cookie is passed via the config file (see _write_config) rather than
@@ -362,14 +336,9 @@ def _write_config(opts: PatreonFetchOptions) -> str:
     ]
 
     # ── [downloader] section ────────────────────────────────────────────────
-    # `stop.on` accepts a single value (not a CSV). It controls when the walk
-    # terminates early — per-post dedup of already-downloaded items is handled
-    # independently by patreon-dl's `use.status.cache` (default 1).
-    #
-    # Pick based on what's most useful:
-    #   - date filter set → publishDateOutOfRange (bail once we leave the window)
-    #   - otherwise → previouslyDownloaded (stop at the first cached post so
-    #     re-fetches of the same creator URL terminate quickly)
+    # `stop.on` ends the walk early; per-post dedup is separate
+    # (`use.status.cache`). Date filter → publishDateOutOfRange; otherwise →
+    # previouslyDownloaded so re-fetches of a creator URL terminate fast.
     lines.append("[downloader]")
     if opts.cookie:
         # patreon-dl reads downloader:cookie as a single value to end-of-line,
@@ -389,49 +358,32 @@ def _write_config(opts: PatreonFetchOptions) -> str:
         lines.append("dry.run = 1")
 
     # ── [include] section ───────────────────────────────────────────────────
-    #
-    # Two independent knobs map onto patreon-dl's two filters:
-    #
-    #   `posts.with.media.type` — which posts patreon-dl visits at all. When
-    #       this is unset, patreon-dl walks every accessible post. We emit it
-    #       only for the narrow case "user wants to download Patreon-hosted
-    #       media types AND hasn't asked to see body-link-only posts". Two
-    #       wrapper flags widen the walk by omitting the key:
-    #         • metadata_only=True   → walks all posts, downloads nothing.
-    #         • "external" in content_types → walks all posts, still
-    #           downloads any other Patreon-hosted types the user picked.
-    #
-    #   `content.media` — what gets downloaded from the posts that ARE visited.
-    #       metadata_only forces it to 0 (and 0 for preview.media). Otherwise
-    #       it's the CSV of real patreon-dl media types (audio/video/image/
-    #       attachment) — "external" is filtered out because it isn't one.
+    # Two filters map onto patreon-dl: `posts.with.media.type` narrows
+    # which posts get visited (omit it to walk every accessible post —
+    # metadata_only and "external" both want that), and `content.media`
+    # controls what's downloaded from visited posts ("external" is a
+    # wrapper-only flag and filtered out here).
     media_types = [t for t in opts.content_types if t != "external"]
     walk_all_posts = opts.metadata_only or ("external" in opts.content_types)
 
     lines.append("[include]")
     if opts.metadata_only:
-        # metadata_only wins — skip every media class. Sidecars (post-api.json)
-        # still come through via the never-disabled content.info path, which
-        # is what makes the external_links surfacing work.
+        # Skip every media class; sidecars still arrive via content.info.
         lines.append("content.media = 0")
         lines.append("preview.media = 0")
     else:
         if not walk_all_posts and media_types:
-            # Narrow walk: only posts that have one of the selected media types.
             lines.append(f"posts.with.media.type = {', '.join(media_types)}")
         if media_types:
             lines.append(f"content.media = {', '.join(media_types)}")
         else:
-            # External-only selection — walk every post, download nothing.
-            # Sidecars still arrive so the body-text Drive URLs surface in
-            # external_links.
+            # External-only: walk every post, download nothing; sidecars
+            # still surface body-text URLs in external_links.
             lines.append("content.media = 0")
-        # media.thumbnails = 1 (default) generates a thumbnails/ subfolder used
-        # by patreon-dl's own browse function — we don't use that here, so
-        # turn it off unless the user explicitly opted into image content.
-        # (Note: this is separate from the cover-image / post-thumbnail files
-        # that land in post_info/. Those are gated by content.info which we
-        # can't disable — they get pruned post-fetch by _cleanup_info_media.)
+        # Disable the unused thumbnails/ subfolder. Separate from the
+        # cover-image / post-thumbnail files in post_info/, which are
+        # gated by the un-disable-able content.info and pruned later by
+        # _cleanup_info_media.
         if "image" not in media_types:
             lines.append("media.thumbnails = 0")
     if opts.published_after:
@@ -744,19 +696,11 @@ def _is_allowlisted_host(url: str) -> bool:
 def _walk_prosemirror_nodes(node: object, sink: list[ExternalLink]) -> None:
     """Recursively collect href/url/src strings from a ProseMirror JSON tree.
 
-    Patreon stores post bodies as a ProseMirror document in
-    `attributes.content_json_string` for posts authored in the newer editor
-    (no equivalent rendered HTML appears in `attributes.content` for those
-    posts — that field is `null`). Links appear two ways inside the tree:
-
-      • node `marks` array, each with `{type: "link", attrs: {href: …}}`.
-        These marks attach to text nodes; the node's own `text` field is the
-        visible link label, so we capture it as the `ExternalLink.text`.
-      • node `attrs` carrying `href` / `url` / `src` directly — image,
-        embed, iframe nodes, etc. These have no associated visible text.
-
-    Children sit under `node.content`. We append every plausible URL we
-    find to `sink`; the caller's allowlist filter weeds out noise.
+    Patreon's newer post editor stores bodies in `attributes.content_json_string`
+    (the HTML `content` field is `null` for those posts). Links live in two
+    places: `marks: [{type: "link", attrs: {href}}]` on text nodes (text is the
+    label) and `attrs: {href|url|src}` on image/embed/iframe nodes (no label).
+    Children sit under `node.content`. Caller filters via allowlist.
     """
     if not isinstance(node, dict):
         return
@@ -791,29 +735,14 @@ def _walk_prosemirror_nodes(node: object, sink: list[ExternalLink]) -> None:
 def _extract_external_links(attrs: object) -> list[ExternalLink]:
     """Pull third-party file-host URLs out of a post's JSON:API attributes.
 
-    Creators stash these links in several shapes; we scan all of them:
+    Three sources, scanned in order with `_is_allowlisted_host` gating:
+      1. `attrs["content"]` HTML — `<a>`, `<iframe src>`, and bare URLs.
+      2. `attrs["embed"]["url"]` — the "Add link/embed" UI value.
+         `embed["provider_url"]` is intentionally skipped (host homepage).
+      3. `attrs["content_json_string"]` ProseMirror tree — used by the
+         newer editor where `content` is null. See `_walk_prosemirror_nodes`.
 
-      1. `attrs["content"]` HTML body —
-         - `<a href="…">visible text</a>` (the common case; both URL and
-           the inner anchor text are captured)
-         - `<iframe src="…">` (embeds; text is empty)
-         - bare `https://…` URLs not wrapped in any tag (text is empty)
-      2. `attrs["embed"]["url"]` — populated when the creator used Patreon's
-         "Add link / embed" UI instead of typing the URL into the body text.
-         (We deliberately skip `embed["provider_url"]`: it's the host's
-         homepage, never a file URL, and would only surface a useless
-         "drive.google.com/" row in the UI.)
-      3. `attrs["content_json_string"]` ProseMirror JSON document — the
-         shape Patreon's newer post editor produces. The HTML `content`
-         field is `null` for those posts; the body lives only here.
-         Walked recursively via `_walk_prosemirror_nodes` which also pulls
-         link-mark text where available.
-
-    Every candidate passes through `_is_allowlisted_host`, which gates
-    against `EXTERNAL_HOST_ALLOWLIST`. Returned list is deduped by URL,
-    stable order (first occurrence wins across all sources). When the same
-    URL appears in multiple sources, the first non-empty text we saw is
-    preserved.
+    Returned list is deduped by URL (stable order, first occurrence wins).
     """
     if not isinstance(attrs, dict):
         return []
@@ -923,19 +852,12 @@ def _extract_artist(payload: dict) -> str:
 
 
 def _cleanup_info_media(posts: list[FetchedPost]) -> None:
-    """Delete cover/thumbnail media files patreon-dl writes into each post's
-    `post_info/` subdir.
+    """Delete cover/thumbnail media patreon-dl writes into `post_info/`.
 
-    patreon-dl gates these downloads on `include.content.info`, which we can't
-    disable without losing `post-api.json` (the source we parse for title /
-    tags / artist). So we clean them up after the fact. Called only when the
-    user hasn't opted into image content via `content_types`.
-
-    Strategy: whitelist what we *keep* — `info.txt` (post summary, harmless)
-    and `post-api.json` (our metadata source). Everything else in `post_info/`
-    is patreon-dl-generated media (cover-image.*, thumbnail.*,
-    thumbnail-preview.*, and whatever future variants Patreon's CDN
-    invents) which the user didn't opt into.
+    Gated on `include.content.info` which we can't disable without losing
+    `post-api.json` (our metadata source). Keep-list approach: only
+    `info.txt` and `post-api.json` survive. Called only when the user
+    didn't opt into image content.
     """
     KEEP_FILENAMES = {"info.txt", "post-api.json"}
 
@@ -970,15 +892,11 @@ def _find_first_audio(post_dir: Path) -> Optional[Path]:
 
 
 # ─── Flatten patreon-dl's nested output ──────────────────────────────────────
-# patreon-dl always writes into `<patreon_root>/<campaign>/posts/<post_id>/
-# <media_type>/<filename>` — the campaign/posts/post_id hierarchy is not
-# escapable. After parsing the metadata we move each audio file OUT of
-# patreon-dl's tree entirely and into `DOWNLOAD_PATH/<post_id>/<filename>` —
-# a single per-post folder directly under the user's main browse root.
-#
-# patreon-dl's tree (post folder, info/post-api.json sidecar, per-campaign
-# status cache, top-level db.sqlite) stays untouched. That preserves
-# `stop.on = previouslyDownloaded` on re-fetches.
+# patreon-dl writes `<patreon_root>/<campaign>/posts/<post_id>/<media_type>/
+# <filename>`. After metadata parse we move audio out to the flattened
+# `DOWNLOAD_PATH/<creator>/<post_id> - <title>/<filename>` (see
+# `audio_utils.flatten_dest_parts`). patreon-dl's tree stays untouched so
+# `stop.on = previouslyDownloaded` keeps working on re-fetches.
 
 
 def _flatten_audio(
