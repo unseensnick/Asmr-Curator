@@ -193,10 +193,7 @@ export default function FileBrowser({
             setBatchSelected(new Set());
             loadFiles(query, searchMode, "downloads");
         }
-        const ext = (() => {
-            const m = filename.match(/(\.[^.]+)$/);
-            return m ? m[1].toLowerCase() : "";
-        })();
+        const ext = filename.match(/(\.[^.]+)$/)?.[1]?.toLowerCase() ?? "";
         const folder = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
         setSelected({
             name: filename,
@@ -256,6 +253,7 @@ export default function FileBrowser({
         });
         for (let i = 0; i < filesToConvert.length; i++) {
             const file = filesToConvert[i];
+            if (!file) continue;
             setBatchProgress({
                 current: i + 1,
                 total: filesToConvert.length,

@@ -66,7 +66,7 @@ export default function ScreenshotPanel({
         const reader = new FileReader();
         reader.onload = (ev) => {
             const dataUrl = ev.target?.result as string;
-            setImageBase64(dataUrl.split(",")[1]);
+            setImageBase64(dataUrl.split(",")[1] ?? null);
             setPreviewUrl(dataUrl);
             setStatus(null);
             setRawLlmText("");

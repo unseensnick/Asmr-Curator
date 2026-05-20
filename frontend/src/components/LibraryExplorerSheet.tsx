@@ -811,7 +811,8 @@ export default function LibraryExplorerSheet({
             } else {
                 // Show the first failure's reason so the user sees the
                 // concrete cause. Subsequent failures get a generic suffix.
-                const first = fails[0];
+                // fails.length > 0 here (the === 0 branch is handled above).
+                const first = fails[0]!;
                 const tail = fails.length > 1 ? ` (+${fails.length - 1} more)` : "";
                 setMoveNotice(
                     `Moved ${data.moved} of ${total}. Couldn't move ${first.from_path}: ${first.error?.message ?? "unknown error"}${tail}`,

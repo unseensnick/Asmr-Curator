@@ -110,6 +110,7 @@ export default function VocabularyPane({
         if (srcIdx === dstIdx) return;
         const next = [...vocabulary];
         const [moved] = next.splice(srcIdx, 1);
+        if (!moved) return;
         next.splice(dstIdx, 0, moved);
         // Optimistic local update for instant feedback; the parent's reload
         // (inside onReorder) will overwrite with fresh ids shortly after.
