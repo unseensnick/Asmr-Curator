@@ -96,7 +96,7 @@ def test_validate_under_root_never_escapes(tmp_path: Path, rel: str) -> None:
 # ── 2. safe_filename_component + flatten_dest_parts ─────────────────────────
 
 
-_FORBIDDEN_CHARS = set('\\/:*?"<>|') | {chr(c) for c in range(0x00, 0x20)}
+_FORBIDDEN_CHARS = set('\\/:*?"<>|') | {chr(c) for c in range(0x20)}
 
 
 @given(st.text(min_size=0, max_size=400))
@@ -138,9 +138,7 @@ def test_flatten_dest_parts_empty_artist_falls_back(post_id: str) -> None:
 
 
 @given(_POST_ID_STRATEGY, st.text(max_size=80), st.text(max_size=80))
-def test_flatten_dest_parts_creator_is_safe(
-    post_id: str, artist: str, title: str
-) -> None:
+def test_flatten_dest_parts_creator_is_safe(post_id: str, artist: str, title: str) -> None:
     """The creator segment is always free of the forbidden chars even
     when the raw artist string is full of them."""
     creator, folder = flatten_dest_parts(post_id, artist, title)
@@ -206,9 +204,7 @@ def test_strip_query_params_removes_named_params(url: str) -> None:
     query = stripped.split("?", 1)[1]
     for segment in query.split("&"):
         key = segment.split("=", 1)[0] if "=" in segment else segment
-        assert key not in STRIP_QUERY_PARAMS, (
-            f"strip-param {key!r} survived in {stripped!r}"
-        )
+        assert key not in STRIP_QUERY_PARAMS, f"strip-param {key!r} survived in {stripped!r}"
 
 
 # ── 6. _post_id_from_url / _vanity_from_url ─────────────────────────────────
