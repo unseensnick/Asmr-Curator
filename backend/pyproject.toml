@@ -22,7 +22,56 @@ dependencies = [
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.0",
 ]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+# Curated rule set — selected for bug-catch value, not pedantry. The
+# omitted families (D pydocstyle, ANN annotations, S bandit, TRY, EM, FBT,
+# N naming, ERA) are intentionally off: they generate more noise than
+# value in this codebase. Revisit if a specific class of bug recurs.
+select = [
+    "F",      # pyflakes — unused imports, undefined names, real bugs
+    "E",      # pycodestyle errors — syntax-adjacent issues
+    "W",      # pycodestyle warnings
+    "I",      # isort — auto-sortable import order
+    "B",      # flake8-bugbear — common bug patterns (mutable defaults, bare except)
+    "C4",     # flake8-comprehensions — cleaner list/dict/set comprehensions
+    "UP",     # pyupgrade — modern syntax (Optional[X] → X | None, etc.)
+    "SIM",    # flake8-simplify — clearer control flow
+    "RUF",    # ruff-specific catches
+    "PIE",    # flake8-pie cleanups
+]
+ignore = [
+    "E501",   # line too long — Ruff's formatter handles wrapping
+    "B008",   # function call in default arg — required by FastAPI's Depends()
+    "B904",   # raise-without-from-inside-except — project pattern intentionally
+              # doesn't chain HTTPException to internal exceptions so error
+              # bodies returned to clients don't leak internal stack frames
+              # (security.md: never expose stack traces or internal paths)
+    "SIM108", # use ternary instead of if/else — sometimes less readable
+    "SIM117", # combine nested with-statements — sometimes hurts readability
+    "RUF012", # mutable class attributes — sometimes intentional
+    "RUF001", # ambiguous unicode chars in strings — false-positive on em-dashes in our copy
+    "RUF002", # ambiguous unicode chars in docstrings — same
+    "RUF003", # ambiguous unicode chars in comments — same
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests can be looser about a few patterns:
+"tests/**" = [
+    "B011",   # assert False — pytest tests use it
+    "SIM117", # nested with-statements — pytest fixture nesting reads fine
+]
+
+[tool.ruff.format]
+# Defaults are fine: 4-space indent, line-length=100 (inherited), double
+# quotes, magic trailing comma respected.
+
 
 [tool.pytest.ini_options]
 # `testpaths` is relative to the rootdir, which pytest sets to the dir

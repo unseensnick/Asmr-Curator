@@ -4,8 +4,8 @@ The browser extension is the only client that writes cookies. The Drive-link
 ingest endpoint (`routes/patreon.py`) reads the stored Google cookie via the
 same DB key when it kicks off a scrape.
 """
+
 import json
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -21,14 +21,14 @@ router = APIRouter()
 # extension can dump cookies in whatever shape its host browser produces.
 _SAMESITE_NORMALISE = {
     "no_restriction": "None",
-    "none":           "None",
-    "lax":            "Lax",
-    "strict":         "Strict",
-    "unspecified":    "Lax",
+    "none": "None",
+    "lax": "Lax",
+    "strict": "Strict",
+    "unspecified": "Lax",
 }
 
 
-def _normalise_cookie_for_playwright(raw: dict) -> Optional[dict]:
+def _normalise_cookie_for_playwright(raw: dict) -> dict | None:
     """Reshape one chrome.cookies.getAll() entry into Playwright's add_cookies
     shape. Returns None when minimum fields (name/value/domain) are missing.
     """

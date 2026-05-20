@@ -1,14 +1,14 @@
-import sqlite3
-import os
 import json
+import os
+import sqlite3
 from pathlib import Path
-from typing import Optional, TypedDict
-
+from typing import TypedDict
 
 # ── Row shapes ────────────────────────────────────────────────────────────────
 # Mirror what the helpers below return, so callers don't have to remember the
 # key set. Plain TypedDicts (not Pydantic) — the data already comes from SQLite
 # and the values aren't user input, so runtime validation buys nothing.
+
 
 class VocabEntry(TypedDict):
     id: int
@@ -42,83 +42,96 @@ DB_PATH = os.environ.get("DB_PATH", _default_db_path())
 
 DEFAULT_VOCABULARY: list[tuple[str, list[str]]] = [
     # Multi-word phrase tags
-    ("Soft Spot For You",      ["soft spot for you", "soft spot foryou", "softspotforyou", "soft spotforyou"]),
-    ("Friends to Lovers",      ["friends to lovers", "friendstolovers", "friendslovers"]),
-    ("Friends to ?",           ["friends to?"]),
-    ("Enemies to Lovers",      ["enemies to lovers", "enemiestolovers"]),
-    ("Strangers to Lovers",    ["strangers to lovers"]),
-    ("Sleep Aid",              ["sleep aid", "sleepaid"]),
-    ("Hair Play",              ["hair play", "hairplay"]),
-    ("Slice of Life",          ["slice of life", "sliceoflife"]),
-    ("Touch Starved",          ["touch starved", "touchstarved"]),
-    ("Evil Queen",             ["evil queen", "evilqueen"]),
-    ("Capturing You",          ["capturing you", "capturingyou"]),
-    ("Cozy Cabin",             ["cozy cabin"]),
-    ("Making You Kneel",       ["making you kneel"]),
-    ("Cold to Everyone",       ["cold to everyone"]),
-    ("Soft For You",           ["soft for you"]),
-    ("Spoon Sex",              ["spoon sex", "spoonsex"]),
-    ("Shy Girl",               ["shy girl", "shygirl"]),
-    ("Thick Girl",             ["thick girl"]),
-    ("Goth Girl",              ["goth girl", "gothgirl"]),
-    ("Curvy Girl",             ["curvygirl"]),
-    ("Popular Girl",           ["popular girl", "populargirl"]),
-    ("Friends to More",        ["friends to more", "friendstomore"]),
-    ("Hair Pulling",           ["hair pulling", "hairpulling", "hairpuling"]),
-    ("Sweet Aftercare",        ["sweet aftercare", "sweetaftercare"]),
-    ("Best Friend's Sister",   ["best friend's sister", "bestfriendssister", "best friends sister", "sisters best friend"]),
+    (
+        "Soft Spot For You",
+        ["soft spot for you", "soft spot foryou", "softspotforyou", "soft spotforyou"],
+    ),
+    ("Friends to Lovers", ["friends to lovers", "friendstolovers", "friendslovers"]),
+    ("Friends to ?", ["friends to?"]),
+    ("Enemies to Lovers", ["enemies to lovers", "enemiestolovers"]),
+    ("Strangers to Lovers", ["strangers to lovers"]),
+    ("Sleep Aid", ["sleep aid", "sleepaid"]),
+    ("Hair Play", ["hair play", "hairplay"]),
+    ("Slice of Life", ["slice of life", "sliceoflife"]),
+    ("Touch Starved", ["touch starved", "touchstarved"]),
+    ("Evil Queen", ["evil queen", "evilqueen"]),
+    ("Capturing You", ["capturing you", "capturingyou"]),
+    ("Cozy Cabin", ["cozy cabin"]),
+    ("Making You Kneel", ["making you kneel"]),
+    ("Cold to Everyone", ["cold to everyone"]),
+    ("Soft For You", ["soft for you"]),
+    ("Spoon Sex", ["spoon sex", "spoonsex"]),
+    ("Shy Girl", ["shy girl", "shygirl"]),
+    ("Thick Girl", ["thick girl"]),
+    ("Goth Girl", ["goth girl", "gothgirl"]),
+    ("Curvy Girl", ["curvygirl"]),
+    ("Popular Girl", ["popular girl", "populargirl"]),
+    ("Friends to More", ["friends to more", "friendstomore"]),
+    ("Hair Pulling", ["hair pulling", "hairpulling", "hairpuling"]),
+    ("Sweet Aftercare", ["sweet aftercare", "sweetaftercare"]),
+    (
+        "Best Friend's Sister",
+        ["best friend's sister", "bestfriendssister", "best friends sister", "sisters best friend"],
+    ),
     ("Enemies to Fuckbuddies", ["enemies to fuckbuddies", "enemiestofuckbuddies"]),
-    ("Chair Sex",              ["chairsex"]),
-    ("Watching Porn",          ["watching porn"]),
-    ("Multiple Orgasms",       []),
-    ("Nipple Sucking",         []),
-    ("Car Cuddles",            []),
-    ("Drive-In Movie",         []),
-    ("Rough Sex",              []),
-    ("Dirty Talk",             []),
+    ("Chair Sex", ["chairsex"]),
+    ("Watching Porn", ["watching porn"]),
+    ("Multiple Orgasms", []),
+    ("Nipple Sucking", []),
+    ("Car Cuddles", []),
+    ("Drive-In Movie", []),
+    ("Rough Sex", []),
+    ("Dirty Talk", []),
     # Single-word / short tags
-    ("SFW",          ["sfw"]),
-    ("NSFW",         ["nsfw"]),
-    ("Dominant",     ["dom", "dommy"]),
-    ("Submissive",   ["sub"]),
-    ("Doggystyle",   ["doggy"]),
-    ("Villain",      []),
-    ("Playful",      []),
-    ("Comfort",      []),
-    ("Wholesome",    []),
-    ("Kissing",      ["kisses", "kissing"]),
-    ("Cuddles",      []),
-    ("Flirty",       ["flirting"]),
-    ("Protective",   []),
-    ("Possessive",   []),
-    ("Jealousy",     []),
-    ("Praise",       []),
+    ("SFW", ["sfw"]),
+    ("NSFW", ["nsfw"]),
+    ("Dominant", ["dom", "dommy"]),
+    ("Submissive", ["sub"]),
+    ("Doggystyle", ["doggy"]),
+    ("Villain", []),
+    ("Playful", []),
+    ("Comfort", []),
+    ("Wholesome", []),
+    ("Kissing", ["kisses", "kissing"]),
+    ("Cuddles", []),
+    ("Flirty", ["flirting"]),
+    ("Protective", []),
+    ("Possessive", []),
+    ("Jealousy", []),
+    ("Praise", []),
     ("Affirmations", []),
-    ("Massage",      []),
-    ("Heartbeat",    []),
-    ("Rain",         []),
-    ("Fireplace",    []),
-    ("Fantasy",      []),
-    ("Royalty",      []),
-    ("Yandere",      []),
-    ("Tsundere",     []),
-    ("Kuudere",      []),
-    ("Aftercare",    []),
-    ("Blowjob",      []),
-    ("Cheerleader",  []),
-    ("Public",       []),
-    ("Gagging",      []),
-    ("Risky",        []),
-    ("More",         []),
-    ("Teasing",      []),
+    ("Massage", []),
+    ("Heartbeat", []),
+    ("Rain", []),
+    ("Fireplace", []),
+    ("Fantasy", []),
+    ("Royalty", []),
+    ("Yandere", []),
+    ("Tsundere", []),
+    ("Kuudere", []),
+    ("Aftercare", []),
+    ("Blowjob", []),
+    ("Cheerleader", []),
+    ("Public", []),
+    ("Gagging", []),
+    ("Risky", []),
+    ("More", []),
+    ("Teasing", []),
 ]
 
 DEFAULT_SUPPRESSED: list[str] = [
-    "tolovers", "f4a", "m4a", "f4f", "m4m", "f4m", "m4f",
+    "tolovers",
+    "f4a",
+    "m4a",
+    "f4f",
+    "m4m",
+    "f4m",
+    "m4f",
 ]
 
 
 # ── Connection ────────────────────────────────────────────────────────────────
+
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
@@ -128,19 +141,28 @@ def get_conn():
 
 # ── Schema ────────────────────────────────────────────────────────────────────
 
+
 def _vocab_row_to_dict(row: sqlite3.Row) -> VocabEntry:
     return {"id": row["id"], "canonical": row["canonical"], "aliases": json.loads(row["aliases"])}
 
 
-def _canonical_exists(conn: sqlite3.Connection, canonical: str, exclude_id: Optional[int] = None) -> bool:
+def _canonical_exists(
+    conn: sqlite3.Connection, canonical: str, exclude_id: int | None = None
+) -> bool:
     if exclude_id is None:
-        return conn.execute(
-            "SELECT id FROM tag_vocabulary WHERE LOWER(canonical)=LOWER(?)", (canonical,)
-        ).fetchone() is not None
-    return conn.execute(
-        "SELECT id FROM tag_vocabulary WHERE LOWER(canonical)=LOWER(?) AND id!=?",
-        (canonical, exclude_id),
-    ).fetchone() is not None
+        return (
+            conn.execute(
+                "SELECT id FROM tag_vocabulary WHERE LOWER(canonical)=LOWER(?)", (canonical,)
+            ).fetchone()
+            is not None
+        )
+    return (
+        conn.execute(
+            "SELECT id FROM tag_vocabulary WHERE LOWER(canonical)=LOWER(?) AND id!=?",
+            (canonical, exclude_id),
+        ).fetchone()
+        is not None
+    )
 
 
 def init_db():
@@ -272,6 +294,7 @@ def _migrate_legacy_to_vocabulary(conn):
 
 # ── Vocabulary CRUD ───────────────────────────────────────────────────────────
 
+
 def get_vocabulary() -> list[VocabEntry]:
     # Ordered by id (= insertion order after PUT /api/dictionary's
     # wipe-and-reinsert), so the UI's drag-reorder is durable and decides
@@ -296,7 +319,7 @@ def add_vocab_entry(canonical: str, aliases: list[str]) -> VocabEntry:
         return _vocab_row_to_dict(cur.fetchone())
 
 
-def edit_vocab_entry(entry_id: int, canonical: str, aliases: list[str]) -> Optional[VocabEntry]:
+def edit_vocab_entry(entry_id: int, canonical: str, aliases: list[str]) -> VocabEntry | None:
     with get_conn() as conn:
         if _canonical_exists(conn, canonical, exclude_id=entry_id):
             raise ValueError(f"Canonical tag already exists: {canonical}")
@@ -316,6 +339,7 @@ def delete_vocab_entry(entry_id: int) -> bool:
 
 
 # ── Suppressed terms CRUD ─────────────────────────────────────────────────────
+
 
 def get_suppressed() -> list[SuppressedEntry]:
     with get_conn() as conn:
@@ -347,6 +371,7 @@ def delete_suppressed(term_id: int) -> bool:
 
 
 # ── Full dict helpers ─────────────────────────────────────────────────────────
+
 
 def get_full_dict() -> dict:
     """Return the dictionary in the shape the frontend expects."""
@@ -388,7 +413,8 @@ def reset_to_defaults():
 
 # ── Settings (key/value) ──────────────────────────────────────────────────────
 
-def get_setting(key: str) -> Optional[str]:
+
+def get_setting(key: str) -> str | None:
     with get_conn() as conn:
         row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
         return row["value"] if row else None

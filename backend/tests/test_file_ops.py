@@ -5,6 +5,7 @@ Each test gets fresh DOWNLOAD_PATH and LIBRARY_PATH dirs via monkeypatch on
 the module-level constants. The `client` fixture also returns the two paths
 so tests can stage files on disk directly and assert post-move layout.
 """
+
 import json
 from pathlib import Path
 
@@ -19,6 +20,7 @@ def client(monkeypatch, tmp_path):
     download.mkdir()
     library.mkdir()
     from backend import main
+
     monkeypatch.setattr(main, "DOWNLOAD_PATH", download)
     monkeypatch.setattr(main, "LIBRARY_PATH", library)
     return TestClient(main.app), download, library
@@ -359,8 +361,8 @@ class TestMoveBatch:
             "/api/move/batch",
             json={
                 "items": [
-                    {"from_path": "A"},          # cycle: A → A/B is inside A
-                    {"from_path": "song.mp3"},   # fine: file → A/B
+                    {"from_path": "A"},  # cycle: A → A/B is inside A
+                    {"from_path": "song.mp3"},  # fine: file → A/B
                 ],
                 "from_root": "library",
                 "to_subdir": "A/B",
@@ -369,7 +371,9 @@ class TestMoveBatch:
             assert r.status_code == 200
             final, _ = _consume_batch_sse(r)
         assert final["moved"] == 1
-        codes = {(r["from_path"], r.get("error", {}).get("code"), r["ok"]) for r in final["results"]}
+        codes = {
+            (r["from_path"], r.get("error", {}).get("code"), r["ok"]) for r in final["results"]
+        }
         assert ("A", "cycle", False) in codes
         assert ("song.mp3", None, True) in codes
         assert (library / "A" / "B" / "song.mp3").exists()

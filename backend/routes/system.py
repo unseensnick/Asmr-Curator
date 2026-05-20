@@ -1,4 +1,5 @@
 """System / liveness endpoints — health probe + frontend status-bar info."""
+
 from fastapi import APIRouter
 
 from backend.main import APP_VERSION, OLLAMA_MODEL

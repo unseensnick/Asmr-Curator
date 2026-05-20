@@ -5,10 +5,8 @@ session and isn't unit-tested here. The helpers (URL parsing, host filtering,
 sensitive-param redaction, itag extraction) are pure and cover the bug
 surfaces that recent Drive-scrape iterations kept tripping on.
 """
-import importlib
-import os
 
-import pytest
+import importlib
 
 import backend.drive_fetch as drive_fetch
 from backend.drive_fetch import (
@@ -18,7 +16,6 @@ from backend.drive_fetch import (
     _request_looks_like_audio,
     drive_id_from_url,
 )
-
 
 # ── drive_id_from_url ──────────────────────────────────────────────────────
 
@@ -218,9 +215,11 @@ class TestEnvVarConstants:
         # Regression guard — changing this silently changes which stream the
         # audio-preference logic picks for cover-art audio Drive uploads.
         from backend.drive_fetch import _PREFERRED_AUDIO_ITAG
+
         assert _PREFERRED_AUDIO_ITAG == "140"
 
     def test_audio_preference_grace_default(self):
         # Window we wait after first eligible URL for an itag=140 to overtake.
         from backend.drive_fetch import AUDIO_PREFERENCE_GRACE_S
+
         assert AUDIO_PREFERENCE_GRACE_S == 5.0

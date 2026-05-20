@@ -19,6 +19,7 @@ so the rest of the backend works when it's absent.
 during download. The `/api/patreon/ingest-drive-link` handler in
 `backend/main.py` reshapes these into SSE.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -28,15 +29,16 @@ import logging
 import os
 import re
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from backend import audio_utils
 
 if TYPE_CHECKING:
-    from playwright.async_api import BrowserContext, Playwright, Browser
+    from playwright.async_api import Browser, BrowserContext, Playwright
 
 log = logging.getLogger(__name__)
 
@@ -104,13 +106,22 @@ _GOOGLE_HOST_RE = re.compile(
 # Query parameters that carry short-lived auth tokens — never write the value
 # of these to disk in a diagnostic dump. Replaced with `<redacted>` before
 # the URL is logged. Keep names lowercase.
-_SENSITIVE_QUERY_PARAMS = frozenset({
-    "sig", "lsig", "signature",          # Google signed-URL signatures
-    "access_token", "id_token", "token", # OAuth-style bearer tokens
-    "auth", "authuser",                  # generic auth
-    "key", "api_key",                    # API keys
-    "session_id", "sessionid",           # session identifiers
-})
+_SENSITIVE_QUERY_PARAMS = frozenset(
+    {
+        "sig",
+        "lsig",
+        "signature",  # Google signed-URL signatures
+        "access_token",
+        "id_token",
+        "token",  # OAuth-style bearer tokens
+        "auth",
+        "authuser",  # generic auth
+        "key",
+        "api_key",  # API keys
+        "session_id",
+        "sessionid",  # session identifiers
+    }
+)
 
 
 # ─── Shared Chromium machinery ─────────────────────────────────────────────
@@ -121,15 +132,15 @@ _SENSITIVE_QUERY_PARAMS = frozenset({
 # would discard those rotations and the next scrape would re-`add_cookies()`
 # values the server has already invalidated. The scrape semaphore in
 # main.py prevents the persistent context from racing itself.
-_pw: Optional["Playwright"] = None
-_browser: Optional["Browser"] = None
-_context: Optional["BrowserContext"] = None
+_pw: Playwright | None = None
+_browser: Browser | None = None
+_context: BrowserContext | None = None
 _context_stale: bool = False
 _browser_lock = asyncio.Lock()
-_browser_idle_task: Optional[asyncio.Task] = None
+_browser_idle_task: asyncio.Task | None = None
 
 
-async def _get_context(cookies: list[dict]) -> "BrowserContext":
+async def _get_context(cookies: list[dict]) -> BrowserContext:
     """Lazily launch + return the shared BrowserContext.
 
     Re-creates browser/context if either was killed or marked stale, and
@@ -141,6 +152,7 @@ async def _get_context(cookies: list[dict]) -> "BrowserContext":
         # Browser dead? Relaunch — also forces a fresh context.
         if _browser is None or not _browser.is_connected():
             from playwright.async_api import async_playwright
+
             _pw = await async_playwright().start()
             _browser = await _pw.chromium.launch(
                 headless=True,
@@ -255,6 +267,7 @@ def _redact_sensitive_url(url: str) -> str:
         else:
             redacted_segments.append(segment)
     from urllib.parse import urlunparse
+
     return urlunparse(parts._replace(query="&".join(redacted_segments)))
 
 
@@ -301,7 +314,7 @@ class DriveFetchError(RuntimeError):
         message: str,
         *,
         code: str = "fetch_failed",
-        debug_dir: Optional[Path] = None,
+        debug_dir: Path | None = None,
     ):
         super().__init__(message)
         self.code = code
@@ -310,13 +323,13 @@ class DriveFetchError(RuntimeError):
 
 @dataclass
 class DriveFetchResult:
-    audio_path: Path        # absolute path to the downloaded file
-    size: int               # bytes actually written
-    source_url: str         # cleaned playback URL we fetched
-    file_id: str            # Drive file ID extracted from the viewer URL
+    audio_path: Path  # absolute path to the downloaded file
+    size: int  # bytes actually written
+    source_url: str  # cleaned playback URL we fetched
+    file_id: str  # Drive file ID extracted from the viewer URL
 
 
-def drive_id_from_url(url: str) -> Optional[str]:
+def drive_id_from_url(url: str) -> str | None:
     """Extract a Drive file ID from any viewer / open / playback URL.
 
     Accepts:
@@ -358,7 +371,7 @@ def _request_looks_like_audio(url: str) -> bool:
     return "/videoplayback" in (parsed.path or "")
 
 
-def _itag_of(url: str) -> Optional[str]:
+def _itag_of(url: str) -> str | None:
     """Extract the `itag` query parameter (e.g. 140=audio, 134=video) from a
     videoplayback URL. Returns None for missing/unparseable — the caller
     treats that as "not the preferred audio stream" rather than guessing.
@@ -386,7 +399,7 @@ def _is_google_request(url: str) -> bool:
     return bool(parsed.hostname and _GOOGLE_HOST_RE.search(parsed.hostname))
 
 
-async def _dump_diagnostics(page, file_id: str, observed: list[str]) -> Optional[Path]:
+async def _dump_diagnostics(page, file_id: str, observed: list[str]) -> Path | None:
     """Dump triage artefacts to `<DOWNLOAD_PATH>/.drive-debug/<file_id>-<ts>/`
     on playback-URL timeout. Returns the dir path, or None on write failure.
 
@@ -417,10 +430,7 @@ async def _dump_diagnostics(page, file_id: str, observed: list[str]) -> Optional
 
     try:
         title = await page.title()
-        meta = (
-            f"final_url: {_redact_sensitive_url(page.url)}\n"
-            f"title: {title}\n"
-        )
+        meta = f"final_url: {_redact_sensitive_url(page.url)}\ntitle: {title}\n"
         (out_dir / "meta.txt").write_text(meta, encoding="utf-8")
     except Exception as e:
         log.warning("drive-debug: meta dump failed: %s", e)
@@ -463,19 +473,15 @@ async def _trigger_play(page, wait_s: float = 15.0) -> bool:
     yt_selector = 'iframe[src*="youtube.googleapis.com/embed"]'
 
     # Wait for the YouTube iframe to appear in the DOM. In practice it
-    # lands within ~1 s; 15 s is generous.
-    try:
+    # lands within ~1 s; 15 s is generous. Swallow the timeout — Drive may
+    # have a non-YouTube viewer for this file type, in which case strategies
+    # B and C still apply.
+    with contextlib.suppress(Exception):
         await page.wait_for_selector(yt_selector, timeout=int(wait_s * 1000))
-    except Exception:
-        # Iframe never appeared — Drive may have a non-YouTube viewer
-        # for this file type. B and C still apply.
-        pass
 
     # A. Click the iframe element itself.
-    try:
+    with contextlib.suppress(Exception):
         await page.locator(yt_selector).first.click(timeout=2_000)
-    except Exception:
-        pass
 
     # Settle for half a second before layering the page-level click —
     # back-to-back synthetic clicks are noisier than helpful.
@@ -510,7 +516,7 @@ async def _trigger_play(page, wait_s: float = 15.0) -> bool:
     return True
 
 
-async def _emit(progress: Optional[ProgressCallback], event: dict) -> None:
+async def _emit(progress: ProgressCallback | None, event: dict) -> None:
     """Best-effort progress emission. Swallows callback errors so a misbehaving
     consumer can't crash the scrape. Callers always pass a fresh dict so
     downstream serialisation can't see partially-built shapes."""
@@ -528,9 +534,9 @@ async def fetch_drive_audio(
     cookies: list[dict],
     dest_dir: Path,
     fallback_stem: str,
-    explicit_filename: Optional[str] = None,
+    explicit_filename: str | None = None,
     timeout_s: float = DEFAULT_PLAYER_WAIT_S,
-    on_progress: Optional[ProgressCallback] = None,
+    on_progress: ProgressCallback | None = None,
 ) -> DriveFetchResult:
     """End-to-end: load Drive headlessly, capture playback URL, download to disk.
 
@@ -604,11 +610,14 @@ async def fetch_drive_audio(
     try:
         page.on("response", lambda r: asyncio.create_task(_on_response(r)))
 
-        await _emit(on_progress, {
-            "state": "loading_page",
-            "drive_url": canonical,
-            "elapsed_s": _elapsed(started),
-        })
+        await _emit(
+            on_progress,
+            {
+                "state": "loading_page",
+                "drive_url": canonical,
+                "elapsed_s": _elapsed(started),
+            },
+        )
         try:
             await page.goto(canonical, wait_until="domcontentloaded", timeout=15_000)
         except Exception as e:
@@ -636,21 +645,21 @@ async def fetch_drive_audio(
                 debug_dir=debug_dir,
             )
 
-        await _emit(on_progress, {
-            "state": "waiting_for_player",
-            "elapsed_s": _elapsed(started),
-        })
+        await _emit(
+            on_progress,
+            {
+                "state": "waiting_for_player",
+                "elapsed_s": _elapsed(started),
+            },
+        )
         # No-op if Drive auto-plays; otherwise see `_trigger_play`.
         played = await _trigger_play(page)
         if not played:
-            log.info(
-                "drive-fetch: neither programmatic play() nor click overlay "
-                "started playback"
-            )
+            log.info("drive-fetch: neither programmatic play() nor click overlay started playback")
 
         try:
             first_url = await asyncio.wait_for(any_future, timeout=timeout_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             debug_dir = await _dump_diagnostics(page, file_id, observed_google)
             raise DriveFetchError(
                 f"No videoplayback request observed within {timeout_s:.0f}s. "
@@ -674,20 +683,22 @@ async def fetch_drive_audio(
                     "drive-fetch: preferred audio stream over first capture %s",
                     first_url[:80],
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 captured_url = first_url
                 log.info(
-                    "drive-fetch: no itag=140 within %.1fs grace; "
-                    "falling back to %s",
+                    "drive-fetch: no itag=140 within %.1fs grace; falling back to %s",
                     AUDIO_PREFERENCE_GRACE_S,
                     first_url[:80],
                 )
 
         cleaned_url = audio_utils.strip_query_params(captured_url)
-        await _emit(on_progress, {
-            "state": "captured",
-            "elapsed_s": _elapsed(started),
-        })
+        await _emit(
+            on_progress,
+            {
+                "state": "captured",
+                "elapsed_s": _elapsed(started),
+            },
+        )
 
         # ── Download via in-page fetch streamed through expose_function ───
         # In-page `fetch(url)` routes via Chromium's stack with the player's
@@ -719,8 +730,7 @@ async def fetch_drive_audio(
             kind = payload.get("kind")
             if kind == "headers":
                 headers = {
-                    str(k).lower(): str(v)
-                    for k, v in (payload.get("headers") or {}).items()
+                    str(k).lower(): str(v) for k, v in (payload.get("headers") or {}).items()
                 }
                 cl = payload.get("contentLength")
                 if isinstance(cl, (int, float)) and cl > 0:
@@ -779,35 +789,41 @@ async def fetch_drive_audio(
 
         # Sub-threshold body → retry. State holders are mutated in place
         # so the _on_drive_msg closure stays valid across attempts.
-        target: Optional[Path] = None
-        part: Optional[Path] = None
+        target: Path | None = None
+        part: Path | None = None
         bytes_written = 0
-        last_short_bytes: Optional[int] = None
+        last_short_bytes: int | None = None
         for attempt in range(1, MAX_DOWNLOAD_ATTEMPTS + 1):
             # Reset per-attempt state in place (don't rebind names —
             # _on_drive_msg captures these via closure).
             bytes_holder["n"] = 0
             total_holder["n"] = 0
             download_state.clear()
-            download_state.update({
-                "error": None,
-                "f": None,
-                "target": None,
-                "part": None,
-                "headers_seen": False,
-            })
+            download_state.update(
+                {
+                    "error": None,
+                    "f": None,
+                    "target": None,
+                    "part": None,
+                    "headers_seen": False,
+                }
+            )
             download_done_evt.clear()
 
-            await _emit(on_progress, {
-                "state": "downloading",
-                "bytes": 0,
-                "total": None,
-                "elapsed_s": _elapsed(started),
-                **(
-                    {"retry_attempt": attempt, "max_attempts": MAX_DOWNLOAD_ATTEMPTS}
-                    if attempt > 1 else {}
-                ),
-            })
+            await _emit(
+                on_progress,
+                {
+                    "state": "downloading",
+                    "bytes": 0,
+                    "total": None,
+                    "elapsed_s": _elapsed(started),
+                    **(
+                        {"retry_attempt": attempt, "max_attempts": MAX_DOWNLOAD_ATTEMPTS}
+                        if attempt > 1
+                        else {}
+                    ),
+                },
+            )
 
             download_started = time.monotonic()
             heartbeat_task = asyncio.create_task(
@@ -820,8 +836,9 @@ async def fetch_drive_audio(
             # (not via spread) because chunks can exceed the arg cap on some
             # Chromiums. `cache: 'no-store'` + random query nonce defeat
             # the player's service-worker cache so retries hit the network.
-            fetch_task = asyncio.create_task(page.evaluate(
-                """
+            fetch_task = asyncio.create_task(
+                page.evaluate(
+                    """
                 async (url) => {
                     try {
                         const res = await fetch(url, {
@@ -859,15 +876,14 @@ async def fetch_drive_audio(
                     }
                 }
                 """,
-                cleaned_url,
-            ))
+                    cleaned_url,
+                )
+            )
 
             try:
                 try:
-                    await asyncio.wait_for(
-                        download_done_evt.wait(), timeout=DOWNLOAD_TIMEOUT_S
-                    )
-                except asyncio.TimeoutError as e:
+                    await asyncio.wait_for(download_done_evt.wait(), timeout=DOWNLOAD_TIMEOUT_S)
+                except TimeoutError as e:
                     raise DriveFetchError(
                         f"Drive download timed out after {DOWNLOAD_TIMEOUT_S:.0f}s.",
                         code="timeout",
@@ -920,7 +936,9 @@ async def fetch_drive_audio(
             if attempt < MAX_DOWNLOAD_ATTEMPTS:
                 log.info(
                     "drive-fetch: attempt %d/%d returned %d bytes (likely init segment); retrying",
-                    attempt, MAX_DOWNLOAD_ATTEMPTS, last_short_bytes,
+                    attempt,
+                    MAX_DOWNLOAD_ATTEMPTS,
+                    last_short_bytes,
                 )
                 # Tiny pause so we don't hammer Drive's CDN in a tight loop.
                 await asyncio.sleep(0.5)
@@ -940,12 +958,15 @@ async def fetch_drive_audio(
 
         part.rename(target)
 
-        await _emit(on_progress, {
-            "state": "downloading",
-            "bytes": bytes_written,
-            "total": bytes_written,
-            "elapsed_s": _elapsed(started),
-        })
+        await _emit(
+            on_progress,
+            {
+                "state": "downloading",
+                "bytes": bytes_written,
+                "total": bytes_written,
+                "elapsed_s": _elapsed(started),
+            },
+        )
 
         return DriveFetchResult(
             audio_path=target,
@@ -969,7 +990,7 @@ def _elapsed(since: float) -> float:
 
 
 async def _download_heartbeat(
-    on_progress: Optional[ProgressCallback],
+    on_progress: ProgressCallback | None,
     started: float,
     download_started: float,
     total_holder: dict[str, int],
@@ -987,12 +1008,15 @@ async def _download_heartbeat(
         while True:
             await asyncio.sleep(DOWNLOAD_HEARTBEAT_S)
             total = total_holder["n"]
-            await _emit(on_progress, {
-                "state": "downloading",
-                "bytes": bytes_holder["n"],
-                "total": total if total > 0 else None,
-                "download_elapsed_s": _elapsed(download_started),
-                "elapsed_s": _elapsed(started),
-            })
+            await _emit(
+                on_progress,
+                {
+                    "state": "downloading",
+                    "bytes": bytes_holder["n"],
+                    "total": total if total > 0 else None,
+                    "download_elapsed_s": _elapsed(download_started),
+                    "elapsed_s": _elapsed(started),
+                },
+            )
     except asyncio.CancelledError:
         return
