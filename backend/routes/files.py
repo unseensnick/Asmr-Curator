@@ -34,7 +34,14 @@ router = APIRouter()
 
 @router.get("/api/files")
 def list_files(subdir: str = "", root: str = "library"):
-    """List files and subdirectories inside `<root>/<subdir>` (one level)."""
+    """List files and subdirectories inside `<root>/<subdir>` (one level).
+
+    Uses `os.scandir` and caches `entry.is_file()` once per entry — under
+    `Path.iterdir() + entry.is_file()` we'd issue ~4 stat syscalls per
+    entry (sort key + ext check + type field + needs_conversion field),
+    which is noticeable on bind-mounted / NAS filesystems with a few
+    thousand entries per folder.
+    """
     root_path = root_for(root)
     target = validate_under_root(subdir, root_path)
     if not target.exists():
@@ -42,18 +49,30 @@ def list_files(subdir: str = "", root: str = "library"):
     if not target.is_dir():
         raise HTTPException(400, "Not a directory")
 
-    entries = []
-    for entry in sorted(target.iterdir(), key=lambda e: (e.is_file(), e.name.lower())):
-        ext = entry.suffix.lower() if entry.is_file() else None
-        entries.append(
-            {
-                "name": entry.name,
-                "type": "file" if entry.is_file() else "dir",
-                "ext": ext,
-                "path": str(entry.relative_to(root_path)),
-                "needs_conversion": entry.is_file() and ext in NEEDS_CONVERSION_EXTS,
-            }
-        )
+    # Snapshot (is_file, name, suffix) once per entry. DirEntry.is_file()
+    # is cached internally by Python, but going through Path objects in
+    # the sort key would re-stat each one.
+    snapshot: list[tuple[bool, str, str]] = []
+    with os.scandir(target) as it:
+        for entry in it:
+            is_file = entry.is_file()
+            ext = Path(entry.name).suffix.lower() if is_file else ""
+            snapshot.append((is_file, entry.name, ext))
+
+    snapshot.sort(key=lambda row: (row[0], row[1].lower()))
+
+    entries = [
+        {
+            "name": name,
+            "type": "file" if is_file else "dir",
+            "ext": ext if is_file else None,
+            "path": str(target.relative_to(root_path) / name)
+            if target != root_path
+            else name,
+            "needs_conversion": is_file and ext in NEEDS_CONVERSION_EXTS,
+        }
+        for is_file, name, ext in snapshot
+    ]
 
     return {
         "current": str(target.relative_to(root_path)) if target != root_path else "",
