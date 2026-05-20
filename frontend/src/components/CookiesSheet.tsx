@@ -8,7 +8,7 @@ import {
     SheetTitle,
 } from "@/components/ui/sheet";
 
-interface CookiesModalProps {
+interface CookiesSheetProps {
     open: boolean;
     onClose: () => void;
 }
@@ -25,7 +25,7 @@ interface CookiesModalProps {
  * the Sheet's `h-full flex flex-col` content frame is what makes that
  * scroll actually engage.
  */
-export default function CookiesModal({ open, onClose }: CookiesModalProps) {
+export default function CookiesSheet({ open, onClose }: CookiesSheetProps) {
     return (
         <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
             <SheetContent
