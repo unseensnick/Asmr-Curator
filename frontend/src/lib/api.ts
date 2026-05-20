@@ -1,6 +1,7 @@
 export const API = {
     files: "/api/files",
     search: "/api/files/search",
+    loadCachedMetadata: "/api/files/load-cached-metadata",
     rename: "/api/rename",
     renamePath: "/api/rename-path",
     convert: "/api/convert",
@@ -378,4 +379,36 @@ export async function moveBatchStream(
         throw new Error("Move batch ended without a final `complete` event");
     }
     return final;
+}
+
+// ── Bulk-edit helpers ────────────────────────────────────────────────────────
+//
+// Phase 1 of the BulkEditSheet plan: lookup cached Patreon `title` /
+// `artist` / `tags` for each selected file from `post-api.json` sidecars
+// under `DOWNLOAD_PATH/.patreon-dl/`. Files without a matching sidecar
+// come back with no metadata fields — `LoadCachedMetadataItem.title /
+// artist / tags` are all optional. The frontend treats absent fields as
+// "no cached info for this file" and leaves the user's existing edits
+// alone.
+
+/** One entry of `/api/files/load-cached-metadata`'s `items[]`. Fields are
+ *  optional because files outside the `<post_id> - <title>/` folder shape
+ *  come back without metadata, and the bulk-edit UI surfaces those as
+ *  "no cached info" rather than treating it as an error. */
+export interface LoadCachedMetadataItem {
+    path: string;
+    title?: string;
+    artist?: string;
+    tags?: string[];
+}
+
+export interface LoadCachedMetadataResponse {
+    items: LoadCachedMetadataItem[];
+}
+
+export function loadCachedMetadata(
+    paths: string[],
+    root: FileRoot,
+): Promise<LoadCachedMetadataResponse> {
+    return apiPost<LoadCachedMetadataResponse>(API.loadCachedMetadata, { paths, root });
 }

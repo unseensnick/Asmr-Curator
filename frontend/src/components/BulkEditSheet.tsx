@@ -1,12 +1,14 @@
 import { useState } from "react";
-import { X } from "lucide-react";
+import { Loader2, RefreshCw, X } from "lucide-react";
 
 import SectionLabel from "@/components/SectionLabel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { loadCachedMetadata } from "@/lib/api";
 import type { FileEntry } from "@/lib/types";
+import { getErrorMessage } from "@/lib/utils";
 
 export type BulkEditRoot = "library" | "downloads";
 
@@ -92,7 +94,13 @@ interface BulkEditSheetProps {
  * while `bulkEditOpen` is true, so re-opening always starts fresh
  * without a manual cleanup effect.
  */
-export default function BulkEditSheet({ open, onClose, files, root: _root }: BulkEditSheetProps) {
+type LoadFeedback =
+    | { kind: "none" }
+    | { kind: "success"; loaded: number; total: number }
+    | { kind: "empty" }
+    | { kind: "error"; message: string };
+
+export default function BulkEditSheet({ open, onClose, files, root }: BulkEditSheetProps) {
     // Keyed by `FileEntry.path` (relative to the chosen root). Paths the
     // user hasn't touched aren't in the map — `editFor` falls back to
     // EMPTY_EDIT so the inputs render as blank with placeholder copy.
@@ -116,14 +124,76 @@ export default function BulkEditSheet({ open, onClose, files, root: _root }: Bul
     const [shared, setShared] = useState<SharedMetadata>(EMPTY_SHARED);
     const [clearFields, setClearFields] = useState<Set<SharedIdField>>(new Set());
 
-    // Populated by phase 6's load-from-cache step: a field belongs to
-    // this set when the loaded per-file metadata for it differs across
-    // the selection. MP3Tag-style `<Mixed values>` placeholder fires off
-    // the same set. In phase 5 nothing populates it yet, so the
-    // placeholder branch is reachable structurally but never fires in
-    // practice — wired here so the apply-to-all form is feature-complete
-    // before its data source lands.
-    const mixedFields = new Set<SharedIdField>();
+    // A field belongs to `mixedFields` when the per-file values loaded by
+    // the Load-from-cache step disagree across the selection. The MP3Tag-
+    // style `<Mixed values>` placeholder fires off the same set so users
+    // get the convention they already know from there.
+    const [mixedFields, setMixedFields] = useState<Set<SharedIdField>>(new Set());
+
+    // Load-from-cache state. `isLoading` gates the button + spinner; the
+    // feedback variant carries either a hit count, an empty-result state,
+    // or an error message. Reset on every fresh click so feedback never
+    // lingers stale from a previous attempt.
+    const [isLoading, setIsLoading] = useState(false);
+    const [loadFeedback, setLoadFeedback] = useState<LoadFeedback>({ kind: "none" });
+
+    async function handleLoadFromCache() {
+        if (files.length === 0 || isLoading) return;
+        setIsLoading(true);
+        setLoadFeedback({ kind: "none" });
+        try {
+            const response = await loadCachedMetadata(
+                files.map((f) => f.path),
+                root,
+            );
+            // Walk the items: populate per-file edits where the sidecar
+            // returned data, collect non-empty artists across the
+            // selection so we can decide single-value vs mixed.
+            const nextEdits: Record<string, PerFileEdit> = { ...edits };
+            const artistsSeen = new Set<string>();
+            let loaded = 0;
+            for (const item of response.items) {
+                const hasData = item.title || item.artist || (item.tags && item.tags.length > 0);
+                if (!hasData) continue;
+                loaded += 1;
+                nextEdits[item.path] = {
+                    title: item.title ?? "",
+                    tags: item.tags?.join(", ") ?? "",
+                };
+                if (item.artist) artistsSeen.add(item.artist);
+            }
+            setEdits(nextEdits);
+
+            // Artist: 0 distinct -> leave shared.artist alone; 1 ->
+            // populate; >1 -> show `<Mixed values>` placeholder via the
+            // mixedFields set, with shared.artist itself blank so any
+            // typed value clearly overrides everything.
+            if (artistsSeen.size === 1) {
+                const onlyArtist = [...artistsSeen][0] ?? "";
+                setShared((prev) => ({ ...prev, artist: onlyArtist }));
+                setMixedFields((prev) => {
+                    const next = new Set(prev);
+                    next.delete("artist");
+                    return next;
+                });
+            } else if (artistsSeen.size > 1) {
+                setShared((prev) => ({ ...prev, artist: "" }));
+                setMixedFields((prev) => {
+                    const next = new Set(prev);
+                    next.add("artist");
+                    return next;
+                });
+            }
+
+            setLoadFeedback(
+                loaded === 0 ? { kind: "empty" } : { kind: "success", loaded, total: files.length },
+            );
+        } catch (err) {
+            setLoadFeedback({ kind: "error", message: getErrorMessage(err) });
+        } finally {
+            setIsLoading(false);
+        }
+    }
 
     function toggleClear(field: SharedIdField) {
         const willClear = !clearFields.has(field);
@@ -144,11 +214,20 @@ export default function BulkEditSheet({ open, onClose, files, root: _root }: Bul
     function patchShared<K extends keyof SharedMetadata>(field: K, value: SharedMetadata[K]) {
         setShared((prev) => ({ ...prev, [field]: value }));
         // Typing anything cancels a pending clear on that field — the
-        // user clearly wants to set, not blank.
+        // user clearly wants to set, not blank. Same logic dismisses the
+        // `<Mixed values>` placeholder: any typed value is an explicit
+        // override, so we drop the field out of mixedFields too.
         if (field !== "suffix" && value) {
             const idField = field as SharedIdField;
             if (clearFields.has(idField)) {
                 setClearFields((prev) => {
+                    const next = new Set(prev);
+                    next.delete(idField);
+                    return next;
+                });
+            }
+            if (mixedFields.has(idField)) {
+                setMixedFields((prev) => {
                     const next = new Set(prev);
                     next.delete(idField);
                     return next;
@@ -206,97 +285,152 @@ export default function BulkEditSheet({ open, onClose, files, root: _root }: Bul
                                 No files selected.
                             </p>
                         ) : (
-                            <TooltipProvider delayDuration={500}>
-                                <table className="w-full text-sm">
-                                    <thead>
-                                        <tr className="border-b border-border">
-                                            <th
-                                                scope="col"
-                                                className="text-left text-[10px] font-medium tracking-[0.08em] uppercase text-muted-foreground/80 px-3 py-2 w-[34%]"
-                                            >
-                                                File
-                                            </th>
-                                            <th
-                                                scope="col"
-                                                className="text-left text-[10px] font-medium tracking-[0.08em] uppercase text-muted-foreground/80 px-3 py-2 w-[30%]"
-                                            >
-                                                Title
-                                            </th>
-                                            <th
-                                                scope="col"
-                                                className="text-left text-[10px] font-medium tracking-[0.08em] uppercase text-muted-foreground/80 px-3 py-2"
-                                            >
-                                                Tags
-                                            </th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {files.map((file) => {
-                                            const edit = editFor(file.path);
-                                            return (
-                                                <tr
-                                                    key={file.path}
-                                                    className="border-b border-border last:border-b-0"
+                            <>
+                                {/* Load-from-cache row. Lives above the table
+                                    because users scan top-down — seeing the
+                                    button first signals "you can pre-fill"
+                                    before they reach for the keyboard. The
+                                    feedback line sits next to the button so
+                                    it never causes a layout shift even when
+                                    cycling through empty / success / error
+                                    states. */}
+                                <div className="flex items-center gap-3 flex-wrap">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={handleLoadFromCache}
+                                        disabled={isLoading}
+                                    >
+                                        {isLoading ? (
+                                            <Loader2
+                                                size={14}
+                                                aria-hidden
+                                                className="animate-spin"
+                                            />
+                                        ) : (
+                                            <RefreshCw size={14} aria-hidden />
+                                        )}
+                                        Load from cached post info
+                                    </Button>
+                                    {loadFeedback.kind === "success" && (
+                                        <span
+                                            className="text-xs text-muted-foreground"
+                                            aria-live="polite"
+                                        >
+                                            Loaded {loadFeedback.loaded} of {loadFeedback.total}{" "}
+                                            {loadFeedback.total === 1 ? "file" : "files"}.
+                                        </span>
+                                    )}
+                                    {loadFeedback.kind === "empty" && (
+                                        <span
+                                            className="text-xs text-muted-foreground"
+                                            aria-live="polite"
+                                        >
+                                            No cached info for these files.
+                                        </span>
+                                    )}
+                                    {loadFeedback.kind === "error" && (
+                                        <span
+                                            className="text-xs text-destructive"
+                                            aria-live="polite"
+                                        >
+                                            {loadFeedback.message}
+                                        </span>
+                                    )}
+                                </div>
+                                <TooltipProvider delayDuration={500}>
+                                    <table className="w-full text-sm">
+                                        <thead>
+                                            <tr className="border-b border-border">
+                                                <th
+                                                    scope="col"
+                                                    className="text-left text-[10px] font-medium tracking-[0.08em] uppercase text-muted-foreground/80 px-3 py-2 w-[34%]"
                                                 >
-                                                    <th
-                                                        scope="row"
-                                                        className="text-left font-normal px-3 py-3 align-middle min-w-0"
+                                                    File
+                                                </th>
+                                                <th
+                                                    scope="col"
+                                                    className="text-left text-[10px] font-medium tracking-[0.08em] uppercase text-muted-foreground/80 px-3 py-2 w-[30%]"
+                                                >
+                                                    Title
+                                                </th>
+                                                <th
+                                                    scope="col"
+                                                    className="text-left text-[10px] font-medium tracking-[0.08em] uppercase text-muted-foreground/80 px-3 py-2"
+                                                >
+                                                    Tags
+                                                </th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {files.map((file) => {
+                                                const edit = editFor(file.path);
+                                                return (
+                                                    <tr
+                                                        key={file.path}
+                                                        className="border-b border-border last:border-b-0"
                                                     >
-                                                        <Tooltip>
-                                                            <TooltipTrigger asChild>
-                                                                <span className="block font-mono text-xs text-foreground truncate">
-                                                                    {file.name}
-                                                                </span>
-                                                            </TooltipTrigger>
-                                                            <TooltipContent
-                                                                side="right"
-                                                                className="max-w-md"
-                                                            >
-                                                                <div className="flex flex-col gap-0.5 font-mono text-left">
-                                                                    <span className="break-all">
+                                                        <th
+                                                            scope="row"
+                                                            className="text-left font-normal px-3 py-3 align-middle min-w-0"
+                                                        >
+                                                            <Tooltip>
+                                                                <TooltipTrigger asChild>
+                                                                    <span className="block font-mono text-xs text-foreground truncate">
                                                                         {file.name}
                                                                     </span>
-                                                                    {file.folder && (
-                                                                        <span className="text-background/70 break-all">
-                                                                            {file.folder}/
+                                                                </TooltipTrigger>
+                                                                <TooltipContent
+                                                                    side="right"
+                                                                    className="max-w-md"
+                                                                >
+                                                                    <div className="flex flex-col gap-0.5 font-mono text-left">
+                                                                        <span className="break-all">
+                                                                            {file.name}
                                                                         </span>
-                                                                    )}
-                                                                </div>
-                                                            </TooltipContent>
-                                                        </Tooltip>
-                                                    </th>
-                                                    <td className="px-3 py-2 align-middle">
-                                                        <Input
-                                                            value={edit.title}
-                                                            onChange={(ev) =>
-                                                                patchEdit(file.path, {
-                                                                    title: ev.target.value,
-                                                                })
-                                                            }
-                                                            placeholder="Keep existing"
-                                                            aria-label={`Title for ${file.name}`}
-                                                            className="font-mono text-sm"
-                                                        />
-                                                    </td>
-                                                    <td className="px-3 py-2 align-middle">
-                                                        <Input
-                                                            value={edit.tags}
-                                                            onChange={(ev) =>
-                                                                patchEdit(file.path, {
-                                                                    tags: ev.target.value,
-                                                                })
-                                                            }
-                                                            placeholder="tag1, tag2, …"
-                                                            aria-label={`Tags for ${file.name}`}
-                                                            className="font-mono text-sm"
-                                                        />
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                            </TooltipProvider>
+                                                                        {file.folder && (
+                                                                            <span className="text-background/70 break-all">
+                                                                                {file.folder}/
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                </TooltipContent>
+                                                            </Tooltip>
+                                                        </th>
+                                                        <td className="px-3 py-2 align-middle">
+                                                            <Input
+                                                                value={edit.title}
+                                                                onChange={(ev) =>
+                                                                    patchEdit(file.path, {
+                                                                        title: ev.target.value,
+                                                                    })
+                                                                }
+                                                                placeholder="Keep existing"
+                                                                aria-label={`Title for ${file.name}`}
+                                                                className="font-mono text-sm"
+                                                            />
+                                                        </td>
+                                                        <td className="px-3 py-2 align-middle">
+                                                            <Input
+                                                                value={edit.tags}
+                                                                onChange={(ev) =>
+                                                                    patchEdit(file.path, {
+                                                                        tags: ev.target.value,
+                                                                    })
+                                                                }
+                                                                placeholder="tag1, tag2, …"
+                                                                aria-label={`Tags for ${file.name}`}
+                                                                className="font-mono text-sm"
+                                                            />
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </TooltipProvider>
+                            </>
                         )}
                     </section>
 
