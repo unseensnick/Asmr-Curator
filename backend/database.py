@@ -1,3 +1,21 @@
+"""SQLite schema, seed data, and CRUD helpers — single source of truth for
+all DB writes in the backend.
+
+No ORM; raw sqlite3 with `?`-placeholder parameterised queries. Tables:
+
+- `tag_vocabulary` / `vocabulary_aliases` — canonical tag forms + aliases
+  used by the LLM-prompt injection and the rename normaliser.
+- `suppressed_terms` — strings dropped silently from extracted tag lists.
+- `settings` — small key/value store; currently holds the Patreon and
+  Google session cookies under `PATREON_COOKIE_KEY` / `GOOGLE_COOKIE_KEY`.
+
+Schema migrations happen here in place via `PRAGMA table_info` + conditional
+`ALTER TABLE ... ADD COLUMN` — there is no separate migration ledger because
+the DB is local and per-deployment. Defaults live next to the schema
+(`DEFAULT_VOCABULARY`, `DEFAULT_SUPPRESSED`). The `DB_PATH` env var picks
+the on-disk location; the directory is created if missing on first boot.
+"""
+
 import json
 import os
 import sqlite3
