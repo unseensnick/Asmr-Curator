@@ -200,6 +200,19 @@ class IngestExternalAudioIn(BaseModel):
     album_artist: str | None = None
 
 
+def _validate_post_id(post_id: str) -> str:
+    """Shared post_id validator for both ingest endpoints.
+
+    Rejects path-traversal shapes (`/`, `\\`, leading `.`) so the value
+    is safe to feed into `_ingest_dest_dir` / `validate_under_download`.
+    `require_non_empty` already trimmed + checked for empty before this.
+    """
+    post_id = require_non_empty(post_id, "post_id")
+    if "/" in post_id or "\\" in post_id or post_id.startswith("."):
+        raise HTTPException(400, "Invalid post_id")
+    return post_id
+
+
 _MAX_EXTERNAL_REDIRECTS = 5
 
 
@@ -245,9 +258,7 @@ async def _validate_url_routable(url: str) -> None:
 
 @router.post("/api/patreon/ingest-external-audio")
 async def ingest_external_audio(body: IngestExternalAudioIn):
-    post_id = require_non_empty(body.post_id, "post_id")
-    if "/" in post_id or "\\" in post_id or post_id.startswith("."):
-        raise HTTPException(400, "Invalid post_id")
+    post_id = _validate_post_id(body.post_id)
     source_url = require_non_empty(body.source_url, "source_url")
     if not (source_url.startswith(("http://", "https://"))):
         raise HTTPException(400, "source_url must be http(s)")
@@ -380,9 +391,7 @@ async def ingest_drive_link(body: IngestDriveLinkIn):
     Google session cookie to be set via `/api/settings/google-cookie`
     (typically by the browser extension).
     """
-    post_id = require_non_empty(body.post_id, "post_id")
-    if "/" in post_id or "\\" in post_id or post_id.startswith("."):
-        raise HTTPException(400, "Invalid post_id")
+    post_id = _validate_post_id(body.post_id)
     drive_url = require_non_empty(body.drive_url, "drive_url")
 
     raw_cookie = database.get_setting(GOOGLE_COOKIE_KEY) or ""
