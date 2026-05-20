@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BookOpen, Cookie, Moon, Settings2, Sun } from "lucide-react";
+import { BookOpen, CircleHelp, Cookie, Moon, Settings2, Sun } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -26,10 +26,16 @@ interface HeaderProps {
     onOpenLibrarySettings: () => void;
     /** Open the standalone Cookies modal. */
     onOpenCookies: () => void;
+    /** Open the Help reference sheet. */
+    onOpenHelp: () => void;
     /** App-level power mode flag; controls auto-expand of "More options" disclosures. */
     powerMode: boolean;
     onPowerModeChange: (next: boolean) => void;
 }
+
+/** localStorage flag: cleared on first Help open so the discovery dot
+ *  next to the ? icon disappears after the user has seen the panel once. */
+const HELP_SEEN_KEY = "app.helpSeen";
 
 /**
  * Single-row app chrome. Brand mark left; Library settings action and
@@ -43,11 +49,31 @@ export default function Header({
     dictTagCount,
     onOpenLibrarySettings,
     onOpenCookies,
+    onOpenHelp,
     powerMode,
     onPowerModeChange,
 }: HeaderProps) {
     const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
     const [info, setInfo] = useState<SystemInfo | null>(null);
+    const [helpSeen, setHelpSeen] = useState<boolean>(() => {
+        try {
+            return localStorage.getItem(HELP_SEEN_KEY) === "true";
+        } catch {
+            return false;
+        }
+    });
+
+    function handleOpenHelp() {
+        if (!helpSeen) {
+            setHelpSeen(true);
+            try {
+                localStorage.setItem(HELP_SEEN_KEY, "true");
+            } catch {
+                // non-fatal
+            }
+        }
+        onOpenHelp();
+    }
 
     useEffect(() => {
         applyTheme(theme);
@@ -87,6 +113,25 @@ export default function Header({
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleOpenHelp}
+                    aria-label="Help and reference"
+                    title="Help &amp; reference"
+                    className="relative"
+                >
+                    <CircleHelp size={16} aria-hidden />
+                    {!helpSeen && (
+                        // First-run discovery dot. Clears on first open and
+                        // does not return; we trust the user to remember the
+                        // button is here.
+                        <span
+                            aria-hidden
+                            className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-primary"
+                        />
+                    )}
+                </Button>
                 <Button
                     variant="outline"
                     onClick={onOpenLibrarySettings}

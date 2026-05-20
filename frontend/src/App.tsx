@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import CookiesSheet from "@/components/CookiesSheet";
 import FileBrowser from "@/components/FileBrowser";
 import Header from "@/components/Header";
+import HelpSheet from "@/components/HelpSheet";
 import OutputPanel from "@/components/OutputPanel";
 import PatreonPanel from "@/components/PatreonPanel";
 import ScreenshotPanel from "@/components/ScreenshotPanel";
@@ -46,6 +47,7 @@ export default function App() {
     const [stripBrackets, setStripBrackets] = useState(true);
     const [libraryOpen, setLibraryOpen] = useState(false);
     const [cookiesOpen, setCookiesOpen] = useState(false);
+    const [helpOpen, setHelpOpen] = useState(false);
     const [extractedArtist, setExtractedArtist] = useState("");
     const [sourceMode, setSourceMode] = useState<SourceMode>("patreon");
     const [powerMode, setPowerMode] = useState<boolean>(() => loadPowerMode());
@@ -159,15 +161,22 @@ export default function App() {
             <Header
                 dictTagCount={dict.vocabulary.length}
                 onOpenLibrarySettings={() => {
-                    // Mutually exclusive — having both right-side modals
-                    // open at once is undefined-stacking and the Radix
-                    // focus scopes fight each other.
+                    // Mutually exclusive — having more than one right-side
+                    // sheet open at once is undefined stacking and the
+                    // Radix focus scopes fight each other.
                     setCookiesOpen(false);
+                    setHelpOpen(false);
                     setLibraryOpen(true);
                 }}
                 onOpenCookies={() => {
                     setLibraryOpen(false);
+                    setHelpOpen(false);
                     setCookiesOpen(true);
+                }}
+                onOpenHelp={() => {
+                    setLibraryOpen(false);
+                    setCookiesOpen(false);
+                    setHelpOpen(true);
                 }}
                 powerMode={powerMode}
                 onPowerModeChange={setPowerMode}
@@ -320,6 +329,7 @@ export default function App() {
                 )}
             </Suspense>
             <CookiesSheet open={cookiesOpen} onClose={() => setCookiesOpen(false)} />
+            <HelpSheet open={helpOpen} onClose={() => setHelpOpen(false)} />
         </div>
     );
 }
