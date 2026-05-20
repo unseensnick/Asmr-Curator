@@ -4,9 +4,12 @@ import { Plus, Sparkles, User } from "lucide-react";
 import TagChip from "@/components/TagChip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { TITLE_VALIDATION_FLASH_MS } from "@/lib/constants";
 import type { AppDict, VocabEntry } from "@/lib/types";
 import { normalizeTag } from "@/lib/utils";
+
+/** How long the title input flashes red when Generate is pressed with
+ *  an empty title. */
+const TITLE_VALIDATION_FLASH_MS = 1200;
 
 interface TagsEditorProps {
     title: string;

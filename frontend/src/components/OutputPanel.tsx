@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from "react";
 
 import CopyButton from "@/components/CopyButton";
 import { Checkbox } from "@/components/ui/checkbox";
-import { OUTPUT_PULSE_MS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
+
+/** Duration of the "filename generated" pulse animation. Sized to match
+ *  the CSS keyframes — bumping requires updating both. */
+const OUTPUT_PULSE_MS = 600;
 
 interface OutputPanelProps {
     outputDash: string;

@@ -3,7 +3,6 @@ import { X } from "lucide-react";
 
 import { API, apiPost, type FileRoot } from "@/lib/api";
 import { FORMAT_EXT, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
-import { FILE_ACTION_FEEDBACK_MS } from "@/lib/constants";
 import type { ConvertFormat, ConvertQuality, FileEntry, RenameSep } from "@/lib/types";
 import { getErrorMessage, sanitizeFilename } from "@/lib/utils";
 
@@ -11,6 +10,10 @@ import MoveToLibrarySection from "./MoveToLibrarySection";
 import RenameSection, { RequiredConversion } from "./RenameSection";
 import { FileIcon } from "./selectedFile/helpers";
 import { byteLength, getExt, MAX_BYTES } from "./selectedFile/utils";
+
+/** How long a "Renamed!" / "Converted!" success badge stays visible
+ *  before reverting. Long enough to read, short enough to feel snappy. */
+const FILE_ACTION_FEEDBACK_MS = 2500;
 
 interface SelectedFilePanelProps {
     selected: FileEntry;
