@@ -607,8 +607,19 @@ async def fetch_drive_audio(
     # killed by a 300 s idle timer fired mid-stream.
     _cancel_idle_close()
     page = await context.new_page()
+    # Track every response-handler task we spawn so we can drain them in
+    # the `finally` below — otherwise the handlers can outlive the page
+    # they observe, and any exception inside them surfaces only as
+    # `Task exception was never retrieved` warnings.
+    response_tasks: set[asyncio.Task] = set()
+
+    def _spawn_response_handler(r: object) -> None:
+        task = asyncio.create_task(_on_response(r))
+        response_tasks.add(task)
+        task.add_done_callback(response_tasks.discard)
+
     try:
-        page.on("response", lambda r: asyncio.create_task(_on_response(r)))
+        page.on("response", _spawn_response_handler)
 
         await _emit(
             on_progress,
@@ -975,6 +986,14 @@ async def fetch_drive_audio(
             file_id=file_id,
         )
     finally:
+        # Cancel + drain any in-flight response handlers before closing
+        # the page they were observing. Suppress per-task exceptions —
+        # they're already accounted for in the main flow.
+        for task in response_tasks:
+            task.cancel()
+        if response_tasks:
+            with contextlib.suppress(Exception):
+                await asyncio.gather(*response_tasks, return_exceptions=True)
         # Close the page but keep the shared context alive so cookie
         # rotations from this playback propagate to the next queued scrape.
         with contextlib.suppress(Exception):
