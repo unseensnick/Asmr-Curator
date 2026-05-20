@@ -52,3 +52,22 @@ export function normalizeTag(
     const trimmed = val.trim();
     return opts?.titleCase ? trimmed.replace(/\b\w/g, (c) => c.toUpperCase()) : trimmed;
 }
+
+/** Run a list of raw tag strings through `normalizeTag` (with titleCase),
+ *  drop empties / suppressed entries, and dedupe by lowercase form (first
+ *  occurrence wins). Both extraction surfaces (Patreon URL fetch +
+ *  Screenshot LLM) flatten `embeddedTags + sourceTags` through this exact
+ *  shape, so the loop lives here instead of being copy-pasted.
+ */
+export function normaliseAndDedupeTags(raws: string[], dict: AppDict): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of raws) {
+        const n = normalizeTag(raw, dict, { titleCase: true });
+        if (n && !seen.has(n.toLowerCase())) {
+            seen.add(n.toLowerCase());
+            out.push(n);
+        }
+    }
+    return out;
+}

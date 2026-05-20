@@ -7,7 +7,7 @@ import { useClipboard } from "@/hooks/useClipboard";
 import { API, apiPost } from "@/lib/api";
 import { parseLlmJson, parseTitleLine } from "@/lib/parser";
 import type { AppDict } from "@/lib/types";
-import { getErrorMessage, normalizeTag } from "@/lib/utils";
+import { getErrorMessage, normaliseAndDedupeTags } from "@/lib/utils";
 
 interface ScreenshotPanelProps {
     dict: AppDict;
@@ -155,15 +155,7 @@ export default function ScreenshotPanel({
             const { title, embeddedTags } = parseTitleLine(rawTitleLine);
 
             // Merge embedded title tags + LLM pill tags, normalised, deduped.
-            const seen = new Set<string>();
-            const allTags: string[] = [];
-            for (const raw of [...embeddedTags, ...rawPillTags]) {
-                const normalized = normalizeTag(raw, dict, { titleCase: true });
-                if (normalized && !seen.has(normalized.toLowerCase())) {
-                    seen.add(normalized.toLowerCase());
-                    allTags.push(normalized);
-                }
-            }
+            const allTags = normaliseAndDedupeTags([...embeddedTags, ...rawPillTags], dict);
 
             setRawLlmText(raw_text);
             const artist = creator_confidence === "high" && creator_name ? creator_name : "";

@@ -12,7 +12,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { fetchPatreonPost } from "@/lib/api";
 import { parseTitleLine } from "@/lib/parser";
 import type { AppDict, PatreonContentType, PatreonPost } from "@/lib/types";
-import { getErrorMessage, normalizeTag, splitLogTail } from "@/lib/utils";
+import { getErrorMessage, normaliseAndDedupeTags, splitLogTail } from "@/lib/utils";
 
 interface PatreonPanelProps {
     dict: AppDict;
@@ -167,15 +167,7 @@ export default function PatreonPanel({
     // clean title + embedded tags, merge with API tags, normalise via dictionary.
     function applyPost(p: PatreonPost) {
         const { title, embeddedTags } = parseTitleLine(p.title || "");
-        const seen = new Set<string>();
-        const normalised: string[] = [];
-        for (const raw of [...embeddedTags, ...p.tags]) {
-            const n = normalizeTag(raw, dict, { titleCase: true });
-            if (n && !seen.has(n.toLowerCase())) {
-                seen.add(n.toLowerCase());
-                normalised.push(n);
-            }
-        }
+        const normalised = normaliseAndDedupeTags([...embeddedTags, ...p.tags], dict);
         onExtracted(title || p.title || "", normalised, p.artist || "");
         setApplyStatus({
             type: "success",
