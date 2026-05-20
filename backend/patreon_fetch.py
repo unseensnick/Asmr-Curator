@@ -320,7 +320,9 @@ def fetch(
         if "image" not in opts.content_types:
             _cleanup_info_media(posts)
         # Pull each audio file out of patreon-dl's
-        # <campaign>/posts/<id>/audio/ nesting into <DOWNLOAD_PATH>/<post_id>/.
+        # <campaign>/posts/<id>/audio/ nesting into the flattened
+        # <DOWNLOAD_PATH>/<creator>/<post_id> - <title>/ layout. The
+        # actual path construction lives in audio_utils.flatten_dest_parts.
         posts = _flatten_audio(posts, output_dir)
 
     return FetchResult(output_dir=str(output_dir), posts=posts, log_tail=log_tail)
