@@ -11,9 +11,15 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
+### Additions
+
+- **Help &amp; reference sheet in the header.** A new `?` button next to Dictionary opens a calm right-side sheet covering the three workflows (Patreon URL / Screenshot / files on disk), first-time cookie setup, and the non-obvious affordances (right-click a tag chip, Cmd / Ctrl + Enter, Power mode). A small dot next to the icon clears on first open. Not a tutorial — it's a reference card the user pulls open when they want it.
+
 ### Changes
 
 - **The layout scales into ultrawide aspect ratios.** Above the 2xl breakpoint (1536px) the container cap is removed so the 3-column dashboard (Source / Edit / Output) grows proportionally with the screen, and the FileBrowser sits in its own section below at the full container width. Users on 21:9 (3440×1440) and 32:9 / 5K (5120×2160) monitors get controls that fill the screen instead of narrow columns centred with background on each side.
+- **Cmd / Ctrl + Enter from the title or format input fires Generate filename.** The shortcut shows next to the button label (`⌘↵` on macOS, `Ctrl↵` elsewhere) so the late-night repeat workflow doesn't have to reach for the mouse.
+- **The FileBrowser remembers which tab you were on across reloads.** Previously every refresh reset to Library; users who live in Downloads after a Patreon bridge had to switch back manually each time.
 - **Secondary text in light mode now clears WCAG AA on tinted surfaces.** Log tails, code-block previews, and hints sitting on `bg-muted/40` were borderline against the contrast floor in light mode; the muted-foreground token nudged darker so legibility holds up in daylight.
 
 ### Fixes

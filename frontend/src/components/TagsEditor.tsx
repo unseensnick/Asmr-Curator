@@ -11,6 +11,12 @@ import { normalizeTag } from "@/lib/utils";
  *  an empty title. */
 const TITLE_VALIDATION_FLASH_MS = 1200;
 
+/** Platform-appropriate label for the Generate shortcut. Mac users see the
+ *  command symbol; everyone else sees "Ctrl". `navigator` is guarded so the
+ *  module loads under any SSR config that strips browser globals. */
+const SHORTCUT_LABEL =
+    typeof navigator !== "undefined" && /mac/i.test(navigator.platform) ? "⌘↵" : "Ctrl↵";
+
 interface TagsEditorProps {
     title: string;
     onTitleChange: (t: string) => void;
@@ -183,6 +189,16 @@ export default function TagsEditor({
                         onTitleChange(e.target.value);
                         if (titleError) setTitleError(false);
                     }}
+                    onKeyDown={(e) => {
+                        // Ctrl/Cmd+Enter fires Generate from inside the title
+                        // input so the late-night repeat workflow doesn't have
+                        // to reach for the mouse. Plain Enter is intentionally
+                        // not bound — too easy to fire mid-edit.
+                        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                            e.preventDefault();
+                            handleGenerate();
+                        }
+                    }}
                     placeholder="e.g. Villain Queen Ties You Up...Then Gets Soft With You"
                     aria-invalid={titleError ? true : undefined}
                     className="h-12"
@@ -264,6 +280,12 @@ export default function TagsEditor({
                         id="tags-editor-suffix"
                         value={suffix}
                         onChange={(e) => onSuffixChange(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                                e.preventDefault();
+                                handleGenerate();
+                            }
+                        }}
                         onBlur={(e) => {
                             // Normalize the format suffix on blur so trivial typos like
                             // "f4a", " F4A", or "F4A " don't propagate into filenames.
@@ -288,11 +310,21 @@ export default function TagsEditor({
                     size="lg"
                     onClick={handleGenerate}
                     disabled={!title.trim()}
-                    title={!title.trim() ? "Add an audio title first" : undefined}
+                    title={
+                        !title.trim()
+                            ? "Add an audio title first"
+                            : `Generate filename (${SHORTCUT_LABEL})`
+                    }
                     className="gap-2 justify-self-end"
                 >
                     <Sparkles size={16} aria-hidden />
                     Generate filename
+                    <kbd
+                        aria-hidden
+                        className="ml-1 hidden sm:inline-flex items-center font-mono text-[0.65rem] text-muted-foreground/80"
+                    >
+                        {SHORTCUT_LABEL}
+                    </kbd>
                 </Button>
             </div>
         </div>
