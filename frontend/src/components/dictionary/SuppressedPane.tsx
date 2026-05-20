@@ -66,9 +66,7 @@ export default function SuppressedPane({
     }
 
     const filtered = search
-        ? suppressed.filter((s) =>
-              s.term.toLowerCase().includes(search.toLowerCase()),
-          )
+        ? suppressed.filter((s) => s.term.toLowerCase().includes(search.toLowerCase()))
         : suppressed;
 
     return (
@@ -82,14 +80,11 @@ export default function SuppressedPane({
                         className="shrink-0 mt-1 text-muted-foreground/70"
                     />
                     <span>
-                        Suppressed terms are silently dropped from output. Add
-                        OCR artefacts or format identifiers (
-                        <code className="font-mono text-foreground/80">f4a</code>
-                        ,{" "}
-                        <code className="font-mono text-foreground/80">
-                            tolovers
-                        </code>
-                        ) that should never appear as tags.
+                        Suppressed terms are silently dropped from output. Add OCR artefacts or
+                        format identifiers (
+                        <code className="font-mono text-foreground/80">f4a</code>,{" "}
+                        <code className="font-mono text-foreground/80">tolovers</code>) that should
+                        never appear as tags.
                     </span>
                 </p>
                 <Input
@@ -130,11 +125,7 @@ export default function SuppressedPane({
 
             {/* Bottom: error + add row */}
             <div className="shrink-0 px-6 pt-3 pb-5 border-t border-border flex flex-col gap-2">
-                {error && (
-                    <p className="text-sm text-destructive break-words">
-                        {error}
-                    </p>
-                )}
+                {error && <p className="text-sm text-destructive break-words">{error}</p>}
                 <div className="flex gap-2">
                     <Input
                         ref={addRef}
@@ -147,11 +138,7 @@ export default function SuppressedPane({
                         className="flex-1 font-mono text-sm"
                         aria-label="Add term to suppress"
                     />
-                    <Button
-                        variant="outline"
-                        onClick={handleAdd}
-                        className="gap-1.5 shrink-0"
-                    >
+                    <Button variant="outline" onClick={handleAdd} className="gap-1.5 shrink-0">
                         <ShieldOff size={14} aria-hidden />
                         Suppress
                     </Button>

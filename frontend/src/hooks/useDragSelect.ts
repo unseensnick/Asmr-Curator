@@ -67,15 +67,8 @@ export interface UseDragSelectResult {
  *   • unmount / Sheet-close paths can tear down a live drag via
  *     `cleanup` so the window listeners + RAF don't dangle
  */
-export function useDragSelect(
-    options: UseDragSelectOptions,
-): UseDragSelectResult {
-    const {
-        selectedPathsRef,
-        renamePathRef,
-        setSelectedPaths,
-        setAnchorPath,
-    } = options;
+export function useDragSelect(options: UseDragSelectOptions): UseDragSelectResult {
+    const { selectedPathsRef, renamePathRef, setSelectedPaths, setAnchorPath } = options;
 
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
     const dragStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -106,20 +99,12 @@ export function useDragSelect(
                 height: bottom - top,
             });
             const inside = new Set<string>();
-            container
-                .querySelectorAll<HTMLElement>("[data-entry-path]")
-                .forEach((row) => {
-                    const r = row.getBoundingClientRect();
-                    if (
-                        r.right < left ||
-                        r.left > right ||
-                        r.bottom < top ||
-                        r.top > bottom
-                    )
-                        return;
-                    const p = row.getAttribute("data-entry-path");
-                    if (p) inside.add(p);
-                });
+            container.querySelectorAll<HTMLElement>("[data-entry-path]").forEach((row) => {
+                const r = row.getBoundingClientRect();
+                if (r.right < left || r.left > right || r.bottom < top || r.top > bottom) return;
+                const p = row.getAttribute("data-entry-path");
+                if (p) inside.add(p);
+            });
             const next = selectionFromDragHits(
                 dragBaseRef.current,
                 inside,
@@ -198,9 +183,7 @@ export function useDragSelect(
                 // movement). Mirrors what an OS file explorer does when you
                 // click the empty area of a folder.
                 if (start && last) {
-                    const moved =
-                        Math.abs(last.x - start.x) > 3 ||
-                        Math.abs(last.y - start.y) > 3;
+                    const moved = Math.abs(last.x - start.x) > 3 || Math.abs(last.y - start.y) > 3;
                     if (!moved && !dragAdditiveRef.current) {
                         setSelectedPaths(new Set());
                         setAnchorPath(null);

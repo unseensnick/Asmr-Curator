@@ -1,13 +1,5 @@
 import { useRef, useState } from "react";
-import {
-    BookOpen,
-    Download,
-    FlaskConical,
-    RotateCcw,
-    ShieldOff,
-    Upload,
-    X,
-} from "lucide-react";
+import { BookOpen, Download, FlaskConical, RotateCcw, ShieldOff, Upload, X } from "lucide-react";
 
 import DictionaryTester from "@/components/dictionary/DictionaryTester";
 import SuppressedPane from "@/components/dictionary/SuppressedPane";
@@ -23,12 +15,7 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import {
-    Sheet,
-    SheetContent,
-    SheetDescription,
-    SheetTitle,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { API, apiGet, apiPost, apiPut } from "@/lib/api";
 import { buildDictDerived, dictFromApiResponse } from "@/lib/types";
@@ -95,9 +82,7 @@ export default function LibrarySettingsSheet({
     // buildDictDerived, so the entry that appears LATER in the list wins
     // on alias lookup. Users reorder when a contested alias is mapping to
     // the wrong canonical.
-    async function handleVocabReorder(
-        newOrder: AppDict["vocabulary"],
-    ): Promise<void> {
+    async function handleVocabReorder(newOrder: AppDict["vocabulary"]): Promise<void> {
         await apiPut(API.dictionary, {
             vocabulary: newOrder.map(({ canonical, aliases }) => ({
                 canonical,
@@ -136,17 +121,12 @@ export default function LibrarySettingsSheet({
         try {
             const text = await file.text();
             const imported = JSON.parse(text);
-            if (
-                !Array.isArray(imported.vocabulary) ||
-                !Array.isArray(imported.suppressed)
-            )
+            if (!Array.isArray(imported.vocabulary) || !Array.isArray(imported.suppressed))
                 throw new Error("Missing 'vocabulary' or 'suppressed' arrays");
             await apiPut(API.dictionary, imported);
             await reloadDict();
         } catch (err) {
-            setImportError(
-                err instanceof Error ? err.message : String(err),
-            );
+            setImportError(err instanceof Error ? err.message : String(err));
         }
     }
 
@@ -190,8 +170,8 @@ export default function LibrarySettingsSheet({
             >
                 <SheetTitle className="sr-only">Dictionary</SheetTitle>
                 <SheetDescription className="sr-only">
-                    Manage canonical tags, suppressed terms, and test
-                    extraction against the dictionary.
+                    Manage canonical tags, suppressed terms, and test extraction against the
+                    dictionary.
                 </SheetDescription>
 
                 {/* Header */}
@@ -265,19 +245,14 @@ export default function LibrarySettingsSheet({
                             <VocabularyPane
                                 vocabulary={dict.vocabulary}
                                 quickFill={
-                                    quickFill?.tab === "vocabulary"
-                                        ? quickFill.value
-                                        : undefined
+                                    quickFill?.tab === "vocabulary" ? quickFill.value : undefined
                                 }
                                 onQuickFillConsumed={() => setQuickFill(null)}
                                 onChange={(vocabulary) => {
                                     onDictChange({
                                         ...dict,
                                         vocabulary,
-                                        ...buildDictDerived(
-                                            vocabulary,
-                                            dict.suppressed,
-                                        ),
+                                        ...buildDictDerived(vocabulary, dict.suppressed),
                                     });
                                 }}
                                 onReorder={handleVocabReorder}
@@ -290,19 +265,14 @@ export default function LibrarySettingsSheet({
                             <SuppressedPane
                                 suppressed={dict.suppressed}
                                 quickFill={
-                                    quickFill?.tab === "suppressed"
-                                        ? quickFill.value
-                                        : undefined
+                                    quickFill?.tab === "suppressed" ? quickFill.value : undefined
                                 }
                                 onQuickFillConsumed={() => setQuickFill(null)}
                                 onChange={(suppressed) => {
                                     onDictChange({
                                         ...dict,
                                         suppressed,
-                                        ...buildDictDerived(
-                                            dict.vocabulary,
-                                            suppressed,
-                                        ),
+                                        ...buildDictDerived(dict.vocabulary, suppressed),
                                     });
                                 }}
                             />
@@ -311,22 +281,14 @@ export default function LibrarySettingsSheet({
                             value="test"
                             className="flex-1 min-h-0 mt-0 flex flex-col data-[state=inactive]:hidden"
                         >
-                            <DictionaryTester
-                                dict={dict}
-                                onQuickFix={handleQuickFix}
-                            />
+                            <DictionaryTester dict={dict} onQuickFix={handleQuickFix} />
                         </TabsContent>
                     </div>
                 </Tabs>
 
                 {/* Footer */}
                 <div className="flex items-center gap-2 px-5 py-3 border-t border-border shrink-0 flex-wrap">
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleExport}
-                        className="gap-1.5"
-                    >
+                    <Button variant="outline" size="sm" onClick={handleExport} className="gap-1.5">
                         <Download size={14} aria-hidden />
                         Export
                     </Button>
@@ -365,12 +327,10 @@ export default function LibrarySettingsSheet({
             <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>
-                            Reset dictionary to built-in defaults?
-                        </AlertDialogTitle>
+                        <AlertDialogTitle>Reset dictionary to built-in defaults?</AlertDialogTitle>
                         <AlertDialogDescription>
-                            All custom entries (vocabulary and suppressed terms)
-                            will be lost. This can&apos;t be undone.
+                            All custom entries (vocabulary and suppressed terms) will be lost. This
+                            can&apos;t be undone.
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -392,14 +352,10 @@ export default function LibrarySettingsSheet({
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle>Import failed</AlertDialogTitle>
-                        <AlertDialogDescription>
-                            {importError}
-                        </AlertDialogDescription>
+                        <AlertDialogDescription>{importError}</AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                        <AlertDialogAction
-                            onClick={() => setImportError(null)}
-                        >
+                        <AlertDialogAction onClick={() => setImportError(null)}>
                             OK
                         </AlertDialogAction>
                     </AlertDialogFooter>

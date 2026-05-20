@@ -28,7 +28,8 @@ describe("parseLlmJson", () => {
     it("extracts JSON wrapped in prose (LLM preamble)", () => {
         // Vision LLMs sometimes prefix the JSON with explanation text;
         // the parser grabs the first `{…}` block.
-        const raw = 'Here is the extracted data: {"raw_title_line": "X", "raw_pill_tags": [], "creator_name": null, "creator_confidence": "low"} - hope this helps!';
+        const raw =
+            'Here is the extracted data: {"raw_title_line": "X", "raw_pill_tags": [], "creator_name": null, "creator_confidence": "low"} - hope this helps!';
         expect(parseLlmJson(raw).raw_title_line).toBe("X");
     });
 
@@ -199,9 +200,7 @@ describe("parseTitleLine — mixed real-world inputs", () => {
         const { title, embeddedTags } = parseTitleLine(input);
         // Emojis stripped, square-bracket prefix kept (not in the strip set),
         // pipe split applied.
-        expect(title).toBe(
-            "[EXCLUSIVE] Love Goddess Guides You Towards Pleasure"
-        );
+        expect(title).toBe("[EXCLUSIVE] Love Goddess Guides You Towards Pleasure");
         expect(embeddedTags).toEqual(["With Music", "Soft Waves"]);
     });
 

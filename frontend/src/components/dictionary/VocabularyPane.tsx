@@ -1,13 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-    AlertCircle,
-    Check,
-    GripVertical,
-    Info,
-    Plus,
-    Trash2,
-    X,
-} from "lucide-react";
+import { AlertCircle, Check, GripVertical, Info, Plus, Trash2, X } from "lucide-react";
 
 import {
     AlertDialog,
@@ -103,13 +95,10 @@ export default function VocabularyPane({
     async function handleSave(updated: VocabEntry) {
         setError("");
         try {
-            const row = await apiPatch<VocabEntry>(
-                API.vocabEntry(updated.id),
-                {
-                    canonical: updated.canonical,
-                    aliases: updated.aliases,
-                },
-            );
+            const row = await apiPatch<VocabEntry>(API.vocabEntry(updated.id), {
+                canonical: updated.canonical,
+                aliases: updated.aliases,
+            });
             onChange(vocabulary.map((x) => (x.id === row.id ? row : x)));
             setEditingId(null);
         } catch (e) {
@@ -140,9 +129,7 @@ export default function VocabularyPane({
         ? vocabulary.filter(
               (e) =>
                   e.canonical.toLowerCase().includes(search.toLowerCase()) ||
-                  e.aliases.some((a) =>
-                      a.toLowerCase().includes(search.toLowerCase()),
-                  ),
+                  e.aliases.some((a) => a.toLowerCase().includes(search.toLowerCase())),
           )
         : vocabulary;
     // Drag-to-reorder doesn't work cleanly against a filtered view (visible
@@ -173,151 +160,129 @@ export default function VocabularyPane({
 
     return (
         <>
-        <div className="flex flex-col flex-1 min-h-0">
-            {/* Top: help + search */}
-            <div className="shrink-0 px-6 pt-5 pb-3 flex flex-col gap-3">
-                <p className="flex items-start gap-2 text-sm text-muted-foreground leading-relaxed">
-                    <Info
-                        size={14}
-                        aria-hidden
-                        className="shrink-0 mt-1 text-muted-foreground/70"
-                    />
-                    <span>
-                        Canonical tags display in filenames. Aliases are
-                        alternate spellings the parser maps back to the
-                        canonical. Click any entry to edit. Drag to reorder;
-                        when two entries share an alias, the one lower in the
-                        list wins.
-                    </span>
-                </p>
-                <Input
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search vocabulary."
-                    aria-label="Search vocabulary"
-                />
-            </div>
-
-            {/* Scrollable list */}
-            <div className="flex-1 min-h-0 overflow-y-auto px-6">
-                <div className="flex flex-col gap-1.5 pb-3">
-                    {filtered.length === 0 && (
-                        <p className="text-sm text-muted-foreground italic py-2">
-                            {search
-                                ? "No matches."
-                                : "No vocabulary entries yet."}
-                        </p>
-                    )}
-                    {filtered.map((entry) =>
-                        editingId === entry.id ? (
-                            <VocabEntryEditor
-                                key={entry.id}
-                                entry={entry}
-                                vocabulary={vocabulary}
-                                onSave={handleSave}
-                                onCancel={() => setEditingId(null)}
-                            />
-                        ) : (
-                            <VocabEntryRow
-                                key={entry.id}
-                                entry={entry}
-                                aliasClaims={aliasClaims}
-                                draggable={dragEnabled}
-                                onEdit={() => setEditingId(entry.id)}
-                                onDelete={() => setDeleteCandidate(entry)}
-                                onDragStart={() => {
-                                    dragSrcIdx.current = vocabulary.findIndex(
-                                        (x) => x.id === entry.id,
-                                    );
-                                }}
-                                onDragOver={(e) => e.preventDefault()}
-                                onDrop={(e) => {
-                                    e.preventDefault();
-                                    const src = dragSrcIdx.current;
-                                    const dst = vocabulary.findIndex(
-                                        (x) => x.id === entry.id,
-                                    );
-                                    dragSrcIdx.current = null;
-                                    if (
-                                        src !== null &&
-                                        dst !== -1 &&
-                                        src !== dst
-                                    ) {
-                                        handleReorder(src, dst);
-                                    }
-                                }}
-                            />
-                        ),
-                    )}
-                </div>
-            </div>
-
-            {/* Bottom: error + add row */}
-            <div className="shrink-0 px-6 pt-3 pb-5 border-t border-border flex flex-col gap-2">
-                {savingOrder && (
-                    <p className="text-xs text-muted-foreground italic">
-                        Saving new order.
-                    </p>
-                )}
-                {error && (
-                    <p className="text-sm text-destructive break-words">
-                        {error}
-                    </p>
-                )}
-                <div className="flex gap-2">
-                    <Input
-                        ref={addRef}
-                        value={addCanonical}
-                        onChange={(e) => setAddCanonical(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key === "Enter") handleAdd();
-                        }}
-                        placeholder="Add canonical tag (e.g. Friends to Lovers)"
-                        className="flex-1"
-                        aria-label="Add canonical tag"
-                    />
-                    <Button
-                        variant="outline"
-                        onClick={handleAdd}
-                        className="gap-1.5 shrink-0"
-                    >
-                        <Plus size={14} aria-hidden />
-                        Add
-                    </Button>
-                </div>
-            </div>
-        </div>
-
-        <AlertDialog
-            open={deleteCandidate !== null}
-            onOpenChange={(v) => !v && setDeleteCandidate(null)}
-        >
-            <AlertDialogContent>
-                <AlertDialogHeader>
-                    <AlertDialogTitle>
-                        Delete{" "}
-                        <span className="font-medium">
-                            {deleteCandidate?.canonical}
+            <div className="flex flex-col flex-1 min-h-0">
+                {/* Top: help + search */}
+                <div className="shrink-0 px-6 pt-5 pb-3 flex flex-col gap-3">
+                    <p className="flex items-start gap-2 text-sm text-muted-foreground leading-relaxed">
+                        <Info
+                            size={14}
+                            aria-hidden
+                            className="shrink-0 mt-1 text-muted-foreground/70"
+                        />
+                        <span>
+                            Canonical tags display in filenames. Aliases are alternate spellings the
+                            parser maps back to the canonical. Click any entry to edit. Drag to
+                            reorder; when two entries share an alias, the one lower in the list
+                            wins.
                         </span>
-                        ?
-                    </AlertDialogTitle>
-                    <AlertDialogDescription>
-                        {deleteCandidate && deleteCandidate.aliases.length > 0
-                            ? `Removes the canonical tag and its ${deleteCandidate.aliases.length} ${deleteCandidate.aliases.length === 1 ? "alias" : "aliases"}. Tags already in saved filenames keep their text; future extractions stop matching.`
-                            : "Future extractions stop matching this tag. Tags already in saved filenames keep their text."}
-                    </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction
-                        onClick={performDelete}
-                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                    >
-                        Delete
-                    </AlertDialogAction>
-                </AlertDialogFooter>
-            </AlertDialogContent>
-        </AlertDialog>
+                    </p>
+                    <Input
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Search vocabulary."
+                        aria-label="Search vocabulary"
+                    />
+                </div>
+
+                {/* Scrollable list */}
+                <div className="flex-1 min-h-0 overflow-y-auto px-6">
+                    <div className="flex flex-col gap-1.5 pb-3">
+                        {filtered.length === 0 && (
+                            <p className="text-sm text-muted-foreground italic py-2">
+                                {search ? "No matches." : "No vocabulary entries yet."}
+                            </p>
+                        )}
+                        {filtered.map((entry) =>
+                            editingId === entry.id ? (
+                                <VocabEntryEditor
+                                    key={entry.id}
+                                    entry={entry}
+                                    vocabulary={vocabulary}
+                                    onSave={handleSave}
+                                    onCancel={() => setEditingId(null)}
+                                />
+                            ) : (
+                                <VocabEntryRow
+                                    key={entry.id}
+                                    entry={entry}
+                                    aliasClaims={aliasClaims}
+                                    draggable={dragEnabled}
+                                    onEdit={() => setEditingId(entry.id)}
+                                    onDelete={() => setDeleteCandidate(entry)}
+                                    onDragStart={() => {
+                                        dragSrcIdx.current = vocabulary.findIndex(
+                                            (x) => x.id === entry.id,
+                                        );
+                                    }}
+                                    onDragOver={(e) => e.preventDefault()}
+                                    onDrop={(e) => {
+                                        e.preventDefault();
+                                        const src = dragSrcIdx.current;
+                                        const dst = vocabulary.findIndex((x) => x.id === entry.id);
+                                        dragSrcIdx.current = null;
+                                        if (src !== null && dst !== -1 && src !== dst) {
+                                            handleReorder(src, dst);
+                                        }
+                                    }}
+                                />
+                            ),
+                        )}
+                    </div>
+                </div>
+
+                {/* Bottom: error + add row */}
+                <div className="shrink-0 px-6 pt-3 pb-5 border-t border-border flex flex-col gap-2">
+                    {savingOrder && (
+                        <p className="text-xs text-muted-foreground italic">Saving new order.</p>
+                    )}
+                    {error && <p className="text-sm text-destructive break-words">{error}</p>}
+                    <div className="flex gap-2">
+                        <Input
+                            ref={addRef}
+                            value={addCanonical}
+                            onChange={(e) => setAddCanonical(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter") handleAdd();
+                            }}
+                            placeholder="Add canonical tag (e.g. Friends to Lovers)"
+                            className="flex-1"
+                            aria-label="Add canonical tag"
+                        />
+                        <Button variant="outline" onClick={handleAdd} className="gap-1.5 shrink-0">
+                            <Plus size={14} aria-hidden />
+                            Add
+                        </Button>
+                    </div>
+                </div>
+            </div>
+
+            <AlertDialog
+                open={deleteCandidate !== null}
+                onOpenChange={(v) => !v && setDeleteCandidate(null)}
+            >
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>
+                            Delete <span className="font-medium">{deleteCandidate?.canonical}</span>
+                            ?
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {deleteCandidate && deleteCandidate.aliases.length > 0
+                                ? `Removes the canonical tag and its ${deleteCandidate.aliases.length} ${deleteCandidate.aliases.length === 1 ? "alias" : "aliases"}. Tags already in saved filenames keep their text; future extractions stop matching.`
+                                : "Future extractions stop matching this tag. Tags already in saved filenames keep their text."}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={performDelete}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        >
+                            Delete
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </>
     );
 }
@@ -328,10 +293,7 @@ interface VocabEntryRowProps {
     entry: VocabEntry;
     /** Lowercase -> all claimants map across the full vocabulary. Used to
      *  flag aliases also owned by another entry. */
-    aliasClaims: Map<
-        string,
-        { entry: VocabEntry; role: "canonical" | "alias"; index: number }[]
-    >;
+    aliasClaims: Map<string, { entry: VocabEntry; role: "canonical" | "alias"; index: number }[]>;
     /** When true, the row is draggable for reordering. Disabled during
      *  active search (visible/source indices diverge). */
     draggable: boolean;
@@ -379,16 +341,12 @@ function VocabEntryRow({
                 />
             )}
             <div className="flex-1 min-w-0">
-                <span className="text-sm font-medium text-foreground block">
-                    {entry.canonical}
-                </span>
+                <span className="text-sm font-medium text-foreground block">{entry.canonical}</span>
                 {entry.aliases.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1.5">
                         {entry.aliases.map((a) => {
                             const claimants = aliasClaims.get(a.toLowerCase()) ?? [];
-                            const others = claimants.filter(
-                                (c) => c.entry.id !== entry.id,
-                            );
+                            const others = claimants.filter((c) => c.entry.id !== entry.id);
                             if (others.length === 0) {
                                 return (
                                     <span
@@ -400,17 +358,11 @@ function VocabEntryRow({
                                 );
                             }
                             const myIndex =
-                                claimants.find((c) => c.entry.id === entry.id)?.index ??
-                                -1;
-                            const maxIndex = Math.max(
-                                ...claimants.map((c) => c.index),
-                            );
+                                claimants.find((c) => c.entry.id === entry.id)?.index ?? -1;
+                            const maxIndex = Math.max(...claimants.map((c) => c.index));
                             const wins = myIndex === maxIndex;
                             const otherNames = others
-                                .map(
-                                    (c) =>
-                                        `${c.entry.canonical} (${c.role})`,
-                                )
+                                .map((c) => `${c.entry.canonical} (${c.role})`)
                                 .join(", ");
                             const tip = wins
                                 ? `Also on ${otherNames}. This entry wins lookup because it sits lower in the list.`
@@ -458,12 +410,7 @@ interface VocabEntryEditorProps {
     onCancel: () => void;
 }
 
-function VocabEntryEditor({
-    entry,
-    vocabulary,
-    onSave,
-    onCancel,
-}: VocabEntryEditorProps) {
+function VocabEntryEditor({ entry, vocabulary, onSave, onCancel }: VocabEntryEditorProps) {
     const [canonical, setCanonical] = useState(entry.canonical);
     const [aliases, setAliases] = useState<string[]>(entry.aliases);
     const [newAlias, setNewAlias] = useState("");
@@ -541,9 +488,7 @@ function VocabEntryEditor({
             {/* Alias chips */}
             <div className="flex flex-wrap gap-1.5 min-h-7 items-center">
                 {aliases.length === 0 ? (
-                    <span className="text-xs text-muted-foreground/70 italic">
-                        No aliases yet.
-                    </span>
+                    <span className="text-xs text-muted-foreground/70 italic">No aliases yet.</span>
                 ) : (
                     aliases.map((a) => (
                         <span
@@ -577,29 +522,19 @@ function VocabEntryEditor({
                         className="flex-1 h-9 font-mono text-sm"
                         aria-label="Add alias"
                     />
-                    <Button
-                        variant="outline"
-                        onClick={addAlias}
-                        className="gap-1.5 shrink-0"
-                    >
+                    <Button variant="outline" onClick={addAlias} className="gap-1.5 shrink-0">
                         <Plus size={14} aria-hidden />
                         Alias
                     </Button>
                 </div>
                 {aliasConflict && (
                     <p className="text-xs text-warning flex items-start gap-1.5 leading-relaxed">
-                        <AlertCircle
-                            size={12}
-                            aria-hidden
-                            className="shrink-0 mt-0.5"
-                        />
+                        <AlertCircle size={12} aria-hidden className="shrink-0 mt-0.5" />
                         <span>
                             Already on{" "}
-                            <strong className="font-medium">
-                                {aliasConflict.canonical}
-                            </strong>
-                            . Adding here lets this entry override on lookup if
-                            it sits lower in the list.
+                            <strong className="font-medium">{aliasConflict.canonical}</strong>.
+                            Adding here lets this entry override on lookup if it sits lower in the
+                            list.
                         </span>
                     </p>
                 )}

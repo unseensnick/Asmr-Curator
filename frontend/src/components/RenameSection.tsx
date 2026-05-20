@@ -2,15 +2,12 @@ import { AlertTriangle, ChevronDown } from "lucide-react";
 
 import ConversionPanel from "@/components/ConversionPanel";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-    Collapsible,
-    CollapsibleContent,
-    CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { ConvertFormat, ConvertQuality, RenameSep } from "@/lib/types";
 
-import { ActionButton, MAX_BYTES, MetaField } from "./selectedFile/helpers";
+import { ActionButton, MetaField } from "./selectedFile/helpers";
+import { MAX_BYTES } from "./selectedFile/utils";
 
 interface RequiredConversionProps {
     converting: boolean;
@@ -38,15 +35,8 @@ export function RequiredConversion({
     return (
         <>
             <div className="flex items-start gap-2 text-sm text-warning bg-warning/10 border border-warning/25 rounded-md px-3 py-2.5 leading-relaxed">
-                <AlertTriangle
-                    size={16}
-                    aria-hidden
-                    className="shrink-0 mt-0.5"
-                />
-                <span>
-                    This file's format doesn't support embedded metadata.
-                    Convert it first.
-                </span>
+                <AlertTriangle size={16} aria-hidden className="shrink-0 mt-0.5" />
+                <span>This file's format doesn't support embedded metadata. Convert it first.</span>
             </div>
             <ConversionPanel
                 formats={["mp3", "flac", "ogg"]}
@@ -58,12 +48,7 @@ export function RequiredConversion({
                 onDeleteChange={onDeleteOriginalChange}
                 checkboxId="delete-original-required"
             />
-            <ActionButton
-                kind="convert"
-                busy={converting}
-                done={converted}
-                onClick={onConvert}
-            />
+            <ActionButton kind="convert" busy={converting} done={converted} onClick={onConvert} />
         </>
     );
 }
@@ -143,9 +128,7 @@ export default function RenameSection(props: RenameSectionProps) {
                 <ToggleGroup
                     type="single"
                     value={renameSep}
-                    onValueChange={(v) =>
-                        v && onRenameSepChange(v as RenameSep)
-                    }
+                    onValueChange={(v) => v && onRenameSepChange(v as RenameSep)}
                     className="border border-border rounded-md overflow-hidden gap-0"
                 >
                     {(["dash", "pipe"] as RenameSep[]).map((sep) => (
@@ -195,13 +178,9 @@ export default function RenameSection(props: RenameSectionProps) {
                     <label className="flex items-center gap-2 cursor-pointer select-none w-fit">
                         <Checkbox
                             checked={linkArtists}
-                            onCheckedChange={(v) =>
-                                onLinkArtistsChange(v === true)
-                            }
+                            onCheckedChange={(v) => onLinkArtistsChange(v === true)}
                         />
-                        <span className="text-sm text-muted-foreground">
-                            Same as artist
-                        </span>
+                        <span className="text-sm text-muted-foreground">Same as artist</span>
                     </label>
                 </div>
             </div>

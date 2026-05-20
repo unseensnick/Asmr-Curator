@@ -1,12 +1,7 @@
 import { Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-    applyTheme,
-    getInitialTheme,
-    setStoredTheme,
-    type ThemeMode,
-} from "@/lib/theme";
+import { applyTheme, getInitialTheme, setStoredTheme, type ThemeMode } from "@/lib/theme";
 
 /**
  * Two-state theme toggle. Sun in light mode, Moon in dark mode.
@@ -43,16 +38,12 @@ export default function ThemeToggle() {
         >
             <Sun
                 className={`size-4 transition-all duration-300 ${
-                    mode === "dark"
-                        ? "scale-0 -rotate-90"
-                        : "scale-100 rotate-0"
+                    mode === "dark" ? "scale-0 -rotate-90" : "scale-100 rotate-0"
                 }`}
             />
             <Moon
                 className={`absolute size-4 transition-all duration-300 ${
-                    mode === "dark"
-                        ? "scale-100 rotate-0"
-                        : "scale-0 rotate-90"
+                    mode === "dark" ? "scale-100 rotate-0" : "scale-0 rotate-90"
                 }`}
             />
         </Button>

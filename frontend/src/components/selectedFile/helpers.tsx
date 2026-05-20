@@ -4,43 +4,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { METADATA_COMPATIBLE_EXTS, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
 
-export const MAX_BYTES = 255;
-
-// eslint-disable-next-line react-refresh/only-export-components -- shared module: small helpers ride alongside the icon/field components used only here
-export function getExt(name: string): string {
-    const m = name.match(/(\.[^.]+)$/);
-    return m ? m[1] : "";
-}
-
-// eslint-disable-next-line react-refresh/only-export-components -- see getExt note
-export function byteLength(str: string): number {
-    return new TextEncoder().encode(str).length;
-}
+// Pure utilities live in ./utils so this module exports components only and
+// the react-refresh HMR rule stays satisfied.
 
 export function FileIcon({ ext }: { ext: string }) {
     if (NEEDS_CONVERSION_EXTS.has(ext))
-        return (
-            <AlertTriangle
-                size={18}
-                aria-hidden
-                className="text-warning shrink-0 mt-0.5"
-            />
-        );
+        return <AlertTriangle size={18} aria-hidden className="text-warning shrink-0 mt-0.5" />;
     if (METADATA_COMPATIBLE_EXTS.has(ext))
-        return (
-            <Music2
-                size={18}
-                aria-hidden
-                className="text-success shrink-0 mt-0.5"
-            />
-        );
-    return (
-        <File
-            size={18}
-            aria-hidden
-            className="text-muted-foreground shrink-0 mt-0.5"
-        />
-    );
+        return <Music2 size={18} aria-hidden className="text-success shrink-0 mt-0.5" />;
+    return <File size={18} aria-hidden className="text-muted-foreground shrink-0 mt-0.5" />;
 }
 
 interface ActionButtonProps {
@@ -51,13 +23,7 @@ interface ActionButtonProps {
     onClick: () => void;
 }
 
-export function ActionButton({
-    kind,
-    busy,
-    done,
-    disabled,
-    onClick,
-}: ActionButtonProps) {
+export function ActionButton({ kind, busy, done, disabled, onClick }: ActionButtonProps) {
     const label =
         kind === "rename"
             ? busy
@@ -98,14 +64,7 @@ interface MetaFieldProps {
     disabled?: boolean;
 }
 
-export function MetaField({
-    id,
-    label,
-    value,
-    onChange,
-    placeholder,
-    disabled,
-}: MetaFieldProps) {
+export function MetaField({ id, label, value, onChange, placeholder, disabled }: MetaFieldProps) {
     return (
         <>
             <label

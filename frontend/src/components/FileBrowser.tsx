@@ -14,22 +14,13 @@ import FileBrowserItem from "@/components/FileBrowserItem";
 import LibraryExplorerSheet from "@/components/LibraryExplorerSheet";
 import SelectedFilePanel from "@/components/SelectedFilePanel";
 import { Button } from "@/components/ui/button";
-import {
-    Collapsible,
-    CollapsibleContent,
-    CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { API, apiGet, apiPost, buildQueryString, type FileRoot } from "@/lib/api";
 import { FORMAT_EXT, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
-import type {
-    ConvertFormat,
-    ConvertQuality,
-    FileEntry,
-    SearchMode,
-} from "@/lib/types";
+import type { ConvertFormat, ConvertQuality, FileEntry, SearchMode } from "@/lib/types";
 import { getErrorMessage } from "@/lib/utils";
 
 interface FileBrowserProps {
@@ -94,18 +85,14 @@ export default function FileBrowser({
         return stored && stored in FORMAT_EXT ? stored : "mp3";
     });
     const [convertQuality, setConvertQuality] = useState<ConvertQuality>(
-        () =>
-            (localStorage.getItem("convertQuality") as ConvertQuality) ||
-            "high",
+        () => (localStorage.getItem("convertQuality") as ConvertQuality) || "high",
     );
     const [deleteOriginal, setDeleteOriginal] = useState(false);
 
     // Batch state
     const [batchMode, setBatchMode] = useState(false);
     const [batchSelected, setBatchSelected] = useState<Set<string>>(new Set());
-    const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(
-        null,
-    );
+    const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null);
 
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const rootRef = useRef<HTMLDivElement | null>(null);
@@ -175,10 +162,7 @@ export default function FileBrowser({
     function handleQueryChange(val: string) {
         setQuery(val);
         if (debounceRef.current) clearTimeout(debounceRef.current);
-        debounceRef.current = setTimeout(
-            () => loadFiles(val, searchMode, root),
-            300,
-        );
+        debounceRef.current = setTimeout(() => loadFiles(val, searchMode, root), 300);
     }
 
     function handleModeChange(mode: SearchMode) {
@@ -213,9 +197,7 @@ export default function FileBrowser({
             const m = filename.match(/(\.[^.]+)$/);
             return m ? m[1].toLowerCase() : "";
         })();
-        const folder = path.includes("/")
-            ? path.slice(0, path.lastIndexOf("/"))
-            : "";
+        const folder = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
         setSelected({
             name: filename,
             ext,
@@ -247,10 +229,7 @@ export default function FileBrowser({
 
     function selectAllConvertible() {
         const paths = files
-            .filter(
-                (f) =>
-                    NEEDS_CONVERSION_EXTS.has(f.ext) || !!f.needs_conversion,
-            )
+            .filter((f) => NEEDS_CONVERSION_EXTS.has(f.ext) || !!f.needs_conversion)
             .map((f) => f.path);
         setBatchSelected(new Set(paths));
     }
@@ -265,12 +244,9 @@ export default function FileBrowser({
     }
 
     async function handleBatchConvert() {
-        const filesToConvert = files.filter((f) =>
-            batchSelected.has(f.path),
-        );
+        const filesToConvert = files.filter((f) => batchSelected.has(f.path));
         if (!filesToConvert.length) return;
-        const quality =
-            convertFormat === "flac" ? "lossless" : convertQuality;
+        const quality = convertFormat === "flac" ? "lossless" : convertQuality;
         const results: BatchProgress["results"] = [];
         setBatchProgress({
             current: 0,
@@ -360,12 +336,7 @@ export default function FileBrowser({
                     <div className="flex flex-col gap-4">
                         {error && <ErrorBanner message={error} />}
 
-                        <Tabs
-                            value={root}
-                            onValueChange={(v) =>
-                                handleRootChange(v as FileRoot)
-                            }
-                        >
+                        <Tabs value={root} onValueChange={(v) => handleRootChange(v as FileRoot)}>
                             <TabsList
                                 variant="line"
                                 className="h-auto p-0 gap-0 bg-transparent justify-start rounded-none border-b border-border w-full"
@@ -381,12 +352,11 @@ export default function FileBrowser({
                                     className="px-4 py-2.5 text-xs font-medium tracking-[0.04em] whitespace-nowrap rounded-none"
                                 >
                                     Downloads
-                                    {downloadsCount !== null &&
-                                        downloadsCount > 0 && (
-                                            <span className="ml-1.5 font-mono tabular-nums text-muted-foreground/80">
-                                                · {downloadsCount}
-                                            </span>
-                                        )}
+                                    {downloadsCount !== null && downloadsCount > 0 && (
+                                        <span className="ml-1.5 font-mono tabular-nums text-muted-foreground/80">
+                                            · {downloadsCount}
+                                        </span>
+                                    )}
                                 </TabsTrigger>
                             </TabsList>
                         </Tabs>
@@ -399,9 +369,7 @@ export default function FileBrowser({
                             loading={loading}
                             batchMode={batchMode}
                             onToggleBatchMode={toggleBatchMode}
-                            onRefresh={() =>
-                                loadFiles(query, searchMode, root)
-                            }
+                            onRefresh={() => loadFiles(query, searchMode, root)}
                             onOpenExplorer={() => setExplorerOpen(true)}
                         />
 
@@ -422,11 +390,7 @@ export default function FileBrowser({
                                           : "No pending downloads."
                                 }
                                 onSelect={(file) =>
-                                    setSelected(
-                                        selected?.path === file.path
-                                            ? null
-                                            : file,
-                                    )
+                                    setSelected(selected?.path === file.path ? null : file)
                                 }
                                 onBatchToggle={toggleBatch}
                             />
@@ -441,16 +405,10 @@ export default function FileBrowser({
                                 onConvertFormatChange={setConvertFormat}
                                 onConvertQualityChange={setConvertQuality}
                                 onDeleteOriginalChange={setDeleteOriginal}
-                                onSelectAllConvertible={
-                                    selectAllConvertible
-                                }
-                                onClearBatch={() =>
-                                    setBatchSelected(new Set())
-                                }
+                                onSelectAllConvertible={selectAllConvertible}
+                                onClearBatch={() => setBatchSelected(new Set())}
                                 onBatchConvert={handleBatchConvert}
-                                onClearBatchResults={() =>
-                                    setBatchProgress(null)
-                                }
+                                onClearBatchResults={() => setBatchProgress(null)}
                                 selected={selected}
                                 outputDash={outputDash}
                                 outputPipe={outputPipe}
@@ -515,11 +473,7 @@ export default function FileBrowser({
 function ErrorBanner({ message }: { message: string }) {
     return (
         <div className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 border border-destructive/25 rounded-md px-3 py-2.5 leading-relaxed">
-            <AlertTriangle
-                size={16}
-                aria-hidden
-                className="shrink-0 mt-0.5"
-            />
+            <AlertTriangle size={16} aria-hidden className="shrink-0 mt-0.5" />
             <span>{message}</span>
         </div>
     );
@@ -565,29 +519,25 @@ function SearchRow({
             <ToggleGroup
                 type="single"
                 value={searchMode}
-                onValueChange={(v) =>
-                    v && onSearchModeChange(v as SearchMode)
-                }
+                onValueChange={(v) => v && onSearchModeChange(v as SearchMode)}
                 className="shrink-0 border border-border rounded-md overflow-hidden gap-0"
             >
-                {(["filename", "folder", "both"] as SearchMode[]).map(
-                    (mode) => (
-                        <ToggleGroupItem
-                            key={mode}
-                            value={mode}
-                            title={
-                                mode === "filename"
-                                    ? "Search filenames"
-                                    : mode === "folder"
-                                      ? "Search folder names"
-                                      : "Search both"
-                            }
-                            className="text-sm px-3 py-1.5 h-auto rounded-none! border-r border-border last:border-r-0 bg-background text-muted-foreground hover:text-foreground data-[state=on]:bg-accent data-[state=on]:text-accent-foreground data-[state=on]:border-accent capitalize"
-                        >
-                            {mode === "filename" ? "Filename" : mode}
-                        </ToggleGroupItem>
-                    ),
-                )}
+                {(["filename", "folder", "both"] as SearchMode[]).map((mode) => (
+                    <ToggleGroupItem
+                        key={mode}
+                        value={mode}
+                        title={
+                            mode === "filename"
+                                ? "Search filenames"
+                                : mode === "folder"
+                                  ? "Search folder names"
+                                  : "Search both"
+                        }
+                        className="text-sm px-3 py-1.5 h-auto rounded-none! border-r border-border last:border-r-0 bg-background text-muted-foreground hover:text-foreground data-[state=on]:bg-accent data-[state=on]:text-accent-foreground data-[state=on]:border-accent capitalize"
+                    >
+                        {mode === "filename" ? "Filename" : mode}
+                    </ToggleGroupItem>
+                ))}
             </ToggleGroup>
 
             <Button
@@ -621,11 +571,7 @@ function SearchRow({
                 title="Refresh the list"
                 aria-label="Refresh the file list"
             >
-                <RefreshCw
-                    size={14}
-                    aria-hidden
-                    className={loading ? "animate-spin" : ""}
-                />
+                <RefreshCw size={14} aria-hidden className={loading ? "animate-spin" : ""} />
             </Button>
         </div>
     );
@@ -798,14 +744,9 @@ function BatchConvertPanel({
     onBatchConvert,
     onClearBatchResults,
 }: BatchConvertPanelProps) {
-    const inFlight =
-        batchProgress !== null && !!batchProgress.currentFile;
-    const failedCount = batchProgress
-        ? batchProgress.results.filter((r) => !r.ok).length
-        : 0;
-    const okCount = batchProgress
-        ? batchProgress.results.filter((r) => r.ok).length
-        : 0;
+    const inFlight = batchProgress !== null && !!batchProgress.currentFile;
+    const failedCount = batchProgress ? batchProgress.results.filter((r) => !r.ok).length : 0;
+    const okCount = batchProgress ? batchProgress.results.filter((r) => r.ok).length : 0;
 
     return (
         <div className="flex flex-col gap-4">
@@ -855,8 +796,7 @@ function BatchConvertPanel({
                                 className="animate-spin text-muted-foreground shrink-0"
                             />
                             <span>
-                                Converting {batchProgress.current} of{" "}
-                                {batchProgress.total}:{" "}
+                                Converting {batchProgress.current} of {batchProgress.total}:{" "}
                                 <span className="font-mono text-xs">
                                     {batchProgress.currentFile}
                                 </span>
@@ -865,18 +805,13 @@ function BatchConvertPanel({
                     ) : (
                         <p className="text-sm text-success">
                             Converted {okCount}
-                            {failedCount > 0
-                                ? `. ${failedCount} failed.`
-                                : "."}
+                            {failedCount > 0 ? `. ${failedCount} failed.` : "."}
                         </p>
                     )}
                     {batchProgress.results
                         .filter((r) => !r.ok)
                         .map((r, i) => (
-                            <p
-                                key={i}
-                                className="text-xs text-destructive font-mono break-all"
-                            >
+                            <p key={i} className="text-xs text-destructive font-mono break-all">
                                 {r.name}: {r.error}
                             </p>
                         ))}
