@@ -21,6 +21,9 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 - **Emoji stripping in extracted titles now catches every Unicode pictograph block.** Characters like ⭐ ⬛ ⌛ and ZWJ sequences (e.g. 🐈‍⬛) used to slip through the strip rules and leave fragments behind in filenames; the rule now uses the canonical Unicode pictograph set so dense-emoji Patreon titles come out clean.
 - **Right-click → "Add as alias of…" on an unrecognised tag chip now actually opens the picker, and the chip snaps to the canonical form once you pick one.** Previously the picker flashed open then dismissed (Radix outside-interaction race), and even when it did work the chip stayed visible as the original novel text instead of the canonical you aliased it to. Both fixed.
 - **Patches two starlette CVEs** (CVE-2025-54121, CVE-2025-62727) by bumping fastapi to 0.130.0 and pinning starlette to 0.52.1. Affects request-body and multipart handling — pull the new image to pick up the fix.
+- **Drops the unused `python-multipart` runtime dependency**, closing 4 high + 4 moderate CVEs (GHSA-59g5-xgcq-4qw3, GHSA-wp53-j4wj-2cfg, GHSA-mj87-hwqh-73pj, GHSA-pp6c-gr5w-3c5g). The package was pinned at 0.0.12 but no code path imported it — removed from `pyproject.toml` and the lockfile.
+- **Bumps `idna` 3.11 → 3.15**, closing the `idna.encode()` resource-exhaustion advisory (GHSA-65pc-fj4g-8rjx).
+- **Frontend deps bumped to latest across majors** (vite 8.0.x, vitest 4.x), which transitively retires the vulnerable nested `esbuild` 0.21.5 (GHSA-67mh-4wv8-2f99). One properties test was adjusted for a vitest 4 API change.
 - **File-API path validators now return a clean 403 on malformed input** (null bytes, paths the OS refuses to resolve). Previously these surfaced as a 500 with a Python stack trace — defence-in-depth tightening, not a known exploit.
 
 ## [2.0.4]
