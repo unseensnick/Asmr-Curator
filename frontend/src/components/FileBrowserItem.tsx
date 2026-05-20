@@ -50,7 +50,18 @@ export default function FileBrowserItem({
         <TooltipProvider delayDuration={500}>
             <Tooltip>
                 <TooltipTrigger asChild>
-                    <div onClick={onClick} className={rowClass}>
+                    <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={onClick}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                onClick();
+                            }
+                        }}
+                        className={rowClass}
+                    >
                         {batchMode && (
                             <Checkbox
                                 checked={isBatchSelected}

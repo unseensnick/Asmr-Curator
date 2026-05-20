@@ -1,5 +1,5 @@
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, GripVertical, Plus, X } from "lucide-react";
-import { useMemo, useState } from "react";
 
 import {
     ContextMenu,
@@ -91,38 +91,12 @@ export default function TagChip({
 
     if (editing) {
         return (
-            <div className="inline-flex items-center gap-1.5 bg-card border border-primary/40 ring-2 ring-primary/15 rounded-md px-2.5 py-1.5">
-                <input
-                    autoFocus
-                    value={editingValue}
-                    onChange={(e) => onEditingValueChange(e.target.value)}
-                    onKeyDown={(e) => {
-                        if (e.key === "Enter") onSaveEdit();
-                        if (e.key === "Escape") onCancelEdit();
-                    }}
-                    onBlur={onSaveEdit}
-                    className="font-mono text-xs bg-transparent outline-none text-foreground min-w-[3ch]"
-                    style={{ width: `${Math.max(editingValue.length, 4)}ch` }}
-                />
-                <button
-                    type="button"
-                    onClick={onSaveEdit}
-                    className="text-success hover:text-success/80 transition-colors leading-none shrink-0 p-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                    title="Save"
-                    aria-label="Save edit"
-                >
-                    <Check size={14} aria-hidden />
-                </button>
-                <button
-                    type="button"
-                    onClick={onCancelEdit}
-                    className="text-muted-foreground hover:text-foreground transition-colors leading-none shrink-0 p-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                    title="Cancel"
-                    aria-label="Cancel edit"
-                >
-                    <X size={14} aria-hidden />
-                </button>
-            </div>
+            <EditingChip
+                editingValue={editingValue}
+                onEditingValueChange={onEditingValueChange}
+                onSaveEdit={onSaveEdit}
+                onCancelEdit={onCancelEdit}
+            />
         );
     }
 
@@ -256,6 +230,67 @@ export default function TagChip({
     );
 }
 
+interface EditingChipProps {
+    editingValue: string;
+    onEditingValueChange: (v: string) => void;
+    onSaveEdit: () => void;
+    onCancelEdit: () => void;
+}
+
+/**
+ * Rendered when a TagChip is in edit mode. Kept as its own component so the
+ * focus-on-mount effect lives on a `useRef` (jsx-a11y/no-autofocus replacement)
+ * and only runs once when the chip flips into edit mode — not on every
+ * keystroke the way an inline callback ref would.
+ */
+function EditingChip({
+    editingValue,
+    onEditingValueChange,
+    onSaveEdit,
+    onCancelEdit,
+}: EditingChipProps) {
+    const inputRef = useRef<HTMLInputElement | null>(null);
+
+    useEffect(() => {
+        inputRef.current?.focus();
+    }, []);
+
+    return (
+        <div className="inline-flex items-center gap-1.5 bg-card border border-primary/40 ring-2 ring-primary/15 rounded-md px-2.5 py-1.5">
+            <input
+                ref={inputRef}
+                value={editingValue}
+                onChange={(e) => onEditingValueChange(e.target.value)}
+                onKeyDown={(e) => {
+                    if (e.key === "Enter") onSaveEdit();
+                    if (e.key === "Escape") onCancelEdit();
+                }}
+                onBlur={onSaveEdit}
+                className="font-mono text-xs bg-transparent outline-none text-foreground min-w-[3ch]"
+                style={{ width: `${Math.max(editingValue.length, 4)}ch` }}
+            />
+            <button
+                type="button"
+                onClick={onSaveEdit}
+                className="text-success hover:text-success/80 transition-colors leading-none shrink-0 p-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                title="Save"
+                aria-label="Save edit"
+            >
+                <Check size={14} aria-hidden />
+            </button>
+            <button
+                type="button"
+                onClick={onCancelEdit}
+                className="text-muted-foreground hover:text-foreground transition-colors leading-none shrink-0 p-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                title="Cancel"
+                aria-label="Cancel edit"
+            >
+                <X size={14} aria-hidden />
+            </button>
+        </div>
+    );
+}
+
 interface AliasPickerProps {
     /** The novel tag text being promoted — shown in the picker header so
      *  the user can confirm they're about to attach the right text. */
@@ -271,6 +306,14 @@ interface AliasPickerProps {
  */
 function AliasPicker({ label, vocabulary, onPick }: AliasPickerProps) {
     const [query, setQuery] = useState("");
+    const queryInputRef = useRef<HTMLInputElement | null>(null);
+
+    // Auto-focus the search input when the popover opens. Replaces the
+    // jsx-a11y-banned `autoFocus` prop while preserving the
+    // open-then-type-immediately UX.
+    useEffect(() => {
+        queryInputRef.current?.focus();
+    }, []);
 
     const matches = useMemo(() => {
         const q = query.trim().toLowerCase();
@@ -294,7 +337,7 @@ function AliasPicker({ label, vocabulary, onPick }: AliasPickerProps) {
                 </p>
             </div>
             <Input
-                autoFocus
+                ref={queryInputRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search canonicals"
@@ -302,7 +345,7 @@ function AliasPicker({ label, vocabulary, onPick }: AliasPickerProps) {
                 aria-label="Search canonical tags"
             />
             <div
-                role="listbox"
+                role="menu"
                 aria-label="Existing canonical tags"
                 className="flex flex-col gap-0.5 max-h-60 overflow-y-auto"
             >
@@ -315,7 +358,7 @@ function AliasPicker({ label, vocabulary, onPick }: AliasPickerProps) {
                         <button
                             key={entry.id}
                             type="button"
-                            role="option"
+                            role="menuitem"
                             onClick={() => onPick(entry)}
                             className="flex flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:outline-none transition-colors"
                         >

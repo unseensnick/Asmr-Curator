@@ -1,5 +1,5 @@
-import { Check, Loader2, X } from "lucide-react";
 import { type ReactNode } from "react";
+import { Check, Loader2, X } from "lucide-react";
 
 type StatusTone = "success" | "error" | "muted" | "info";
 

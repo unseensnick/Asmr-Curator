@@ -9,9 +9,9 @@ import PatreonPanel from "@/components/PatreonPanel";
 import ScreenshotPanel from "@/components/ScreenshotPanel";
 import TagsEditor from "@/components/TagsEditor";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { apiGet, API, apiPatch, apiPost } from "@/lib/api";
-import { dictFromApiResponse, emptyDict } from "@/lib/types";
+import { API, apiGet, apiPatch, apiPost } from "@/lib/api";
 import type { AppDict, DictionaryApiResponse, VocabEntry } from "@/lib/types";
+import { dictFromApiResponse, emptyDict } from "@/lib/types";
 import { getErrorMessage, sanitizeFilename } from "@/lib/utils";
 
 type SourceMode = "patreon" | "screenshot";

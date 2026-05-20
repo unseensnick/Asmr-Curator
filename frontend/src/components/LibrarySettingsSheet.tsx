@@ -18,8 +18,8 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { API, apiGet, apiPost, apiPut } from "@/lib/api";
-import { buildDictDerived, dictFromApiResponse } from "@/lib/types";
 import type { AppDict, DictionaryApiResponse } from "@/lib/types";
+import { buildDictDerived, dictFromApiResponse } from "@/lib/types";
 
 type DictTab = "vocabulary" | "suppressed" | "test";
 

@@ -48,8 +48,12 @@ export default function OutputPanel({
                     value={outputPipe}
                     emptyText="Tag string will appear here. Paste into ID3 fields, post body, or comments."
                 />
-                <label className="flex items-center gap-2 mt-1 cursor-pointer select-none w-fit">
+                <label
+                    htmlFor="output-strip-brackets"
+                    className="flex items-center gap-2 mt-1 cursor-pointer select-none w-fit"
+                >
                     <Checkbox
+                        id="output-strip-brackets"
                         checked={stripBrackets}
                         onCheckedChange={(v) => onStripBracketsChange(v === true)}
                     />
