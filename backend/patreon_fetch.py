@@ -5,6 +5,7 @@ no IPC, no sidecar service. patreon-dl writes media + raw API JSON to
 disk, and this module reads back what it produced.
 """
 
+import collections
 import contextlib
 import json
 import os
@@ -12,6 +13,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -282,18 +284,42 @@ def fetch(
         config_path,
     ]
 
+    # Drain stdout (with stderr merged) line-by-line into a bounded deque on
+    # a daemon thread so a multi-hour patreon-dl run can't OOM the wrapper
+    # by accumulating tens of MB of stdout — earlier `subprocess.run(PIPE)`
+    # buffered the entire output. The deque cap keeps memory bounded
+    # regardless of run length; we still grab the last ~2000 chars for the
+    # log tail at the end.
+    tail_lines: collections.deque[str] = collections.deque(maxlen=400)
+    returncode: int
+
+    def _drain(stream) -> None:
+        for line in iter(stream.readline, ""):
+            tail_lines.append(line)
+
     try:
         # Merge stderr into stdout — patreon-dl writes its info/warn lines to
         # stdout via console.log; we want both streams in one chronological tail.
-        result = subprocess.run(
+        with subprocess.Popen(
             cmd,
             text=True,
-            timeout=timeout,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-        )
-    except subprocess.TimeoutExpired as e:
-        raise PatreonFetchError(f"patreon-dl timed out after {timeout}s") from e
+            bufsize=1,  # line-buffered
+        ) as proc:
+            assert proc.stdout is not None
+            drain_thread = threading.Thread(
+                target=_drain, args=(proc.stdout,), daemon=True
+            )
+            drain_thread.start()
+            try:
+                returncode = proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired as e:
+                proc.kill()
+                proc.wait()
+                drain_thread.join(timeout=2)
+                raise PatreonFetchError(f"patreon-dl timed out after {timeout}s") from e
+            drain_thread.join(timeout=5)
     finally:
         Path(config_path).unlink(missing_ok=True)
 
@@ -301,10 +327,10 @@ def fetch(
     # surface it anywhere. patreon-dl doesn't currently echo the cookie, but
     # if it ever did, this stops it leaking into error messages or the API
     # response body.
-    log_tail = _scrub_cookie((result.stdout or "")[-2000:], cookie)
-    if result.returncode != 0:
+    log_tail = _scrub_cookie("".join(tail_lines)[-2000:], cookie)
+    if returncode != 0:
         raise PatreonFetchError(
-            f"patreon-dl exited with code {result.returncode}. log tail: {log_tail}"
+            f"patreon-dl exited with code {returncode}. log tail: {log_tail}"
         )
 
     posts = _collect_posts(output_dir, since=fetch_started_at)

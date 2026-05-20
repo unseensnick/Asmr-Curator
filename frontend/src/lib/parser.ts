@@ -11,27 +11,71 @@ export interface LlmResponse {
     creator_confidence: "high" | "low";
 }
 
+const EMPTY_RESPONSE: LlmResponse = {
+    raw_title_line: "",
+    raw_pill_tags: [],
+    creator_name: null,
+    creator_confidence: "low",
+};
+
+/**
+ * Scans `text` for the first balanced `{…}` block and returns the substring.
+ *
+ * Brace-balanced, not greedy — a greedy `/\{[\s\S]*\}/` match against prose
+ * with multiple JSON-looking blobs (e.g. an example followed by the real
+ * answer) captures from the first `{` to the *last* `}`, producing invalid
+ * JSON that fails the parse and silently degrades to the empty fallback.
+ * String literals are tracked so braces inside `"…"` don't perturb depth.
+ */
+function findFirstJsonObject(text: string): string | null {
+    let depth = 0;
+    let start = -1;
+    let inString = false;
+    let escape = false;
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i]!;
+        if (inString) {
+            if (escape) escape = false;
+            else if (c === "\\") escape = true;
+            else if (c === '"') inString = false;
+            continue;
+        }
+        if (c === '"') {
+            inString = true;
+            continue;
+        }
+        if (c === "{") {
+            if (depth === 0) start = i;
+            depth++;
+        } else if (c === "}") {
+            depth--;
+            if (depth === 0 && start !== -1) {
+                return text.slice(start, i + 1);
+            }
+        }
+    }
+    return null;
+}
+
 /**
  * Extracts fields from a raw LLM response string.
- * The LLM sometimes wraps the JSON in prose; this grabs the first `{…}` block.
- * Returns empty strings/arrays if the response isn't valid JSON.
+ * The LLM sometimes wraps the JSON in prose; this grabs the first balanced
+ * `{…}` block. Returns empty strings/arrays if the response isn't valid JSON.
  */
 export function parseLlmJson(raw_text: string): LlmResponse {
+    const candidate = findFirstJsonObject(raw_text);
+    if (!candidate) return EMPTY_RESPONSE;
     try {
-        const match = raw_text.match(/\{[\s\S]*\}/);
-        if (match) {
-            const data = JSON.parse(match[0]);
-            return {
-                raw_title_line: typeof data.raw_title_line === "string" ? data.raw_title_line : "",
-                raw_pill_tags: Array.isArray(data.raw_pill_tags) ? data.raw_pill_tags : [],
-                creator_name: typeof data.creator_name === "string" ? data.creator_name : null,
-                creator_confidence: data.creator_confidence === "high" ? "high" : "low",
-            };
-        }
+        const data = JSON.parse(candidate);
+        return {
+            raw_title_line: typeof data.raw_title_line === "string" ? data.raw_title_line : "",
+            raw_pill_tags: Array.isArray(data.raw_pill_tags) ? data.raw_pill_tags : [],
+            creator_name: typeof data.creator_name === "string" ? data.creator_name : null,
+            creator_confidence: data.creator_confidence === "high" ? "high" : "low",
+        };
     } catch {
-        // non-JSON response — caller handles gracefully
+        return EMPTY_RESPONSE;
     }
-    return { raw_title_line: "", raw_pill_tags: [], creator_name: null, creator_confidence: "low" };
 }
 
 // ── Title line parser ─────────────────────────────────────────────────────────
