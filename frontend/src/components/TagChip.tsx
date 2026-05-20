@@ -156,7 +156,17 @@ export default function TagChip({
             onDragStart={onDragStart}
             onDragOver={onDragOver}
             onDrop={onDrop}
-            onClick={onStartEdit}
+            onClick={(e) => {
+                // Stray click reaching the chip while the alias picker is
+                // open would fire onStartEdit, swap the chip for
+                // <EditingChip>, and the popover's anchor would disappear
+                // from under it — taking the picker with it. Suppress.
+                if (aliasPickerOpen) {
+                    e.preventDefault();
+                    return;
+                }
+                onStartEdit();
+            }}
             onKeyDown={handleKeyDown}
             title={
                 novel
@@ -199,7 +209,17 @@ export default function TagChip({
                 <ContextMenuTrigger asChild>
                     <PopoverAnchor asChild>{chipBody}</PopoverAnchor>
                 </ContextMenuTrigger>
-                <ContextMenuContent>
+                <ContextMenuContent
+                    onCloseAutoFocus={(e) => {
+                        // Don't restore focus to the chip when the menu
+                        // closes — if the alias picker is opening, the
+                        // chip gaining focus is interpreted by the popover
+                        // as a focus-outside event and dismisses the
+                        // picker. The popover handles its own focus when
+                        // it opens.
+                        e.preventDefault();
+                    }}
+                >
                     <ContextMenuLabel>Add to dictionary</ContextMenuLabel>
                     <ContextMenuItem
                         disabled={!onPromoteToCanonical || promoting}
@@ -239,17 +259,26 @@ export default function TagChip({
                 align="start"
                 className="w-72 p-2"
                 onPointerDownOutside={(e) => {
-                    // Ignore the trailing pointerdown that fires from the
-                    // same click that closed the context menu. After the
-                    // grace window, behave normally — click-outside still
+                    // Ignore trailing pointerdown that fires from the same
+                    // click that closed the context menu. 500 ms covers
+                    // Radix's close animation + focus restoration cycles.
+                    // After that window any normal outside-click still
                     // dismisses the picker.
-                    if (performance.now() - aliasPickerOpenedAtRef.current < 150) {
+                    if (performance.now() - aliasPickerOpenedAtRef.current < 500) {
                         e.preventDefault();
                     }
                 }}
                 onFocusOutside={(e) => {
-                    // Same guard for focus restoration when the menu closes.
-                    if (performance.now() - aliasPickerOpenedAtRef.current < 150) {
+                    if (performance.now() - aliasPickerOpenedAtRef.current < 500) {
+                        e.preventDefault();
+                    }
+                }}
+                onInteractOutside={(e) => {
+                    // Catch-all for any outside interaction Radix dispatches
+                    // (some browsers fire focusin on the trigger after menu
+                    // close, which neither pointerDown nor focusOutside
+                    // catches reliably).
+                    if (performance.now() - aliasPickerOpenedAtRef.current < 500) {
                         e.preventDefault();
                     }
                 }}
