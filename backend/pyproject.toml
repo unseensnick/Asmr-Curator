@@ -5,19 +5,20 @@ description = "Self-hosted ASMR Curator: vision LLM extraction, tag dictionary, 
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "fastapi==0.130.0",
-    # Pinned explicitly to patch CVE-2025-54121 + CVE-2025-62727 — fastapi
-    # 0.130.0's bound (`>=0.40,<0.59`) admits versions older than the fix
-    # (0.49.1), so we narrow the floor here.
-    "starlette==0.52.1",
-    "uvicorn[standard]==0.32.1",
-    "playwright==1.59.0",
+    "fastapi==0.136.1",
+    # Starlette 1.0.0 carries every CVE patch the prior 0.52.1 floor was
+    # there for (CVE-2025-54121 + CVE-2025-62727) plus the 0.5x backlog.
+    # FastAPI 0.136.1's bound is `starlette>=0.46.0`, open-ended at the
+    # top, so the explicit pin no longer needs the narrowed floor.
+    "starlette==1.0.0",
+    "uvicorn[standard]==0.47.0",
+    "playwright==1.60.0",
     # Pinned to match backend/requirements.txt — pyproject.toml drives
     # `uv sync` in the devcontainer; requirements.txt drives the Docker
     # build. Both must list the same direct deps or one path silently
     # misses imports (httpx is in main.py for external-audio streaming
     # + the SSE response client; mutagen writes ID3/FLAC/MP4 tags).
-    "httpx==0.27.2",
+    "httpx==0.28.1",
     "mutagen==1.47.0",
 ]
 
