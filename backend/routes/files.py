@@ -2,6 +2,7 @@
 delete, rename (file-only + path-general)."""
 
 import asyncio
+import errno
 import json
 import os
 import shutil
@@ -552,6 +553,23 @@ def delete_path(body: DeleteIn):
     return {"deleted": True, "kind": "folder_recursive", "path": rel}
 
 
+def _handle_rename_error(
+    e: OSError, src_name: str, dest_name: str, *, too_long_message: str
+) -> HTTPException:
+    """Translate an OSError from `Path.rename()` into the right HTTPException.
+
+    Two rename endpoints (`/api/rename` for file-only + metadata embed,
+    `/api/rename-path` for file-or-folder) share the same error shape:
+    ENAMETOOLONG is a user-actionable 422; anything else logs the OS
+    detail server-side and returns a sanitised 500. Caller raises the
+    returned exception so stack traces stay shallow.
+    """
+    if e.errno == errno.ENAMETOOLONG:
+        return HTTPException(422, too_long_message)
+    log.error("rename failed (%s -> %s): %s", src_name, dest_name, e)
+    return HTTPException(500, "Rename failed. Check the server log.")
+
+
 class RenamePathIn(BaseModel):
     path: str
     new_name: str
@@ -616,10 +634,9 @@ def rename_path(body: RenamePathIn):
     try:
         src.rename(dest)
     except OSError as e:
-        if e.errno == 36:  # ENAMETOOLONG
-            raise HTTPException(422, "Name too long for the filesystem.")
-        log.error("rename-path failed (%s -> %s): %s", src.name, dest.name, e)
-        raise HTTPException(500, "Rename failed. Check the server log.")
+        raise _handle_rename_error(
+            e, src.name, dest.name, too_long_message="Name too long for the filesystem."
+        )
 
     return {
         "renamed": True,
@@ -669,12 +686,12 @@ def rename_file(body: RenameIn):
     try:
         src.rename(dest)
     except OSError as e:
-        if e.errno == 36:  # ENAMETOOLONG
-            raise HTTPException(
-                422, f"Filename too long ({len(new_name)} chars). Remove some tags to shorten it."
-            )
-        log.error("rename failed (%s -> %s): %s", src.name, dest.name, e)
-        raise HTTPException(500, "Rename failed. Check the server log.")
+        raise _handle_rename_error(
+            e,
+            src.name,
+            dest.name,
+            too_long_message=f"Filename too long ({len(new_name)} chars). Remove some tags to shorten it.",
+        )
 
     metadata_error: str | None = None
     if body.metadata and any(
