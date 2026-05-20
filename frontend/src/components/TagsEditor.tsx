@@ -65,6 +65,27 @@ export default function TagsEditor({
         [dict.vocabulary],
     );
 
+    // Wrap the alias-promotion handler so that, after the dictionary
+    // PATCH succeeds, this chip's displayed text snaps to the canonical
+    // form (matches what normalizeTag would have produced if the
+    // dictionary entry had existed at extract time). Dedupe in case the
+    // canonical is already present elsewhere in the list.
+    async function handlePromoteToAlias(text: string, canonical: VocabEntry): Promise<void> {
+        await onPromoteToAlias(text, canonical);
+        const textLc = text.toLowerCase();
+        const seen = new Set<string>();
+        const next: string[] = [];
+        for (const t of tags) {
+            const display = t.toLowerCase() === textLc ? canonical.canonical : t;
+            const key = display.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            next.push(display);
+        }
+        const changed = next.length !== tags.length || next.some((v, i) => v !== tags[i]);
+        if (changed) onTagsChange(next);
+    }
+
     // ── Tag CRUD ──────────────────────────────────────────────────────────────
 
     function addTag() {
@@ -199,7 +220,7 @@ export default function TagsEditor({
                                 onDrop={(e) => onDrop(e, i)}
                                 vocabulary={dict.vocabulary}
                                 onPromoteToCanonical={onPromoteToCanonical}
-                                onPromoteToAlias={onPromoteToAlias}
+                                onPromoteToAlias={handlePromoteToAlias}
                             />
                         ))}
                     </div>
