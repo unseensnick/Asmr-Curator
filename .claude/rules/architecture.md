@@ -17,7 +17,9 @@ paths:
 6. Tags are matched against the vocabulary dictionary (fetched from `/api/dictionary`).
 7. The final filename is assembled in the UI and optionally applied via `/api/rename`.
 
-## Backend route groups (all in `backend/main.py`)
+## Backend route groups (under `backend/routes/`)
+
+Routes are split by domain into `backend/routes/*.py`. Each module exports an `APIRouter`; `backend/main.py` constructs the app, holds the shared helpers (validators, metadata writer, cookie normalisation, ingest path builder, Drive-scrape semaphore) + module-level state, and registers the routers via `app.include_router(...)`. Route modules import shared helpers from `backend.main`.
 
 - `/api/extract`, `/api/preview-tags` — Ollama integration (vision LLM).
 - `/api/dictionary`, `/api/vocabulary/*`, `/api/suppressed/*` — dictionary CRUD.
@@ -32,7 +34,8 @@ paths:
 
 ## Module responsibilities
 
-- **`backend/main.py`** — all FastAPI routes; no separate router files.
+- **`backend/main.py`** — FastAPI app construction, lifespan, SPA fallback, shared dependencies (validators, env paths, helpers, Drive-scrape semaphore), router registration. Route handlers live under `backend/routes/`.
+- **`backend/routes/`** — one module per domain (`system`, `extract`, `files`, `convert`, `dictionary`, `settings`, `patreon`). Each exports an `APIRouter` named `router`. Imports shared helpers from `backend.main`.
 - **`backend/database.py`** — SQLite schema, seeding (`DEFAULT_VOCABULARY`, `DEFAULT_SUPPRESSED`), all CRUD helpers. No ORM. Stores the Patreon session cookie under `PATREON_COOKIE_KEY`.
 - **`backend/patreon_fetch.py`** — subprocess wrapper around `patreon-dl`; reads cookie from the DB. After patreon-dl writes into its nested tree under `DOWNLOAD_PATH/.patreon-dl/`, `_flatten_audio` moves each post's audio out to `DOWNLOAD_PATH/<creator>/<post_id> - <title>/<file>` (path built by `audio_utils.flatten_dest_parts`, also used by the Drive + external-audio ingest endpoints in `main.py` so all writers land in the same shape). Legacy `<post_id>/<file>` from earlier runs is still recognised by the cached-sidecar lookup so re-fetches don't miss it.
 - **`backend/drive_fetch.py`** — Playwright-driven Drive scrape behind `/api/patreon/ingest-drive-link`. Loads the Drive viewer with the synced Google cookie, intercepts the playback URL, streams the audio. Serialises per-account via a semaphore — Google's mid-stream cookie rotation can't be raced.
