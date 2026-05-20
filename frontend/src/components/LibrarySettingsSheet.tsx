@@ -36,7 +36,7 @@ import type { AppDict, DictionaryApiResponse } from "@/lib/types";
 
 type DictTab = "vocabulary" | "suppressed" | "test";
 
-interface LibraryConfigModalProps {
+interface LibrarySettingsSheetProps {
     open: boolean;
     onClose: () => void;
     dict: AppDict;
@@ -65,15 +65,15 @@ interface NavTab {
  * underlying view so context isn't completely obscured.
  *
  * Cookies used to be a fourth tab here; they moved to a dedicated
- * CookiesModal opened from the Settings dropdown because auth state
+ * CookiesSheet opened from the Settings dropdown because auth state
  * has no conceptual reason to live next to tag editing.
  */
-export default function LibraryConfigModal({
+export default function LibrarySettingsSheet({
     open,
     onClose,
     dict,
     onDictChange,
-}: LibraryConfigModalProps) {
+}: LibrarySettingsSheetProps) {
     const [tab, setTab] = useState<DictTab>("vocabulary");
     // Quick-fill: jump to a tab and pre-populate its add input
     const [quickFill, setQuickFill] = useState<{

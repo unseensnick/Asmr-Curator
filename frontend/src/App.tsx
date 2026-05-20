@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 
-import CookiesModal from "@/components/CookiesModal";
+import CookiesSheet from "@/components/CookiesSheet";
 import FileBrowser from "@/components/FileBrowser";
 import Header from "@/components/Header";
-import LibraryConfigModal from "@/components/LibraryConfigModal";
+import LibrarySettingsSheet from "@/components/LibrarySettingsSheet";
 import OutputPanel from "@/components/OutputPanel";
 import PatreonPanel from "@/components/PatreonPanel";
 import ScreenshotPanel from "@/components/ScreenshotPanel";
@@ -315,13 +315,13 @@ export default function App() {
                 </div>
             </section>
 
-            <LibraryConfigModal
+            <LibrarySettingsSheet
                 open={libraryOpen}
                 onClose={() => setLibraryOpen(false)}
                 dict={dict}
                 onDictChange={setDict}
             />
-            <CookiesModal
+            <CookiesSheet
                 open={cookiesOpen}
                 onClose={() => setCookiesOpen(false)}
             />
