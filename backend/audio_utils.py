@@ -1,11 +1,6 @@
-"""Shared audio-file utilities used by both `main.py` (the `/api/patreon/
-ingest-external-audio` endpoint) and `drive_fetch.py` (the Playwright-based
-Drive scrape).
-
-Lives here — not in main.py — so `drive_fetch` doesn't need to reach back
-into the FastAPI module and create a circular import. Mirrors the existing
-`backend/database.py` separation pattern: shared helpers in their own module,
-no FastAPI dependency.
+"""Shared audio-file utilities — URL cleaning, filename derivation,
+flat-path construction. Imported by main.py and drive_fetch.py. Lives
+outside main.py so drive_fetch.py doesn't import FastAPI transitively.
 """
 from __future__ import annotations
 
@@ -15,21 +10,12 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse, urlunparse, unquote
 
-# Query parameters always stripped from a captured Google playback URL before
-# the file is fetched. The exact set the user's manual reference workflow
-# strips is `range`, `ump`, *and* `srfvp`:
-#
-#   • `range`  — chunk-byte-range request. Removing it makes the server
-#                return the complete file.
-#   • `ump`    — UMP chunked-streaming opt-in. Removing it disables the
-#                multi-chunk streaming protocol.
-#   • `srfvp`  — "single request, first valid position" marker. Drive's
-#                CDN honours it by capping the response to a tiny initial
-#                range regardless of how `range` was set; without stripping
-#                it, the cleaned URL returns a kilobyte-scale stub instead
-#                of the full file.
-#
-# Both the extension and the backend re-apply these as defence in depth.
+# Query params stripped from a captured Google playback URL:
+#   range  — byte-range cap; remove for a full-file response.
+#   ump    — chunked-streaming opt-in.
+#   srfvp  — "single request first valid position"; left in, the CDN caps
+#            the response to a tiny initial range and returns a stub.
+# Applied both client-side (extension) and server-side as defence in depth.
 STRIP_QUERY_PARAMS = ("ump", "range", "srfvp")
 
 # MIME → extension lookup for filename fallback when Content-Disposition is
@@ -47,10 +33,8 @@ AUDIO_MIME_EXT = {
     "audio/webm": ".webm",
 }
 
-# Cap byte length below the common 255-byte filesystem limit so that a
-# long anchor-text-derived filename (emoji-heavy + extension suffix) can't
-# blow past it. We cut in UTF-8 byte space, not char space, because emojis
-# encode to 4 bytes each.
+# Cap below the 255-byte filesystem limit so emoji-heavy anchor text can't
+# blow past it. Cut in UTF-8 byte space, not char space.
 _FILENAME_MAX_BYTES = 200
 
 _FILENAME_INVALID_RE = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
@@ -61,14 +45,9 @@ _CD_FILENAME_RE = re.compile(
 
 
 def strip_query_params(url: str, names: tuple[str, ...] = STRIP_QUERY_PARAMS) -> str:
-    """Remove specific query-string params while preserving the exact byte
-    sequence of every other param.
-
-    We can't round-trip through `parse_qsl` + `urlencode` here: those would
-    re-encode characters like `/` inside values (e.g. `mime=audio/mp4`),
-    which invalidates the signed-URL signature on Google's playback CDN.
-    Operate on the raw query string directly, dropping whole `key=value`
-    segments whose key matches `names`.
+    """Drop named query params while preserving every other param byte-
+    for-byte. `parse_qsl` + `urlencode` would re-encode `/` inside values
+    (e.g. `mime=audio/mp4`) and invalidate Google's signed-URL signature.
     """
     parts = urlparse(url)
     if not parts.query:
@@ -98,18 +77,14 @@ def safe_filename_component(value: str) -> str:
 
 
 def flatten_dest_parts(post_id: str, artist: str, title: str) -> tuple[str, str]:
-    """Return (creator_segment, post_folder_segment) for the flattened
+    """Return `(creator, "<post_id> - <title>")` for the flattened
     `DOWNLOAD_PATH/<creator>/<post_id> - <title>/` layout.
 
-    Both segments are sanitised via `safe_filename_component`, which
-    substitutes `/\:*?"<>|` and control chars with `_` (so an artist of
-    `///` becomes `___`, still a valid scoped folder name). An empty
-    `artist` falls back to "Unknown creator"; an empty title drops the
-    ` - <title>` suffix and leaves just `<post_id>`, so the folder always
-    has at least one identifier. Shared between the patreon-dl flatten
-    step (which writes), the cached-sidecar reader, and the Drive +
-    external-audio ingest endpoints, so all writers land in the same
-    shape.
+    `safe_filename_component` *substitutes* `/\\:*?"<>|` and control chars
+    with `_` rather than stripping (so `///` becomes `___`, not empty).
+    Empty `artist` → "Unknown creator"; empty title drops the suffix so
+    the folder always carries the post_id. Shared by every writer under
+    DOWNLOAD_PATH so all three ingest paths land in the same shape.
     """
     creator = safe_filename_component(artist) or "Unknown creator"
     title_part = safe_filename_component(title)
