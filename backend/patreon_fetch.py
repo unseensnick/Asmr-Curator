@@ -308,9 +308,7 @@ def fetch(
             bufsize=1,  # line-buffered
         ) as proc:
             assert proc.stdout is not None
-            drain_thread = threading.Thread(
-                target=_drain, args=(proc.stdout,), daemon=True
-            )
+            drain_thread = threading.Thread(target=_drain, args=(proc.stdout,), daemon=True)
             drain_thread.start()
             try:
                 returncode = proc.wait(timeout=timeout)
@@ -329,9 +327,7 @@ def fetch(
     # response body.
     log_tail = _scrub_cookie("".join(tail_lines)[-2000:], cookie)
     if returncode != 0:
-        raise PatreonFetchError(
-            f"patreon-dl exited with code {returncode}. log tail: {log_tail}"
-        )
+        raise PatreonFetchError(f"patreon-dl exited with code {returncode}. log tail: {log_tail}")
 
     posts = _collect_posts(output_dir, since=fetch_started_at)
 
