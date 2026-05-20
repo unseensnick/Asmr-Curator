@@ -24,7 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { API, apiGet, apiPatch, apiPost } from "@/lib/api";
 import type { AppDict, DictionaryApiResponse, FileEntry, VocabEntry } from "@/lib/types";
 import { dictFromApiResponse, emptyDict } from "@/lib/types";
-import { getErrorMessage, sanitizeFilename } from "@/lib/utils";
+import { getErrorMessage, sanitizeFilename, stripOuterBrackets } from "@/lib/utils";
 
 type SourceMode = "patreon" | "screenshot";
 
@@ -88,15 +88,10 @@ export default function App() {
     // ── Filename generation ───────────────────────────────────────────────────
     function generate() {
         const sfx = suffix.trim() || "F4A";
-        // Strip any number of leading and trailing [bracket] markers (and the
-        // whitespace around them) regardless of contents. Mid-title brackets
-        // are left alone — they're usually part of the actual title.
-        const pipeTitle = stripBrackets
-            ? title
-                  .replace(/^(?:\s*\[[^\]]*\]\s*)+/, "")
-                  .replace(/(?:\s*\[[^\]]*\]\s*)+$/, "")
-                  .trim()
-            : title;
+        // Brackets-in-filename, stripped-from-ID3 rule. Canonical in
+        // `stripOuterBrackets`; the dashed filename output keeps them
+        // verbatim, the piped tag-string for ID3 drops them.
+        const pipeTitle = stripBrackets ? stripOuterBrackets(title) : title;
         setOutputDash([title, ...tags, sfx].map(sanitizeFilename).filter(Boolean).join(" - "));
         setOutputPipe([pipeTitle, ...tags, sfx].join(" | "));
     }

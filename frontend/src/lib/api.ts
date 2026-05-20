@@ -2,6 +2,7 @@ export const API = {
     files: "/api/files",
     search: "/api/files/search",
     loadCachedMetadata: "/api/files/load-cached-metadata",
+    bulkWrite: "/api/files/bulk-write",
     rename: "/api/rename",
     renamePath: "/api/rename-path",
     convert: "/api/convert",
@@ -411,4 +412,58 @@ export function loadCachedMetadata(
     root: FileRoot,
 ): Promise<LoadCachedMetadataResponse> {
     return apiPost<LoadCachedMetadataResponse>(API.loadCachedMetadata, { paths, root });
+}
+
+// Phase 2 of the BulkEditSheet plan: per-file title + optional canonical
+// rename + shared artist / album / album_artist + the explicit-blank
+// `clear[]` list, all committed in one PATCH with two-phase validation
+// on the backend.
+
+export interface BulkWriteItem {
+    path: string;
+    /** Per-file ID3 TIT2. Empty string -> leave existing title alone. */
+    title?: string;
+    /** Pre-composed canonical filename WITH extension. Empty string ->
+     *  don't rename this specific file even when the request-level
+     *  `rename` flag is true. The backend treats this as opaque and
+     *  only enforces shape / length / collision rules. */
+    new_name?: string;
+}
+
+export interface BulkWriteShared {
+    artist?: string;
+    album_artist?: string;
+    album?: string;
+    /** Subset of ["artist", "album_artist", "album"] — these fields are
+     *  cleared (frame removed) on every file in the selection. Distinct
+     *  from an empty string in `artist` / `album_artist` / `album`, which
+     *  means 'leave existing per file'. */
+    clear?: ("artist" | "album_artist" | "album")[];
+}
+
+export interface BulkWriteRequest {
+    items: BulkWriteItem[];
+    shared: BulkWriteShared;
+    rename: boolean;
+    root: FileRoot;
+}
+
+export interface BulkWriteItemResult {
+    path: string;
+    ok: boolean;
+    error?: string;
+    new_path?: string;
+}
+
+export interface BulkWriteResponse {
+    ok: boolean;
+    results: BulkWriteItemResult[];
+}
+
+/** Returns the backend's `{ok, results}` payload on a 2xx. Validation
+ *  failures (422) raise via the shared `request` wrapper with the raw
+ *  response text as the Error message — JSON-parse the message to dig
+ *  out per-item errors when surfacing them in the UI. */
+export function bulkWrite(body: BulkWriteRequest): Promise<BulkWriteResponse> {
+    return apiPatch<BulkWriteResponse>(API.bulkWrite, body);
 }

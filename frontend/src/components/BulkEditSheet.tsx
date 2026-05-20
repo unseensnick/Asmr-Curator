@@ -1,14 +1,15 @@
-import { useState } from "react";
-import { Loader2, RefreshCw, X } from "lucide-react";
+import { useMemo, useState } from "react";
+import { AlertCircle, Loader2, RefreshCw, X } from "lucide-react";
 
 import SectionLabel from "@/components/SectionLabel";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { loadCachedMetadata } from "@/lib/api";
+import { bulkWrite, loadCachedMetadata } from "@/lib/api";
 import type { FileEntry } from "@/lib/types";
-import { getErrorMessage } from "@/lib/utils";
+import { getErrorMessage, sanitizeFilename, stripOuterBrackets } from "@/lib/utils";
 
 export type BulkEditRoot = "library" | "downloads";
 
@@ -137,6 +138,20 @@ export default function BulkEditSheet({ open, onClose, files, root }: BulkEditSh
     const [isLoading, setIsLoading] = useState(false);
     const [loadFeedback, setLoadFeedback] = useState<LoadFeedback>({ kind: "none" });
 
+    // Optional rename gate. Off by default — bulk-edit defaults to a
+    // metadata-only update so users don't accidentally rewrite every
+    // filename in the selection. Flipping this on surfaces the dry-run
+    // preview pane below; only files with a non-null proposed name get
+    // a rename in the eventual commit.
+    const [rename, setRename] = useState(false);
+
+    // Commit state. `isSubmitting` gates the footer + reopens prevention;
+    // `submitError` carries the message when the PATCH fails. Success
+    // closes the sheet via `onClose`, so there's no success-feedback
+    // state to manage.
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [submitError, setSubmitError] = useState<string | null>(null);
+
     async function handleLoadFromCache() {
         if (files.length === 0 || isLoading) return;
         setIsLoading(true);
@@ -240,6 +255,111 @@ export default function BulkEditSheet({ open, onClose, files, root }: BulkEditSh
         if (clearFields.has(field)) return "Will clear on apply";
         if (mixedFields.has(field)) return "<Mixed values>";
         return "";
+    }
+
+    // ── Rename preview composition ───────────────────────────────────────────
+    //
+    // Mirrors the single-file `generate()` formula in App.tsx: each file's
+    // canonical name is `<title> - <tag1> - ... - <suffix>.<ext>`, with
+    // every part sanitized and brackets KEPT in the filename (they're only
+    // stripped for the ID3 payload). Empty title means we don't propose a
+    // rename for this file — leaving the row at "no change" in the
+    // preview pane.
+
+    /** Returns `null` when the file shouldn't be renamed (no per-file
+     *  title entered). Returns `""` only if every part sanitized away to
+     *  nothing; the preview renders that as a row-level error. */
+    function composeProposedName(edit: PerFileEdit, ext: string): string | null {
+        if (!edit.title.trim()) return null;
+        const sfx = shared.suffix.trim() || "F4A";
+        const tagList = edit.tags
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean);
+        const parts = [edit.title, ...tagList, sfx].map(sanitizeFilename).filter(Boolean);
+        if (parts.length === 0) return "";
+        return `${parts.join(" - ")}${ext}`;
+    }
+
+    interface PreviewRow {
+        file: FileEntry;
+        proposed: string | null;
+        /** Set when the proposed name would exceed the 255-byte FS limit. */
+        tooLong: boolean;
+        /** Set when proposed equals current — UI flags as "no change". */
+        unchanged: boolean;
+    }
+
+    /** Recompute when any input that feeds the canonical name changes.
+     *  255 bytes is the Linux filesystem name cap (mirrored on the
+     *  backend's two-phase validator via errno.ENAMETOOLONG). */
+    const previewRows: PreviewRow[] = useMemo(() => {
+        const encoder = new TextEncoder();
+        return files.map((file) => {
+            const edit = edits[file.path] ?? EMPTY_EDIT;
+            const proposed = composeProposedName(edit, file.ext);
+            const tooLong = proposed !== null && encoder.encode(proposed).length > 255;
+            const unchanged = proposed !== null && proposed === file.name;
+            return { file, proposed, tooLong, unchanged };
+        });
+        // composeProposedName closes over `edits` + `shared.suffix`; both
+        // dependencies are baked in via the entries we map over so the
+        // useMemo deps cover the visible inputs without a stale-closure
+        // risk.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [files, edits, shared.suffix]);
+
+    // ── Commit-readiness ────────────────────────────────────────────────────
+    //
+    // The footer button enables only when there's something to write.
+    // Mirrors the backend's no-op detection so we don't fire a request
+    // that would be a 200 with all `unchanged` rows.
+
+    const hasPerFileEdit = Object.values(edits).some((e) => e.title || e.tags);
+    const hasSharedEdit = Boolean(shared.artist || shared.album_artist || shared.album);
+    const hasClear = clearFields.size > 0;
+    const hasRename = rename && previewRows.some((r) => r.proposed && !r.unchanged && !r.tooLong);
+    const canCommit = hasPerFileEdit || hasSharedEdit || hasClear || hasRename;
+    const anyTooLong = rename && previewRows.some((r) => r.tooLong);
+
+    async function handleSubmit() {
+        if (!canCommit || isSubmitting || anyTooLong) return;
+        setIsSubmitting(true);
+        setSubmitError(null);
+        try {
+            // Build the per-item payload. ID3 title gets brackets stripped
+            // (the ID3-vs-filename rule); new_name keeps brackets via
+            // composeProposedName already running on the raw edit.title.
+            const items = files.map((file) => {
+                const edit = edits[file.path] ?? EMPTY_EDIT;
+                const proposed = rename ? composeProposedName(edit, file.ext) : null;
+                return {
+                    path: file.path,
+                    title: edit.title ? stripOuterBrackets(edit.title) : "",
+                    new_name: proposed ?? "",
+                };
+            });
+            await bulkWrite({
+                items,
+                shared: {
+                    artist: shared.artist,
+                    album_artist: shared.album_artist,
+                    album: shared.album,
+                    clear: [...clearFields],
+                },
+                rename,
+                root,
+            });
+            // Success — close the sheet. The FileBrowser will refresh on
+            // its next render (phase 8 will plumb a refresh callback so
+            // the new names appear without the user having to navigate
+            // away and back).
+            onClose();
+        } catch (err) {
+            setSubmitError(getErrorMessage(err));
+        } finally {
+            setIsSubmitting(false);
+        }
     }
 
     const count = files.length;
@@ -502,23 +622,117 @@ export default function BulkEditSheet({ open, onClose, files, root }: BulkEditSh
 
                     <section aria-label="Rename" className="flex flex-col gap-3">
                         <SectionLabel>Rename</SectionLabel>
-                        {/* phase 7: rename toggle + dry-run preview pane */}
+                        <label
+                            htmlFor="bulk-rename-toggle"
+                            className="flex items-start gap-3 cursor-pointer"
+                        >
+                            <Checkbox
+                                id="bulk-rename-toggle"
+                                checked={rename}
+                                onCheckedChange={(v) => setRename(v === true)}
+                                className="mt-0.5"
+                            />
+                            <span className="flex flex-col gap-1 min-w-0">
+                                <span className="text-sm text-foreground">
+                                    Rename files to the canonical format
+                                </span>
+                                <span className="text-xs text-muted-foreground leading-relaxed">
+                                    {`Each file gets renamed to `}
+                                    <code className="font-mono text-foreground/80">
+                                        {`<title> - <tag> - … - <suffix>.<ext>`}
+                                    </code>
+                                    . Brackets in the title are kept in the filename and stripped
+                                    from the ID3 title — same rule as the single-file Generate flow.
+                                    Rows with no per-file title stay as-is.
+                                </span>
+                            </span>
+                        </label>
+
+                        {rename && count > 0 && (
+                            <div className="rounded-md border border-border overflow-hidden mt-1">
+                                <div className="px-3 py-2 text-[10px] font-medium tracking-[0.08em] uppercase text-muted-foreground/80 bg-muted/30 border-b border-border">
+                                    Preview (
+                                    {previewRows.filter((r) => r.proposed && !r.unchanged).length}{" "}
+                                    of {count} will rename)
+                                </div>
+                                <ul className="divide-y divide-border">
+                                    {previewRows.map((row) => (
+                                        <li
+                                            key={row.file.path}
+                                            className="flex items-center gap-3 px-3 py-2 font-mono text-xs"
+                                        >
+                                            <span className="flex-1 min-w-0 truncate text-muted-foreground">
+                                                {row.file.name}
+                                            </span>
+                                            <span aria-hidden className="text-muted-foreground/60">
+                                                →
+                                            </span>
+                                            <span className="flex-1 min-w-0 truncate">
+                                                {row.tooLong ? (
+                                                    <span className="inline-flex items-center gap-1 text-destructive">
+                                                        <AlertCircle
+                                                            size={12}
+                                                            aria-hidden
+                                                            className="shrink-0"
+                                                        />
+                                                        Name too long (max 255 bytes)
+                                                    </span>
+                                                ) : row.proposed === null || row.unchanged ? (
+                                                    <span className="text-muted-foreground/70 italic">
+                                                        no change
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-foreground">
+                                                        {row.proposed}
+                                                    </span>
+                                                )}
+                                            </span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
                     </section>
                 </div>
 
-                {/* Footer — Cancel + the gated commit. Preview-changes stays
-                    disabled until phases 5-7 surface an edited value to act on. */}
-                <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border shrink-0">
-                    <Button variant="ghost" size="sm" onClick={onClose}>
+                {/* Footer — Cancel + the gated commit. Button is enabled only
+                    when there's actual work to do (per-file edit, shared
+                    value, clear toggle, or proposed rename). The commit
+                    fires PATCH /api/files/bulk-write directly; the preview
+                    pane above is the dry-run safety net. Validation errors
+                    surface inline next to Cancel. */}
+                <div className="flex items-center justify-end gap-3 px-5 py-3 border-t border-border shrink-0">
+                    {submitError && (
+                        <span
+                            className="text-xs text-destructive flex-1 min-w-0 truncate"
+                            aria-live="polite"
+                            title={submitError}
+                        >
+                            {submitError}
+                        </span>
+                    )}
+                    <Button variant="ghost" size="sm" onClick={onClose} disabled={isSubmitting}>
                         Cancel
                     </Button>
                     <Button
                         variant="default"
                         size="sm"
-                        disabled
-                        aria-label="Preview changes (no edits to commit yet)"
+                        onClick={handleSubmit}
+                        disabled={!canCommit || isSubmitting || anyTooLong}
+                        aria-label={
+                            !canCommit
+                                ? "No edits to apply yet"
+                                : anyTooLong
+                                  ? "One or more proposed names exceed the filesystem limit"
+                                  : rename
+                                    ? "Apply metadata and rename"
+                                    : "Apply metadata"
+                        }
                     >
-                        Preview changes
+                        {isSubmitting ? (
+                            <Loader2 size={14} aria-hidden className="animate-spin" />
+                        ) : null}
+                        {isSubmitting ? "Applying…" : "Apply changes"}
                     </Button>
                 </div>
             </SheetContent>
