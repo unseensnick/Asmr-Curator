@@ -53,13 +53,22 @@ export default function App() {
     const [libraryOpen, setLibraryOpen] = useState(false);
     const [cookiesOpen, setCookiesOpen] = useState(false);
     const [helpOpen, setHelpOpen] = useState(false);
-    // BulkEditSheet open state. The toolbar button that populates the
-    // selection and opens this lands in phase 8; until then the sheet
-    // is wired but unreachable from the UI, so files / root stay at
-    // their empty defaults.
+    // BulkEditSheet state. Files + root are populated by the FileBrowser's
+    // "Bulk edit" toolbar button at the moment of open, so the sheet always
+    // mounts with the current selection snapshot — later edits to the
+    // selection in the FileBrowser don't trail into an already-open sheet.
     const [bulkEditOpen, setBulkEditOpen] = useState(false);
-    const bulkEditFiles: FileEntry[] = [];
-    const bulkEditRoot: BulkEditRoot = "library";
+    const [bulkEditFiles, setBulkEditFiles] = useState<FileEntry[]>([]);
+    const [bulkEditRoot, setBulkEditRoot] = useState<BulkEditRoot>("library");
+
+    function openBulkEdit(selectionFiles: FileEntry[], selectionRoot: BulkEditRoot) {
+        setLibraryOpen(false);
+        setCookiesOpen(false);
+        setHelpOpen(false);
+        setBulkEditFiles(selectionFiles);
+        setBulkEditRoot(selectionRoot);
+        setBulkEditOpen(true);
+    }
     const [extractedArtist, setExtractedArtist] = useState("");
     const [sourceMode, setSourceMode] = useState<SourceMode>("patreon");
     const [powerMode, setPowerMode] = useState<boolean>(() => loadPowerMode());
@@ -327,6 +336,7 @@ export default function App() {
                     defaultOpen={false}
                     bridgeRequest={bridgeRequest}
                     onBridgeConsumed={() => setBridgeRequest(null)}
+                    onOpenBulkEdit={openBulkEdit}
                 />
             </section>
 

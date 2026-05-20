@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
     AlertTriangle,
     ChevronDown,
+    FilePen,
     FolderOpen,
     ListChecks,
     Loader2,
@@ -41,6 +42,11 @@ interface FileBrowserProps {
      *  the named file + scroll into view. Parent clears via onBridgeConsumed. */
     bridgeRequest?: { path: string; filename: string } | null;
     onBridgeConsumed?: () => void;
+    /** Hand the current batch selection (2+ files) up to the parent so it
+     *  can open the BulkEditSheet with that snapshot. The parent owns the
+     *  sheet's open state + mutual-exclusion with the other right-side
+     *  sheets; we just feed the click. */
+    onOpenBulkEdit?: (files: FileEntry[], root: FileRoot) => void;
 }
 
 interface SearchResponse {
@@ -71,6 +77,7 @@ export default function FileBrowser({
     defaultOpen = false,
     bridgeRequest = null,
     onBridgeConsumed,
+    onOpenBulkEdit,
 }: FileBrowserProps) {
     // Persist the last-opened root across reloads so a user who lives in
     // Downloads after a bridge doesn't get forced back to Library on every
@@ -437,6 +444,22 @@ export default function FileBrowser({
                                 onClearBatch={() => setBatchSelected(new Set())}
                                 onBatchConvert={handleBatchConvert}
                                 onClearBatchResults={() => setBatchProgress(null)}
+                                onOpenBulkEdit={
+                                    onOpenBulkEdit
+                                        ? () => {
+                                              // Snapshot the current selection
+                                              // at click time — the sheet
+                                              // mounts with this list and
+                                              // later toggling files in/out
+                                              // of batchSelected doesn't
+                                              // mutate the open sheet.
+                                              onOpenBulkEdit(
+                                                  files.filter((f) => batchSelected.has(f.path)),
+                                                  root,
+                                              );
+                                          }
+                                        : undefined
+                                }
                                 selected={selected}
                                 outputDash={outputDash}
                                 outputPipe={outputPipe}
@@ -685,6 +708,10 @@ interface WorkAreaProps {
     onClearBatch: () => void;
     onBatchConvert: () => void;
     onClearBatchResults: () => void;
+    /** Open the BulkEditSheet with the current batch selection. Undefined
+     *  when the parent didn't wire a handler — render path treats that as
+     *  "feature not available here". */
+    onOpenBulkEdit?: () => void;
     selected: FileEntry | null;
     outputDash: string;
     outputPipe: string;
@@ -714,6 +741,7 @@ function WorkArea(props: WorkAreaProps) {
                 onClearBatch={props.onClearBatch}
                 onBatchConvert={props.onBatchConvert}
                 onClearBatchResults={props.onClearBatchResults}
+                onOpenBulkEdit={props.onOpenBulkEdit}
             />
         );
     }
@@ -765,6 +793,7 @@ interface BatchConvertPanelProps {
     onClearBatch: () => void;
     onBatchConvert: () => void;
     onClearBatchResults: () => void;
+    onOpenBulkEdit?: () => void;
 }
 
 function BatchConvertPanel({
@@ -780,6 +809,7 @@ function BatchConvertPanel({
     onClearBatch,
     onBatchConvert,
     onClearBatchResults,
+    onOpenBulkEdit,
 }: BatchConvertPanelProps) {
     const inFlight = batchProgress !== null && !!batchProgress.currentFile;
     const failedCount = batchProgress ? batchProgress.results.filter((r) => !r.ok).length : 0;
@@ -811,6 +841,23 @@ function BatchConvertPanel({
                     )}
                 </div>
             </div>
+
+            {/* Bulk edit affordance — separate operation that happens to
+                share the same selection state. Gated at 2+ so a single
+                selected file routes through the standard
+                SelectedFilePanel instead, where rename + metadata write
+                already live for that case. */}
+            {onOpenBulkEdit && batchSelected.size >= 2 && (
+                <Button
+                    type="button"
+                    variant="outline"
+                    onClick={onOpenBulkEdit}
+                    className="h-10 w-full gap-2 text-sm"
+                >
+                    <FilePen size={16} aria-hidden />
+                    Bulk edit {batchSelected.size} files
+                </Button>
+            )}
 
             <ConversionPanel
                 formats={["mp3", "flac", "ogg"]}
