@@ -72,7 +72,18 @@ export default function FileBrowser({
     bridgeRequest = null,
     onBridgeConsumed,
 }: FileBrowserProps) {
-    const [root, setRoot] = useState<FileRoot>("library");
+    // Persist the last-opened root across reloads so a user who lives in
+    // Downloads after a bridge doesn't get forced back to Library on every
+    // refresh. Only "library" / "downloads" are valid; anything else falls
+    // back to library.
+    const [root, setRoot] = useState<FileRoot>(() => {
+        try {
+            const stored = localStorage.getItem("fileBrowser.root");
+            return stored === "downloads" ? "downloads" : "library";
+        } catch {
+            return "library";
+        }
+    });
     const [files, setFiles] = useState<FileEntry[]>([]);
     const [query, setQuery] = useState("");
     const [searchMode, setSearchMode] = useState<SearchMode>("filename");
@@ -112,6 +123,13 @@ export default function FileBrowser({
     useEffect(() => {
         localStorage.setItem("convertQuality", convertQuality);
     }, [convertQuality]);
+    useEffect(() => {
+        try {
+            localStorage.setItem("fileBrowser.root", root);
+        } catch {
+            // non-fatal
+        }
+    }, [root]);
 
     // ── Load files ────────────────────────────────────────────────────────
 
