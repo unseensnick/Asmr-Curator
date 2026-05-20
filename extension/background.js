@@ -11,11 +11,12 @@
 // Zen MV3 use `background.scripts` and the helpers are already on
 // `self.AsmrExt` before this file runs. Guard so we don't ReferenceError.
 if (typeof importScripts === "function") {
-  importScripts("lib/storage.js");
+  importScripts("lib/storage.js", "lib/semver.js");
 }
 
 const browserApi = self.browser || self.chrome;
-const { getBackendUrl, getLatestExtensionInfo, setLatestExtensionInfo } = self.AsmrExt;
+const { compareSemver, getBackendUrl, getLatestExtensionInfo, setLatestExtensionInfo } =
+  self.AsmrExt;
 
 // ── Update check ──────────────────────────────────────────────────────────────
 //
@@ -30,23 +31,6 @@ const RELEASES_URL =
   "https://api.github.com/repos/unseensnick/Asmr-Curator/releases?per_page=10";
 const EXT_ASSET_RE =
   /^asmr-curator-companion-v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\.zip$/;
-
-// Plain semver compare. Returns < 0 if a < b, 0 if equal, > 0 if a > b. Only
-// covers MAJOR.MINOR.PATCH[-pre] — fancier semver isn't needed for our zips.
-function compareSemver(a, b) {
-  const [aMain, aPre] = a.split("-");
-  const [bMain, bPre] = b.split("-");
-  const aParts = aMain.split(".").map(Number);
-  const bParts = bMain.split(".").map(Number);
-  for (let i = 0; i < 3; i++) {
-    if (aParts[i] !== bParts[i]) return aParts[i] - bParts[i];
-  }
-  // Release (no pre-release tag) beats any pre-release on the same triple.
-  if (aPre === bPre) return 0;
-  if (!aPre) return 1;
-  if (!bPre) return -1;
-  return aPre.localeCompare(bPre);
-}
 
 async function checkForUpdate() {
   try {

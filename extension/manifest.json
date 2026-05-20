@@ -25,6 +25,7 @@
     "service_worker": "background.js",
     "scripts": [
       "lib/storage.js",
+      "lib/semver.js",
       "background.js"
     ]
   },
