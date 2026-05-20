@@ -6,8 +6,7 @@
 export const MAX_BYTES = 255;
 
 export function getExt(name: string): string {
-    const m = name.match(/(\.[^.]+)$/);
-    return m ? m[1] : "";
+    return name.match(/(\.[^.]+)$/)?.[1] ?? "";
 }
 
 export function byteLength(str: string): number {

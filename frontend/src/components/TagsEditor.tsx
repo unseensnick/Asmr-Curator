@@ -83,7 +83,7 @@ export default function TagsEditor({
 
     function startEdit(i: number) {
         setEditingIdx(i);
-        setEditingVal(tags[i]);
+        setEditingVal(tags[i] ?? "");
     }
 
     function saveEdit(i: number) {
@@ -125,6 +125,7 @@ export default function TagsEditor({
         if (src === null || src === i) return;
         const next = [...tags];
         const [moved] = next.splice(src, 1);
+        if (moved === undefined) return;
         next.splice(i, 0, moved);
         dragSrcIdx.current = null;
         onTagsChange(next);

@@ -111,10 +111,11 @@ export function selectionFromClick(
  *  Returns null when the list is empty (caller should no-op rather
  *  than clobber state). */
 export function selectAll(visible: readonly SelectablePath[]): SelectionUpdate | null {
-    if (visible.length === 0) return null;
+    const first = visible[0];
+    if (!first) return null;
     return {
         selected: new Set(visible.map((e) => e.path)),
-        anchor: visible[0].path,
+        anchor: first.path,
     };
 }
 
