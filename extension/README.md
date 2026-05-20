@@ -99,10 +99,12 @@ extension/
 - `GET /api/dictionary` — used by **Test connection** in Settings as
   a cheap ping.
 
-The backend currently has no CORS middleware, so the extension's
-`chrome-extension://…` / `moz-extension://…` origin is accepted by
-default. If you later add CORS hardening, allow those origins
-explicitly.
+The backend's CORS middleware allow-lists only the dev Vite origins
+(`http://localhost:5173` / `http://127.0.0.1:5173`). Browser extensions
+bypass page-CORS by virtue of `host_permissions` — `fetch()` from the
+service worker / popup hits the backend directly without an Origin
+header that needs allow-listing, so the extension works without any
+extension-specific allowlist entry.
 
 ## What's no longer here
 

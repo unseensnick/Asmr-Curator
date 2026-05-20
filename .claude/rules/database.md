@@ -10,7 +10,7 @@ This project uses **SQLite via `sqlite3`** — no ORM, no migration tool. The sc
 
 ## Conventions
 
-- **All SQL goes through `backend/database.py`.** Never inline a SQL query in `backend/main.py` route handlers — add or extend a helper instead (DIP / SoC).
+- **All SQL goes through `backend/database.py`.** Never inline a SQL query in a `backend/routes/*.py` route handler — add or extend a helper instead (DIP / SoC).
 - **Parameterise every query.** Never f-string user input into SQL. `sqlite3` supports `?` placeholders — use them.
 - **Schema changes are code edits in `database.py`.** Update the `CREATE TABLE` / seed logic in place. Because the DB is local and per-deployment, there is no migration ledger — but new columns must be additive and tolerate older DB files. SQLite has no `IF NOT EXISTS` on `ADD COLUMN`, so guard with `PRAGMA table_info(<table>)` and only `ALTER TABLE ... ADD COLUMN ...` when the column is absent.
 - **Never drop a column or table** without explicit user confirmation. User dictionaries are stored here and lost data is unrecoverable.
