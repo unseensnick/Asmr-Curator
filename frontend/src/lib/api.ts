@@ -26,11 +26,9 @@ export const API = {
 /** Root selector for file ops. Library = curated archive, Downloads = ingest staging. */
 export type FileRoot = "library" | "downloads";
 
-// Thin fetch wrappers — all requests go to the same origin (FastAPI).
-//
-// Every call has a timeout via AbortController so a stalled Ollama call /
-// hung patreon-dl / dead backend doesn't leave the UI spinning forever.
-// Defaults are generous (long enough for cold-start Ollama) but bounded.
+// Thin fetch wrappers — same-origin (FastAPI). AbortController per-call so
+// a stalled Ollama / hung patreon-dl / dead backend can't leave the UI
+// spinning forever. Generous defaults, bounded.
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
@@ -41,11 +39,9 @@ const ENDPOINT_TIMEOUTS: Array<{ match: RegExp; ms: number }> = [
   { match: /^\/api\/convert\b/,            ms: 600_000 },  // ffmpeg encodes; matches backend timeout
   { match: /^\/api\/patreon\/fetch\b/,     ms: 1_800_000 }, // creator-wide downloads
   { match: /^\/api\/patreon\/ingest-external-audio\b/, ms: 600_000 },
-  // Note: `/api/patreon/ingest-drive-link` and `/api/move/batch` are
-  // intentionally not listed — both return a `text/event-stream`,
-  // consumed by their own streaming helpers below (`ingestDriveLinkStream`
-  // / `moveBatchStream`). A hard total-timeout would cut a healthy
-  // stream short during a long cross-mount move or Drive download.
+  // `/api/patreon/ingest-drive-link` and `/api/move/batch` are SSE
+  // streams (see ingestDriveLinkStream / moveBatchStream) — no total
+  // timeout, that would cut healthy long streams short.
 ];
 
 function timeoutFor(path: string): number {
@@ -107,11 +103,8 @@ async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
-// Build a `?key=val&key2=val2` suffix from a flat object, skipping
-// undefined / null / empty-string entries so callers don't have to
-// branch on every optional parameter before stringifying. Returns
-// `""` (empty string) when no entries survive — safe to concatenate
-// directly with the base path.
+// `?key=val&...` from a flat object. Skips undefined/null/"". Returns
+// `""` when no entries survive — safe to concatenate to the base path.
 export function buildQueryString(
   params: Record<string, string | number | undefined | null>,
 ): string {
@@ -161,21 +154,12 @@ export function clearGoogleCookies(): Promise<GoogleCookieStatus> {
 }
 
 /**
- * Stream Drive-link ingest progress via Server-Sent Events.
+ * Stream Drive-link ingest progress via SSE.
  *
- * Backend `POST /api/patreon/ingest-drive-link` returns `text/event-stream`
- * with one JSON event per line of progress: `launching_browser` →
- * `loading_page` → `waiting_for_player` → `captured` → `downloading` (with
- * periodic heartbeats) → `done` (or `error`). Each event is delivered to
- * the `onEvent` callback as it arrives.
- *
- * Resolves with the final `done` payload when the scrape succeeds. Rejects
- * with an Error built from the `error` event when the scrape fails. Either
- * way the response is closed before this returns.
- *
- * `AbortSignal` can be passed to cancel mid-stream (e.g. on component
- * unmount). The backend cancels the underlying Playwright session when the
- * client disconnects.
+ * `onEvent` fires for each progress event (`launching_browser` →
+ * `loading_page` → `captured` → `downloading` → `done`/`error`). Resolves
+ * on `done`, rejects on `error`. `AbortSignal` cancels mid-stream — the
+ * backend tears down the Playwright session on client disconnect.
  */
 export async function ingestDriveLinkStream(
   postId: string,
