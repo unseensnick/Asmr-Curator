@@ -15,7 +15,7 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 - **Right-click → "Add as alias of…" on an unrecognised tag chip now actually opens the picker, and the chip snaps to the canonical form once you pick one.** Previously the picker flashed open then dismissed (Radix outside-interaction race), and even when it did work the chip stayed visible as the original novel text instead of the canonical you aliased it to. Both fixed.
 - **Patches two starlette CVEs** (CVE-2025-54121, CVE-2025-62727) by bumping fastapi to 0.130.0 and pinning starlette to 0.52.1. Affects request-body and multipart handling — pull the new image to pick up the fix.
-- **File-API path validators now return a clean 403 on malformed input** (null bytes, paths the OS refuses to resolve). Previously these surfaced as a 500 with a Python stack trace — defence-in-depth tightening, not a known exploit. Found by a property-based test added in the same release.
+- **File-API path validators now return a clean 403 on malformed input** (null bytes, paths the OS refuses to resolve). Previously these surfaced as a 500 with a Python stack trace — defence-in-depth tightening, not a known exploit.
 
 ## [2.0.4]
 

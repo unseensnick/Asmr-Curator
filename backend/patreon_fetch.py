@@ -19,22 +19,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
-from backend.audio_utils import flatten_dest_parts, unique_destination
+from backend.audio_utils import AUDIO_FORMATS_CONFIG, flatten_dest_parts, unique_destination
 
 PATREON_DL_BIN = os.environ.get("PATREON_DL_BIN", "patreon-dl")
 # Hard cap so a runaway creator-wide download can't hang the API forever.
 DEFAULT_TIMEOUT_SECONDS = 60 * 30
 
-# Shared audio-format config — same single source of truth that backend/main.py
-# and the frontend read. Keeps `_find_first_audio` from quietly diverging from
-# what the file browser considers an audio file.
-_FORMATS_CONFIG_PATH = (
-    Path(__file__).parent.parent / "frontend" / "src" / "lib" / "audio-formats.json"
-)
-with _FORMATS_CONFIG_PATH.open() as _f:
-    _FORMATS_CONFIG = json.load(_f)
-AUDIO_EXTS = set(_FORMATS_CONFIG["metadataCompatibleExts"]) | set(
-    _FORMATS_CONFIG["needsConversionExts"]
+# Audio extension set derived from the shared config in audio_utils.
+# Keeps `_find_first_audio` from quietly diverging from what the file
+# browser considers an audio file.
+AUDIO_EXTS = set(AUDIO_FORMATS_CONFIG["metadataCompatibleExts"]) | set(
+    AUDIO_FORMATS_CONFIG["needsConversionExts"]
 )
 
 # patreon-dl's media-type vocabulary plus our synthetic `external` flag.
