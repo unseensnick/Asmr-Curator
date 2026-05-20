@@ -4,6 +4,7 @@ import { Plus, Sparkles, User } from "lucide-react";
 import TagChip from "@/components/TagChip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TITLE_VALIDATION_FLASH_MS } from "@/lib/constants";
 import type { AppDict, VocabEntry } from "@/lib/types";
 import { normalizeTag } from "@/lib/utils";
 
@@ -128,7 +129,7 @@ export default function TagsEditor({
     function handleGenerate() {
         if (!title.trim()) {
             setTitleError(true);
-            setTimeout(() => setTitleError(false), 1200);
+            setTimeout(() => setTitleError(false), TITLE_VALIDATION_FLASH_MS);
             return;
         }
         onGenerate();
