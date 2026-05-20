@@ -54,7 +54,7 @@ import { METADATA_COMPATIBLE_EXTS, NEEDS_CONVERSION_EXTS } from "@/lib/audioForm
 import { LIBRARY_FILTER_DEBOUNCE_MS } from "@/lib/constants";
 import { selectAll, selectionFromClick } from "@/lib/explorerSelection";
 import type { FileEntry, ListedDirResponse } from "@/lib/types";
-import { getErrorMessage } from "@/lib/utils";
+import { deferToNextMacrotask, getErrorMessage } from "@/lib/utils";
 
 interface LibraryExplorerSheetProps {
     open: boolean;
@@ -457,13 +457,13 @@ export default function LibraryExplorerSheet({
     // `aria-hidden="true"` while still containing the focused element
     // — the browser warns about it as an a11y violation. This effect
     // sweeps open SheetContent nodes after every transient overlay
-    // state change and clears any stuck attribute. setTimeout(0) lets
-    // Radix's own cleanup attempt first; we only step in if it didn't
-    // finish. Re-evaluate on the next radix-ui upgrade and drop if the
-    // upstream behaviour is fixed.
+    // state change and clears any stuck attribute. deferToNextMacrotask
+    // lets Radix's own cleanup attempt first; we only step in if it
+    // didn't finish. Re-evaluate on the next radix-ui upgrade and drop
+    // if the upstream behaviour is fixed.
     useEffect(() => {
         if (!open) return;
-        const id = window.setTimeout(() => {
+        return deferToNextMacrotask(() => {
             document
                 .querySelectorAll<HTMLElement>('[data-slot="sheet-content"][data-state="open"]')
                 .forEach((el) => {
@@ -472,8 +472,7 @@ export default function LibraryExplorerSheet({
                         el.removeAttribute("data-aria-hidden");
                     }
                 });
-        }, 0);
-        return () => window.clearTimeout(id);
+        });
     }, [open, menuTarget, cutPaths, moveNotice, deleteCandidate, moveBusy, renamePath]);
 
     // File-explorer hotkeys: N / F2 / Del.
