@@ -18,7 +18,7 @@ services:
         command: sleep infinity
         volumes:
             # Workspace bind-mount — VS Code edits files here.
-            - .:/workspaces/asmr-filename-gen:cached
+            - .:/workspaces/asmr-curator:cached
             # Curated archive — same `LIBRARY_PATH` from `.env` that the
             # production compose uses, mounted to the same container path.
             - ${LIBRARY_PATH}:/mnt/audio:cached
@@ -27,8 +27,8 @@ services:
             # LIBRARY_PATH (the backend errors on startup if they collide).
             - ${DOWNLOAD_PATH}:/mnt/downloads:cached
         environment:
-            - DB_PATH=/workspaces/asmr-filename-gen/data/dictionary.db
-            - PYTHONPATH=/workspaces/asmr-filename-gen
+            - DB_PATH=/workspaces/asmr-curator/data/dictionary.db
+            - PYTHONPATH=/workspaces/asmr-curator
             - UV_LINK_MODE=copy
             - VIRTUAL_ENV=/home/devuser/.venv
             - LIBRARY_PATH=/mnt/audio

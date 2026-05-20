@@ -1,5 +1,5 @@
 [project]
-name = "asmr-filename-generator"
+name = "asmr-curator"
 version = "2.0.4"
 description = "Self-hosted ASMR Curator: vision LLM extraction, tag dictionary, file rename + ID3, audio conversion"
 readme = "README.md"

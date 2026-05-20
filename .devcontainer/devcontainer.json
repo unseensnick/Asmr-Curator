@@ -4,7 +4,7 @@
   "// dockerComposeFile / service": "Sources every per-machine config (LIBRARY_PATH, DOWNLOAD_PATH, OLLAMA_BASE_URL, etc.) from the repo root's `.env` via `../docker-compose.dev.yml`. The dev compose lives at the repo root (not in this folder) so docker-compose's project directory matches where `.env` is — same arrangement as the production compose next to it. No personal data lives in this file.",
   "dockerComposeFile": "../docker-compose.dev.yml",
   "service": "dev",
-  "workspaceFolder": "/workspaces/asmr-filename-gen",
+  "workspaceFolder": "/workspaces/asmr-curator",
   "remoteUser": "devuser",
 
   "forwardPorts": [
@@ -12,8 +12,8 @@
     5173
   ],
 
-  "postCreateCommand": "sudo chown -R devuser:devuser /workspaces/asmr-filename-gen && sudo chmod -R u+rw /workspaces/asmr-filename-gen",
-  "postStartCommand": "uv pip install --python /home/devuser/.venv/bin/python -r /workspaces/asmr-filename-gen/backend/requirements.txt -q && volta install node@25 && npm install -g patreon-dl@3.9.0",
+  "postCreateCommand": "sudo chown -R devuser:devuser /workspaces/asmr-curator && sudo chmod -R u+rw /workspaces/asmr-curator",
+  "postStartCommand": "uv pip install --python /home/devuser/.venv/bin/python -r /workspaces/asmr-curator/backend/requirements.txt -q && volta install node@25 && npm install -g patreon-dl@3.9.0",
 
   "customizations": {
     "vscode": {
