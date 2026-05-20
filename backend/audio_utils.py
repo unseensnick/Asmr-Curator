@@ -1,14 +1,25 @@
 """Shared audio-file utilities — URL cleaning, filename derivation,
-flat-path construction. Imported by main.py and drive_fetch.py. Lives
-outside main.py so drive_fetch.py doesn't import FastAPI transitively.
+flat-path construction, shared audio-format config. Imported by main.py,
+patreon_fetch.py, and drive_fetch.py. Lives outside main.py so the
+non-FastAPI modules don't import FastAPI transitively.
 """
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from pathlib import Path
 from urllib.parse import unquote, urlparse, urlunparse
+
+# Shared audio-format config — single source of truth with the frontend's
+# `lib/audio-formats.json`. Loaded once at import time; `main.py` and
+# `patreon_fetch.py` both pull derived sets from `AUDIO_FORMATS_CONFIG`.
+_FORMATS_CONFIG_PATH = (
+    Path(__file__).parent.parent / "frontend" / "src" / "lib" / "audio-formats.json"
+)
+with _FORMATS_CONFIG_PATH.open() as _f:
+    AUDIO_FORMATS_CONFIG = json.load(_f)
 
 # Query params stripped from a captured Google playback URL:
 #   range  — byte-range cap; remove for a full-file response.

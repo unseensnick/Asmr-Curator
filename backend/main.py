@@ -9,7 +9,6 @@ constants, and the small validation helpers (`require_non_empty`,
 live under `backend/routes/`.
 """
 
-import json
 import logging
 import os
 import tomllib
@@ -27,13 +26,12 @@ from mutagen.mp4 import MP4
 from mutagen.oggvorbis import OggVorbis
 
 from backend import drive_fetch
+from backend.audio_utils import AUDIO_FORMATS_CONFIG
 
-# ── Shared audio format config (single source of truth with frontend) ─────────
-_FORMATS_CONFIG_PATH = (
-    Path(__file__).parent.parent / "frontend" / "src" / "lib" / "audio-formats.json"
-)
-with _FORMATS_CONFIG_PATH.open() as _f:
-    _FORMATS_CONFIG = json.load(_f)
+# Audio format sets derived from the shared config in audio_utils. The
+# frontend reads the same audio-formats.json, so adding a new extension
+# in one place propagates to both halves automatically.
+_FORMATS_CONFIG = AUDIO_FORMATS_CONFIG
 
 log = logging.getLogger("asmr_curator")
 
