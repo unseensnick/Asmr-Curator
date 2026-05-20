@@ -7,12 +7,13 @@
   in `backend/drive_fetch.py`, serialised per-account via the semaphore
   defined here.
 """
+
 import asyncio
+import contextlib
 import json
 import os
 from datetime import date
 from pathlib import Path
-from typing import Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -31,7 +32,8 @@ from backend.main import (
     require_non_empty,
     validate_under_download,
 )
-from backend.patreon_fetch import PatreonFetchError, fetch as patreon_fetch
+from backend.patreon_fetch import PatreonFetchError
+from backend.patreon_fetch import fetch as patreon_fetch
 
 # DOWNLOAD_PATH accessed via `_main.DOWNLOAD_PATH` (attribute lookup) rather
 # than a top-level import binding so the test suite's monkeypatch on
@@ -54,7 +56,7 @@ _drive_scrape_lock = asyncio.Semaphore(_DRIVE_SCRAPE_CAPACITY)
 _drive_scrape_pending = 0
 
 
-def _validate_iso_date(value: Optional[str], field: str) -> Optional[str]:
+def _validate_iso_date(value: str | None, field: str) -> str | None:
     if value is None or value == "":
         return None
     try:
@@ -65,7 +67,7 @@ def _validate_iso_date(value: Optional[str], field: str) -> Optional[str]:
         raise HTTPException(400, f"{field}: {e}")
 
 
-def _ingest_dest_dir(post_id: str, artist: Optional[str], title: Optional[str]) -> Path:
+def _ingest_dest_dir(post_id: str, artist: str | None, title: str | None) -> Path:
     """Resolve the per-post destination under DOWNLOAD_PATH.
 
     With artist or title supplied, builds the flattened
@@ -75,7 +77,9 @@ def _ingest_dest_dir(post_id: str, artist: Optional[str], title: Optional[str]) 
     """
     if artist or title:
         creator, folder = audio_utils.flatten_dest_parts(
-            post_id, artist or "", title or "",
+            post_id,
+            artist or "",
+            title or "",
         )
         return validate_under_download(f"{creator}/{folder}")
     return validate_under_download(post_id)
@@ -87,10 +91,10 @@ class PatreonFetchIn(BaseModel):
     # Which patreon-dl media types to include. Allowed: "audio", "video",
     # "image", "attachment". None/empty → wrapper default (["audio"]).
     # Ignored when metadata_only=True.
-    content_types: Optional[list[str]] = None
+    content_types: list[str] | None = None
     # ISO YYYY-MM-DD bounds. Only meaningful for creator URLs.
-    published_after: Optional[str] = None
-    published_before: Optional[str] = None
+    published_after: str | None = None
+    published_before: str | None = None
     # Walk the pipeline without writing anything (preview only). Status DB
     # left untouched so `previouslyDownloaded` dedup stays correct on the
     # real run.
@@ -110,7 +114,9 @@ def patreon_fetch_endpoint(body: PatreonFetchIn):
     output_dir = _main.DOWNLOAD_PATH / PATREON_OUTPUT_SUBDIR
     try:
         result = patreon_fetch(
-            url, cookie, output_dir,
+            url,
+            cookie,
+            output_dir,
             metadata_only=body.metadata_only,
             content_types=body.content_types,
             published_after=published_after,
@@ -122,7 +128,7 @@ def patreon_fetch_endpoint(body: PatreonFetchIn):
 
     download_path = _main.DOWNLOAD_PATH.resolve()
 
-    def _rel(p: Optional[str]) -> Optional[str]:
+    def _rel(p: str | None) -> str | None:
         if not p:
             return None
         try:
@@ -138,9 +144,7 @@ def patreon_fetch_endpoint(body: PatreonFetchIn):
             "artist": p.artist,
             "post_dir": _rel(p.post_dir),
             "audio_path": _rel(p.audio_path),
-            "external_links": [
-                {"url": link.url, "text": link.text} for link in p.external_links
-            ],
+            "external_links": [{"url": link.url, "text": link.text} for link in p.external_links],
         }
         for p in result.posts
     ]
@@ -174,18 +178,19 @@ def patreon_fetch_endpoint(body: PatreonFetchIn):
 
 # ── External audio ingest ─────────────────────────────────────────────────────
 
+
 class IngestExternalAudioIn(BaseModel):
     post_id: str
     source_url: str
     # Optional override; otherwise derived from Content-Disposition or
     # `<post_id>_<timestamp>.<ext>`.
-    filename: Optional[str] = None
+    filename: str | None = None
     # Optional metadata to embed after the download. Only honoured for
     # metadata-compatible formats; silently ignored otherwise.
-    title: Optional[str] = None
-    artist: Optional[str] = None
-    album: Optional[str] = None
-    album_artist: Optional[str] = None
+    title: str | None = None
+    artist: str | None = None
+    album: str | None = None
+    album_artist: str | None = None
 
 
 @router.post("/api/patreon/ingest-external-audio")
@@ -194,7 +199,7 @@ async def ingest_external_audio(body: IngestExternalAudioIn):
     if "/" in post_id or "\\" in post_id or post_id.startswith("."):
         raise HTTPException(400, "Invalid post_id")
     source_url = require_non_empty(body.source_url, "source_url")
-    if not (source_url.startswith("http://") or source_url.startswith("https://")):
+    if not (source_url.startswith(("http://", "https://"))):
         raise HTTPException(400, "source_url must be http(s)")
 
     cleaned_url = audio_utils.strip_query_params(source_url)
@@ -207,7 +212,9 @@ async def ingest_external_audio(body: IngestExternalAudioIn):
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        async with httpx.AsyncClient(timeout=EXTERNAL_AUDIO_HTTPX_TIMEOUTS, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=EXTERNAL_AUDIO_HTTPX_TIMEOUTS, follow_redirects=True
+        ) as client:
             async with client.stream("GET", cleaned_url) as response:
                 if response.status_code >= 400:
                     raise HTTPException(
@@ -243,10 +250,15 @@ async def ingest_external_audio(body: IngestExternalAudioIn):
 
     # Best-effort metadata embed. Any failure here is non-fatal — the file
     # is on disk either way.
-    metadata_error: Optional[str] = None
-    if target.suffix.lower() in METADATA_COMPATIBLE_EXTS and any([
-        body.title, body.artist, body.album, body.album_artist,
-    ]):
+    metadata_error: str | None = None
+    if target.suffix.lower() in METADATA_COMPATIBLE_EXTS and any(
+        [
+            body.title,
+            body.artist,
+            body.album,
+            body.album_artist,
+        ]
+    ):
         try:
             _write_metadata(
                 target,
@@ -278,14 +290,15 @@ async def ingest_external_audio(body: IngestExternalAudioIn):
 
 # ── Drive-link ingest (server-side scrape via Playwright) ────────────────────
 
+
 class IngestDriveLinkIn(BaseModel):
     post_id: str
     drive_url: str
-    filename: Optional[str] = None
+    filename: str | None = None
     # Post metadata used for the flattened layout. Without either field, the
     # legacy `<post_id>/` shape is used so external callers keep working.
-    title: Optional[str] = None
-    artist: Optional[str] = None
+    title: str | None = None
+    artist: str | None = None
 
 
 @router.post("/api/patreon/ingest-drive-link")
@@ -339,11 +352,13 @@ async def ingest_drive_link(body: IngestDriveLinkIn):
         _drive_scrape_pending += 1
         try:
             if contested:
-                await queue.put({
-                    "state": "queued",
-                    "ahead": ahead_on_arrival,
-                    "elapsed_s": 0.0,
-                })
+                await queue.put(
+                    {
+                        "state": "queued",
+                        "ahead": ahead_on_arrival,
+                        "elapsed_s": 0.0,
+                    }
+                )
             async with _drive_scrape_lock:
                 result = await drive_fetch.fetch_drive_audio(
                     drive_url=drive_url,
@@ -355,28 +370,34 @@ async def ingest_drive_link(body: IngestDriveLinkIn):
                 )
                 download_path = _main.DOWNLOAD_PATH.resolve()
                 audio_path = str(result.audio_path.relative_to(download_path))
-                await queue.put({
-                    "state": "done",
-                    "audio_path": audio_path,
-                    "size": result.size,
-                    "source_url": result.source_url,
-                    "file_id": result.file_id,
-                })
+                await queue.put(
+                    {
+                        "state": "done",
+                        "audio_path": audio_path,
+                        "size": result.size,
+                        "source_url": result.source_url,
+                        "file_id": result.file_id,
+                    }
+                )
         except drive_fetch.DriveFetchError as e:
-            await queue.put({
-                "state": "error",
-                "code": e.code,
-                "message": str(e),
-                "debug_dir": str(e.debug_dir) if e.debug_dir else None,
-            })
+            await queue.put(
+                {
+                    "state": "error",
+                    "code": e.code,
+                    "message": str(e),
+                    "debug_dir": str(e.debug_dir) if e.debug_dir else None,
+                }
+            )
         except Exception as e:
             log.exception("ingest-drive-link: unexpected failure")
-            await queue.put({
-                "state": "error",
-                "code": "internal",
-                "message": f"Unexpected backend error: {e}",
-                "debug_dir": None,
-            })
+            await queue.put(
+                {
+                    "state": "error",
+                    "code": "internal",
+                    "message": f"Unexpected backend error: {e}",
+                    "debug_dir": None,
+                }
+            )
         finally:
             _drive_scrape_pending -= 1
             await queue.put(DONE_SENTINEL)
@@ -393,10 +414,8 @@ async def ingest_drive_link(body: IngestDriveLinkIn):
             # Client disconnect — cancel the underlying work so we don't
             # keep a Playwright session running for a closed tab.
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
-            except (asyncio.CancelledError, Exception):
-                pass
 
     return StreamingResponse(
         event_stream(),

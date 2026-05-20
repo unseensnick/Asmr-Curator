@@ -1,21 +1,25 @@
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from pathlib import Path
 import json
 import logging
 import os
 import tomllib
+from contextlib import asynccontextmanager
+from pathlib import Path
+
 import httpx
-from mutagen.id3 import ID3, TIT2, TPE1, TALB, TPE2, ID3NoHeaderError
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from mutagen.flac import FLAC
-from mutagen.oggvorbis import OggVorbis
+from mutagen.id3 import ID3, TALB, TIT2, TPE1, TPE2, ID3NoHeaderError
 from mutagen.mp4 import MP4
+from mutagen.oggvorbis import OggVorbis
+
 from backend import drive_fetch
 
 # ── Shared audio format config (single source of truth with frontend) ─────────
-_FORMATS_CONFIG_PATH = Path(__file__).parent.parent / "frontend" / "src" / "lib" / "audio-formats.json"
+_FORMATS_CONFIG_PATH = (
+    Path(__file__).parent.parent / "frontend" / "src" / "lib" / "audio-formats.json"
+)
 with _FORMATS_CONFIG_PATH.open() as _f:
     _FORMATS_CONFIG = json.load(_f)
 
@@ -90,13 +94,16 @@ def root():
 
 # ── Config ────────────────────────────────────────────────────────────────────
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL    = os.environ.get("OLLAMA_MODEL", "qwen2.5vl:7b")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5vl:7b")
 
 # Subprocess + HTTP timeouts. Named so callers don't sprinkle magic numbers,
 # and so the values are findable when tuning a slow encode / large download.
-FFMPEG_SUBPROCESS_TIMEOUT_S = 300                                       # /api/convert ffmpeg cap
-EXTERNAL_AUDIO_HTTPX_TIMEOUTS = httpx.Timeout(                          # /api/patreon/ingest-external-audio
-    connect=15.0, read=300.0, write=60.0, pool=15.0,
+FFMPEG_SUBPROCESS_TIMEOUT_S = 300  # /api/convert ffmpeg cap
+EXTERNAL_AUDIO_HTTPX_TIMEOUTS = httpx.Timeout(  # /api/patreon/ingest-external-audio
+    connect=15.0,
+    read=300.0,
+    write=60.0,
+    pool=15.0,
 )
 
 
@@ -119,6 +126,7 @@ GOOGLE_COOKIE_KEY = "google_cookie"
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
+
 
 def require_non_empty(value: str, field: str) -> str:
     stripped = value.strip()
@@ -170,18 +178,24 @@ def reject_if_exists(path: Path) -> None:
 
 # field name → (ID3 tag id, ID3 tag class) for MP3
 _MP3_TAGS = {
-    "title":        ("TIT2", TIT2),
-    "artist":       ("TPE1", TPE1),
-    "album":        ("TALB", TALB),
+    "title": ("TIT2", TIT2),
+    "artist": ("TPE1", TPE1),
+    "album": ("TALB", TALB),
     "album_artist": ("TPE2", TPE2),
 }
 # field name → Vorbis comment key for FLAC/OGG
 _VORBIS_TAGS = {
-    "title": "title", "artist": "artist", "album": "album", "album_artist": "albumartist",
+    "title": "title",
+    "artist": "artist",
+    "album": "album",
+    "album_artist": "albumartist",
 }
 # field name → MP4 atom key for M4A/AAC
 _M4A_TAGS = {
-    "title": "\xa9nam", "artist": "\xa9ART", "album": "\xa9alb", "album_artist": "aART",
+    "title": "\xa9nam",
+    "artist": "\xa9ART",
+    "album": "\xa9alb",
+    "album_artist": "aART",
 }
 
 
@@ -219,26 +233,35 @@ def _write_metadata(path: Path, title: str, artist: str, album: str, album_artis
 # ── Audio-format catalogue (file browser + convert + rename ext gating) ──────
 
 METADATA_COMPATIBLE_EXTS = set(_FORMATS_CONFIG["metadataCompatibleExts"])
-NEEDS_CONVERSION_EXTS    = set(_FORMATS_CONFIG["needsConversionExts"])
-AUDIO_EXTS               = METADATA_COMPATIBLE_EXTS | NEEDS_CONVERSION_EXTS
-OUTPUT_FORMATS           = _FORMATS_CONFIG["outputFormats"]
+NEEDS_CONVERSION_EXTS = set(_FORMATS_CONFIG["needsConversionExts"])
+AUDIO_EXTS = METADATA_COMPATIBLE_EXTS | NEEDS_CONVERSION_EXTS
+OUTPUT_FORMATS = _FORMATS_CONFIG["outputFormats"]
 
 QUALITY_FLAGS: dict[str, dict[str, list[str]]] = {
     "mp3": {
         # VBR: -q:a 0 = best (~220-260kbps avg), 9 = worst (~45-85kbps avg)
-        "low":      ["-codec:a", "libmp3lame", "-q:a", "7"],   # ~96-112kbps
-        "standard": ["-codec:a", "libmp3lame", "-q:a", "4"],   # ~140-185kbps
-        "high":     ["-codec:a", "libmp3lame", "-q:a", "2"],   # ~170-210kbps
-        "best":     ["-codec:a", "libmp3lame", "-q:a", "0"],   # ~220-260kbps
+        "low": ["-codec:a", "libmp3lame", "-q:a", "7"],  # ~96-112kbps
+        "standard": ["-codec:a", "libmp3lame", "-q:a", "4"],  # ~140-185kbps
+        "high": ["-codec:a", "libmp3lame", "-q:a", "2"],  # ~170-210kbps
+        "best": ["-codec:a", "libmp3lame", "-q:a", "0"],  # ~220-260kbps
     },
     "flac": {
-        "lossless": ["-codec:a", "flac", "-compression_level", "8", "-ar", "44100", "-sample_fmt", "s16"],
+        "lossless": [
+            "-codec:a",
+            "flac",
+            "-compression_level",
+            "8",
+            "-ar",
+            "44100",
+            "-sample_fmt",
+            "s16",
+        ],
     },
     "ogg": {
-        "low":      ["-codec:a", "libvorbis", "-q:a", "3"],
+        "low": ["-codec:a", "libvorbis", "-q:a", "3"],
         "standard": ["-codec:a", "libvorbis", "-q:a", "5"],
-        "high":     ["-codec:a", "libvorbis", "-q:a", "7"],
-        "best":     ["-codec:a", "libvorbis", "-q:a", "9"],
+        "high": ["-codec:a", "libvorbis", "-q:a", "7"],
+        "best": ["-codec:a", "libvorbis", "-q:a", "9"],
     },
 }
 

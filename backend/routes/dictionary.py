@@ -1,4 +1,5 @@
 """Tag vocabulary + suppressed-terms CRUD + bulk import/reset."""
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -9,6 +10,7 @@ router = APIRouter()
 
 
 # ── Full dict (load / import / reset) ───────────────────────────────────────
+
 
 @router.get("/api/dictionary")
 def get_dictionary():
@@ -33,6 +35,7 @@ def reset_dictionary():
 
 
 # ── Vocabulary CRUD ─────────────────────────────────────────────────────────
+
 
 class VocabIn(BaseModel):
     canonical: str
@@ -76,6 +79,7 @@ def delete_vocab(entry_id: int):
 
 
 # ── Suppressed terms CRUD ───────────────────────────────────────────────────
+
 
 class SuppressIn(BaseModel):
     term: str

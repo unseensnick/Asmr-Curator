@@ -1,11 +1,11 @@
 """File-browser endpoints: list, search, debug, mkdir, move (single + batch),
 delete, rename (file-only + path-general)."""
+
 import asyncio
 import json
 import os
 import shutil
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -44,13 +44,15 @@ def list_files(subdir: str = "", root: str = "library"):
     entries = []
     for entry in sorted(target.iterdir(), key=lambda e: (e.is_file(), e.name.lower())):
         ext = entry.suffix.lower() if entry.is_file() else None
-        entries.append({
-            "name": entry.name,
-            "type": "file" if entry.is_file() else "dir",
-            "ext": ext,
-            "path": str(entry.relative_to(root_path)),
-            "needs_conversion": entry.is_file() and ext in NEEDS_CONVERSION_EXTS,
-        })
+        entries.append(
+            {
+                "name": entry.name,
+                "type": "file" if entry.is_file() else "dir",
+                "ext": ext,
+                "path": str(entry.relative_to(root_path)),
+                "needs_conversion": entry.is_file() and ext in NEEDS_CONVERSION_EXTS,
+            }
+        )
 
     return {
         "current": str(target.relative_to(root_path)) if target != root_path else "",
@@ -109,8 +111,7 @@ def search_files(
         for dirpath, dirnames, filenames in os.walk(scope):
             # Prune in place so os.walk doesn't descend into noisy subtrees.
             dirnames[:] = [
-                d for d in dirnames
-                if d not in _SEARCH_PRUNE_DIRS and not d.startswith(".")
+                d for d in dirnames if d not in _SEARCH_PRUNE_DIRS and not d.startswith(".")
             ]
             rel_dir = Path(dirpath).relative_to(root_path)
             folder = "" if str(rel_dir) == "." else str(rel_dir)
@@ -130,13 +131,15 @@ def search_files(
                     if search_in == "both" and not (match_name or match_folder):
                         continue
                 rel_path = str(rel_dir / name) if folder else name
-                results.append({
-                    "name": name,
-                    "ext": ext,
-                    "path": rel_path,
-                    "folder": folder,
-                    "needs_conversion": ext in NEEDS_CONVERSION_EXTS,
-                })
+                results.append(
+                    {
+                        "name": name,
+                        "ext": ext,
+                        "path": rel_path,
+                        "folder": folder,
+                        "needs_conversion": ext in NEEDS_CONVERSION_EXTS,
+                    }
+                )
                 if len(results) >= _SEARCH_RESULT_LIMIT:
                     truncated = True
                     break
@@ -167,15 +170,21 @@ def debug_files(root: str = "library"):
     root_path = root_for(root).resolve()
     env_name = f"{root.upper()}_PATH"
     if not root_path.exists():
-        return {"error": f"{env_name} does not exist: {root_path}", "root_path": str(root_path), "root": root}
+        return {
+            "error": f"{env_name} does not exist: {root_path}",
+            "root_path": str(root_path),
+            "root": root,
+        }
 
     top_level = []
     try:
         for entry in sorted(root_path.iterdir(), key=lambda e: e.name.lower())[:20]:
-            top_level.append({
-                "name": entry.name,
-                "type": "dir" if entry.is_dir() else "file",
-            })
+            top_level.append(
+                {
+                    "name": entry.name,
+                    "type": "dir" if entry.is_dir() else "file",
+                }
+            )
     except Exception as e:
         return {"error": str(e), "root_path": str(root_path), "root": root}
 
@@ -213,7 +222,7 @@ def _validate_folder_name(name: str) -> str:
 
 class MkdirIn(BaseModel):
     subdir: str
-    parent: Optional[str] = None
+    parent: str | None = None
 
 
 @router.post("/api/mkdir", status_code=201)
@@ -242,6 +251,7 @@ class MetadataIn(BaseModel):
     """Tag fields embedded after a rename or rename-during-move. Shared by
     /api/rename and /api/move so a move-with-new-name can also write
     user-supplied tags in one round-trip."""
+
     title: str = ""
     artist: str = ""
     album: str = ""
@@ -252,15 +262,15 @@ class MoveIn(BaseModel):
     from_path: str
     from_root: str
     to_subdir: str
-    new_name: Optional[str] = None
-    metadata: Optional[MetadataIn] = None
+    new_name: str | None = None
+    metadata: MetadataIn | None = None
 
 
 def _plan_move(
     from_path: str,
     from_root: str,
     to_subdir: str,
-    new_name: Optional[str],
+    new_name: str | None,
 ) -> tuple[Path, Path]:
     """Validate a single move and return `(src, dest)` absolute paths.
 
@@ -328,17 +338,19 @@ def move_file(body: MoveIn):
     # Optional metadata embed. Folder moves and non-tag-compatible files
     # skip silently. Failures here surface as a partial-success warning,
     # never a failed move (the file is on disk where the user asked).
-    metadata_error: Optional[str] = None
+    metadata_error: str | None = None
     if (
         body.metadata
         and dest.is_file()
         and dest.suffix.lower() in METADATA_COMPATIBLE_EXTS
-        and any([
-            body.metadata.title,
-            body.metadata.artist,
-            body.metadata.album,
-            body.metadata.album_artist,
-        ])
+        and any(
+            [
+                body.metadata.title,
+                body.metadata.artist,
+                body.metadata.album,
+                body.metadata.album_artist,
+            ]
+        )
     ):
         try:
             _write_metadata(
@@ -361,7 +373,7 @@ def move_file(body: MoveIn):
 
 class MoveBatchItem(BaseModel):
     from_path: str
-    new_name: Optional[str] = None
+    new_name: str | None = None
 
 
 class MoveBatchIn(BaseModel):
@@ -565,11 +577,7 @@ def rename_path(body: RenamePathIn):
         }
 
     parent_rel = src.parent.relative_to(root_path.resolve())
-    dest_rel = (
-        f"{parent_rel}/{new_name}"
-        if str(parent_rel) not in ("", ".")
-        else new_name
-    )
+    dest_rel = f"{parent_rel}/{new_name}" if str(parent_rel) not in ("", ".") else new_name
     dest = validate_under_root(dest_rel, root_path)
     if dest.exists():
         kind = "folder" if dest.is_dir() else "file"
@@ -599,7 +607,7 @@ class RenameIn(BaseModel):
     path: str
     new_name: str
     root: str = "library"
-    metadata: Optional[MetadataIn] = None
+    metadata: MetadataIn | None = None
 
 
 @router.post("/api/rename")
@@ -626,20 +634,28 @@ def rename_file(body: RenameIn):
     # Linux max filename length is 255 bytes (not chars — encode to check).
     name_bytes = len(new_name.encode("utf-8"))
     if name_bytes > 255:
-        raise HTTPException(422, f"Filename too long: {name_bytes} bytes (max 255). Remove some tags to shorten it.")
+        raise HTTPException(
+            422, f"Filename too long: {name_bytes} bytes (max 255). Remove some tags to shorten it."
+        )
 
     try:
         src.rename(dest)
     except OSError as e:
         if e.errno == 36:  # ENAMETOOLONG
-            raise HTTPException(422, f"Filename too long ({len(new_name)} chars). Remove some tags to shorten it.")
+            raise HTTPException(
+                422, f"Filename too long ({len(new_name)} chars). Remove some tags to shorten it."
+            )
         raise HTTPException(500, f"Rename failed: {e}")
 
-    metadata_error: Optional[str] = None
-    if body.metadata and any([
-        body.metadata.title, body.metadata.artist,
-        body.metadata.album, body.metadata.album_artist,
-    ]):
+    metadata_error: str | None = None
+    if body.metadata and any(
+        [
+            body.metadata.title,
+            body.metadata.artist,
+            body.metadata.album,
+            body.metadata.album_artist,
+        ]
+    ):
         try:
             _write_metadata(
                 dest,

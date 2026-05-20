@@ -2,13 +2,13 @@
 flat-path construction. Imported by main.py and drive_fetch.py. Lives
 outside main.py so drive_fetch.py doesn't import FastAPI transitively.
 """
+
 from __future__ import annotations
 
 import re
 import time
 from pathlib import Path
-from typing import Optional
-from urllib.parse import urlparse, urlunparse, unquote
+from urllib.parse import unquote, urlparse, urlunparse
 
 # Query params stripped from a captured Google playback URL:
 #   range  — byte-range cap; remove for a full-file response.
@@ -92,7 +92,7 @@ def flatten_dest_parts(post_id: str, artist: str, title: str) -> tuple[str, str]
     return creator, folder_name
 
 
-def filename_from_content_disposition(header: Optional[str]) -> Optional[str]:
+def filename_from_content_disposition(header: str | None) -> str | None:
     if not header:
         return None
     match = _CD_FILENAME_RE.search(header)
@@ -105,7 +105,7 @@ def filename_from_content_disposition(header: Optional[str]) -> Optional[str]:
     return safe_filename_component(raw) or None
 
 
-def ext_from_content_type(content_type: Optional[str]) -> str:
+def ext_from_content_type(content_type: str | None) -> str:
     if not content_type:
         return ".mp3"
     main = content_type.split(";")[0].strip().lower()
@@ -129,9 +129,9 @@ def unique_destination(target: Path) -> Path:
 
 def derive_filename(
     *,
-    explicit: Optional[str],
-    content_disposition: Optional[str],
-    content_type: Optional[str],
+    explicit: str | None,
+    content_disposition: str | None,
+    content_type: str | None,
     fallback_stem: str,
 ) -> str:
     """Pick a filename for a downloaded audio file in the same order both

@@ -4,6 +4,8 @@ The integration is intentionally a one-shot subprocess call:
 no IPC, no sidecar service. patreon-dl writes media + raw API JSON to
 disk, and this module reads back what it produced.
 """
+
+import contextlib
 import json
 import os
 import re
@@ -13,10 +15,9 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 from urllib.parse import urlparse
 
-from backend.audio_utils import flatten_dest_parts, safe_filename_component
+from backend.audio_utils import flatten_dest_parts
 
 PATREON_DL_BIN = os.environ.get("PATREON_DL_BIN", "patreon-dl")
 # Hard cap so a runaway creator-wide download can't hang the API forever.
@@ -25,10 +26,14 @@ DEFAULT_TIMEOUT_SECONDS = 60 * 30
 # Shared audio-format config — same single source of truth that backend/main.py
 # and the frontend read. Keeps `_find_first_audio` from quietly diverging from
 # what the file browser considers an audio file.
-_FORMATS_CONFIG_PATH = Path(__file__).parent.parent / "frontend" / "src" / "lib" / "audio-formats.json"
+_FORMATS_CONFIG_PATH = (
+    Path(__file__).parent.parent / "frontend" / "src" / "lib" / "audio-formats.json"
+)
 with _FORMATS_CONFIG_PATH.open() as _f:
     _FORMATS_CONFIG = json.load(_f)
-AUDIO_EXTS = set(_FORMATS_CONFIG["metadataCompatibleExts"]) | set(_FORMATS_CONFIG["needsConversionExts"])
+AUDIO_EXTS = set(_FORMATS_CONFIG["metadataCompatibleExts"]) | set(
+    _FORMATS_CONFIG["needsConversionExts"]
+)
 
 # patreon-dl's media-type vocabulary plus our synthetic `external` flag.
 # `external` signals `_write_config` to drop the `posts.with.media.type`
@@ -71,10 +76,24 @@ _VANITY_OLD_RE = re.compile(r"patreon\.com/([^/?#]+)", re.IGNORECASE)
 # Reserved path segments that can appear at patreon.com/<segment> but
 # aren't creator vanities — skipping them prevents false positives like
 # treating `patreon.com/home` as a creator URL.
-_RESERVED_VANITY_PATHS = frozenset({
-    "c", "posts", "home", "search", "settings", "join", "login",
-    "messages", "api", "policy", "about", "help", "creators", "auth",
-})
+_RESERVED_VANITY_PATHS = frozenset(
+    {
+        "c",
+        "posts",
+        "home",
+        "search",
+        "settings",
+        "join",
+        "login",
+        "messages",
+        "api",
+        "policy",
+        "about",
+        "help",
+        "creators",
+        "auth",
+    }
+)
 
 # URL patterns for `attributes.content` HTML. Creators store links in
 # several shapes; we scan all of them and let EXTERNAL_HOST_ALLOWLIST
@@ -110,6 +129,7 @@ class ExternalLink:
     used as the per-download filename hint so multiple links on the same
     post end up with distinct, human-readable filenames. Empty string for
     non-anchor sources (iframes, plain-text URLs, embed.url)."""
+
     url: str
     text: str = ""
 
@@ -119,9 +139,9 @@ class FetchedPost:
     post_id: str
     title: str
     tags: list[str]
-    artist: str             # creator's full_name from the post's user relationship
-    post_dir: str           # absolute path to the post directory
-    audio_path: Optional[str]   # absolute path to the first audio file, if any
+    artist: str  # creator's full_name from the post's user relationship
+    post_dir: str  # absolute path to the post directory
+    audio_path: str | None  # absolute path to the first audio file, if any
     # URLs found inside the post body whose host is in
     # EXTERNAL_HOST_ALLOWLIST, each paired with the visible anchor text
     # (when the source was an `<a>` tag). The user typically needs to open
@@ -146,6 +166,7 @@ class PatreonFetchOptions:
     shape stable as new filters get added — each one is one more line
     in `_write_config`, never a new branch around the subprocess call.
     """
+
     # The Patreon session cookie. Written into the temp config file's
     # [downloader] section rather than the CLI argv so it can't be read
     # via /proc/<pid>/cmdline on shared hosts. The temp file is created
@@ -158,8 +179,8 @@ class PatreonFetchOptions:
     content_types: list[str] = field(default_factory=lambda: ["audio"])
     # ISO yyyy-MM-dd strings. Only meaningful for creator URLs; patreon-dl
     # silently ignores them for single-post URLs.
-    published_after: Optional[str] = None
-    published_before: Optional[str] = None
+    published_after: str | None = None
+    published_before: str | None = None
     # Walk the whole pipeline without writing any files to disk. patreon-dl
     # still resolves post metadata (so title/tags/artist come back) but no
     # audio / images / attachments get downloaded. Useful for previewing
@@ -172,9 +193,9 @@ def fetch(
     cookie: str,
     output_dir: Path,
     metadata_only: bool = False,
-    content_types: Optional[list[str]] = None,
-    published_after: Optional[str] = None,
-    published_before: Optional[str] = None,
+    content_types: list[str] | None = None,
+    published_after: str | None = None,
+    published_before: str | None = None,
     dry_run: bool = False,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> FetchResult:
@@ -250,19 +271,26 @@ def fetch(
     # unlinked in the finally block below.
     cmd = [
         PATREON_DL_BIN,
-        "--target-url", url,
-        "--out-dir", str(output_dir),
+        "--target-url",
+        url,
+        "--out-dir",
+        str(output_dir),
         "--no-prompt",
-        "--log-level", "info",
-        "--config-file", config_path,
+        "--log-level",
+        "info",
+        "--config-file",
+        config_path,
     ]
 
     try:
         # Merge stderr into stdout — patreon-dl writes its info/warn lines to
         # stdout via console.log; we want both streams in one chronological tail.
         result = subprocess.run(
-            cmd, text=True, timeout=timeout,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            cmd,
+            text=True,
+            timeout=timeout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
         )
     except subprocess.TimeoutExpired as e:
         raise PatreonFetchError(f"patreon-dl timed out after {timeout}s") from e
@@ -307,7 +335,7 @@ def _scrub_cookie(text: str, cookie: str) -> str:
     return text.replace(cookie, "[REDACTED]")
 
 
-def _clean_content_types(types: Optional[list[str]]) -> list[str]:
+def _clean_content_types(types: list[str] | None) -> list[str]:
     """Normalise + filter a content-types input. None or empty → wrapper default."""
     if not types:
         return ["audio"]
@@ -402,7 +430,7 @@ def _write_config(opts: PatreonFetchOptions) -> str:
     return path
 
 
-def _post_id_from_url(url: str) -> Optional[str]:
+def _post_id_from_url(url: str) -> str | None:
     """Return the numeric post ID if `url` is a single-post Patreon URL.
 
     Single-post URLs look like `patreon.com/posts/<slug>-<id>` (with
@@ -416,7 +444,7 @@ def _post_id_from_url(url: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
-def _vanity_from_url(url: str) -> Optional[str]:
+def _vanity_from_url(url: str) -> str | None:
     """Return the creator vanity slug if `url` is a Patreon creator URL.
 
     Handles both the new canonical form (`patreon.com/c/<vanity>`) and the
@@ -441,7 +469,7 @@ def _vanity_from_url(url: str) -> Optional[str]:
     return None
 
 
-def _campaign_vanity_from_payload(payload: dict) -> Optional[str]:
+def _campaign_vanity_from_payload(payload: dict) -> str | None:
     """Pull the campaign vanity out of a Patreon JSON:API post payload.
 
     Follows post → campaign relationship into the `included` array, same
@@ -556,8 +584,8 @@ def _iter_cached_posts(output_dir: Path):
 def _find_cached_creator_posts(
     output_dir: Path,
     vanity: str,
-    published_after: Optional[str],
-    published_before: Optional[str],
+    published_after: str | None,
+    published_before: str | None,
 ) -> list[FetchedPost]:
     """Walk cached sidecars under `output_dir` for posts belonging to the
     creator identified by `vanity`.
@@ -582,9 +610,7 @@ def _find_cached_creator_posts(
     target = vanity.lower()
     matches: list[tuple[str, FetchedPost]] = []
     for post, published_at, data in _iter_cached_posts(output_dir):
-        sidecar_vanity = (
-            _campaign_vanity_from_payload(data) or _slugify(post.artist) or None
-        )
+        sidecar_vanity = _campaign_vanity_from_payload(data) or _slugify(post.artist) or None
         if sidecar_vanity != target:
             continue
         # Compare yyyy-MM-dd prefix against patreon-dl-style bounds. Skip
@@ -601,7 +627,7 @@ def _find_cached_creator_posts(
     return [post for _, post in matches]
 
 
-def _find_cached_post(output_dir: Path, post_id: str) -> Optional[FetchedPost]:
+def _find_cached_post(output_dir: Path, post_id: str) -> FetchedPost | None:
     """Find a previously-downloaded post's metadata by id, ignoring the
     mtime filter `_collect_posts` uses.
 
@@ -621,7 +647,8 @@ def _find_cached_post(output_dir: Path, post_id: str) -> Optional[FetchedPost]:
 
 
 def _collect_posts(
-    output_dir: Path, since: Optional[float] = None,
+    output_dir: Path,
+    since: float | None = None,
 ) -> list[FetchedPost]:
     """Walk patreon-dl's output and pull title/tags/audio out of each post-api.json.
 
@@ -649,22 +676,24 @@ def _collect_posts(
             continue
         post_id, title, tags, artist, external_links = parsed
         audio_path = _find_first_audio(post_dir)
-        posts.append(FetchedPost(
-            post_id=post_id,
-            title=title,
-            tags=tags,
-            artist=artist,
-            post_dir=str(post_dir),
-            audio_path=str(audio_path) if audio_path else None,
-            external_links=external_links,
-        ))
+        posts.append(
+            FetchedPost(
+                post_id=post_id,
+                title=title,
+                tags=tags,
+                artist=artist,
+                post_dir=str(post_dir),
+                audio_path=str(audio_path) if audio_path else None,
+                external_links=external_links,
+            )
+        )
     posts.sort(key=lambda p: p.post_id)
     return posts
 
 
 def _parse_post_api(
     payload: dict,
-) -> Optional[tuple[str, str, list[str], str, list[ExternalLink]]]:
+) -> tuple[str, str, list[str], str, list[ExternalLink]] | None:
     """Extract (post_id, title, tags[], artist, external_links[]) from a Patreon
     JSON:API payload."""
     data = payload.get("data") if isinstance(payload, dict) else None
@@ -840,11 +869,7 @@ def _extract_artist(payload: dict) -> str:
     if not isinstance(included, list):
         return ""
     for item in included:
-        if (
-            isinstance(item, dict)
-            and item.get("type") == "user"
-            and item.get("id") == user_id
-        ):
+        if isinstance(item, dict) and item.get("type") == "user" and item.get("id") == user_id:
             full_name = (item.get("attributes") or {}).get("full_name")
             if isinstance(full_name, str):
                 return full_name.strip()
@@ -872,13 +897,12 @@ def _cleanup_info_media(posts: list[FetchedPost]) -> None:
                 continue
             if entry.name in KEEP_FILENAMES:
                 continue
-            try:
+            # Non-fatal — if unlink fails the file just stays on disk.
+            with contextlib.suppress(OSError):
                 entry.unlink()
-            except OSError:
-                pass  # non-fatal — leave it on disk
 
 
-def _find_first_audio(post_dir: Path) -> Optional[Path]:
+def _find_first_audio(post_dir: Path) -> Path | None:
     audio_dir = post_dir / "audio"
     if audio_dir.is_dir():
         for entry in sorted(audio_dir.iterdir()):
@@ -900,7 +924,8 @@ def _find_first_audio(post_dir: Path) -> Optional[Path]:
 
 
 def _flatten_audio(
-    posts: list[FetchedPost], patreon_root: Path,
+    posts: list[FetchedPost],
+    patreon_root: Path,
 ) -> list[FetchedPost]:
     """Move each post's audio out of patreon-dl's tree into a per-creator,
     per-post folder under DOWNLOAD_PATH.

@@ -1,4 +1,6 @@
 """Audio-format conversion via ffmpeg subprocess."""
+
+import contextlib
 import subprocess
 
 from fastapi import APIRouter, HTTPException
@@ -58,11 +60,14 @@ def convert_file(body: ConvertIn):
     reject_if_exists(dest)
 
     codec_flags = QUALITY_FLAGS[fmt][quality]
-    cmd = ["ffmpeg", "-i", str(src), "-vn"] + codec_flags + [str(dest)]
+    cmd = ["ffmpeg", "-i", str(src), "-vn", *codec_flags, str(dest)]
 
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=FFMPEG_SUBPROCESS_TIMEOUT_S,
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=FFMPEG_SUBPROCESS_TIMEOUT_S,
         )
     except FileNotFoundError:
         raise HTTPException(500, "ffmpeg not found — make sure it is installed")
@@ -76,10 +81,8 @@ def convert_file(body: ConvertIn):
         raise HTTPException(500, "Conversion failed. Check the server log for ffmpeg output.")
 
     if body.delete_original:
-        try:
+        with contextlib.suppress(OSError):
             src.unlink()
-        except OSError:
-            pass
 
     return {
         "converted": True,
