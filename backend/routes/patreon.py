@@ -133,8 +133,12 @@ def patreon_fetch_endpoint(body: PatreonFetchIn):
             return None
         try:
             return str(Path(p).resolve().relative_to(download_path))
-        except ValueError:
-            return p  # fell outside DOWNLOAD_PATH — return absolute verbatim
+        except (ValueError, OSError):
+            # ValueError: path falls outside DOWNLOAD_PATH (the intended
+            # branch), or null-byte input from patreon-dl. OSError: any
+            # other OS-layer resolve failure. Mirrors the resolve()
+            # guard added to validate_under_root.
+            return p
 
     posts = [
         {
