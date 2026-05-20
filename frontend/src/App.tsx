@@ -15,9 +15,14 @@ import TagsEditor from "@/components/TagsEditor";
 // fallback is null because the Sheet's open animation already covers
 // the brief load.
 const LibrarySettingsSheet = lazy(() => import("@/components/LibrarySettingsSheet"));
+// BulkEditSheet will grow heavy as phases 4-7 land the per-file table,
+// shared form, and rename-preview pane. Lazy from the start so the
+// initial chunk doesn't carry it.
+const BulkEditSheet = lazy(() => import("@/components/BulkEditSheet"));
+import type { BulkEditRoot } from "@/components/BulkEditSheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { API, apiGet, apiPatch, apiPost } from "@/lib/api";
-import type { AppDict, DictionaryApiResponse, VocabEntry } from "@/lib/types";
+import type { AppDict, DictionaryApiResponse, FileEntry, VocabEntry } from "@/lib/types";
 import { dictFromApiResponse, emptyDict } from "@/lib/types";
 import { getErrorMessage, sanitizeFilename } from "@/lib/utils";
 
@@ -48,6 +53,13 @@ export default function App() {
     const [libraryOpen, setLibraryOpen] = useState(false);
     const [cookiesOpen, setCookiesOpen] = useState(false);
     const [helpOpen, setHelpOpen] = useState(false);
+    // BulkEditSheet open state. The toolbar button that populates the
+    // selection and opens this lands in phase 8; until then the sheet
+    // is wired but unreachable from the UI, so files / root stay at
+    // their empty defaults.
+    const [bulkEditOpen, setBulkEditOpen] = useState(false);
+    const bulkEditFiles: FileEntry[] = [];
+    const bulkEditRoot: BulkEditRoot = "library";
     const [extractedArtist, setExtractedArtist] = useState("");
     const [sourceMode, setSourceMode] = useState<SourceMode>("patreon");
     const [powerMode, setPowerMode] = useState<boolean>(() => loadPowerMode());
@@ -166,16 +178,19 @@ export default function App() {
                     // Radix focus scopes fight each other.
                     setCookiesOpen(false);
                     setHelpOpen(false);
+                    setBulkEditOpen(false);
                     setLibraryOpen(true);
                 }}
                 onOpenCookies={() => {
                     setLibraryOpen(false);
                     setHelpOpen(false);
+                    setBulkEditOpen(false);
                     setCookiesOpen(true);
                 }}
                 onOpenHelp={() => {
                     setLibraryOpen(false);
                     setCookiesOpen(false);
+                    setBulkEditOpen(false);
                     setHelpOpen(true);
                 }}
                 powerMode={powerMode}
@@ -255,6 +270,8 @@ export default function App() {
                                 powerMode={powerMode}
                                 onOpenCookies={() => {
                                     setLibraryOpen(false);
+                                    setHelpOpen(false);
+                                    setBulkEditOpen(false);
                                     setCookiesOpen(true);
                                 }}
                                 onBridgeToDownloads={(path, filename) =>
@@ -325,6 +342,14 @@ export default function App() {
                         onClose={() => setLibraryOpen(false)}
                         dict={dict}
                         onDictChange={setDict}
+                    />
+                )}
+                {bulkEditOpen && (
+                    <BulkEditSheet
+                        open={bulkEditOpen}
+                        onClose={() => setBulkEditOpen(false)}
+                        files={bulkEditFiles}
+                        root={bulkEditRoot}
                     />
                 )}
             </Suspense>
