@@ -155,7 +155,7 @@ export default function App() {
     }
 
     return (
-        <div className="max-w-[160rem] mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 py-8 lg:py-10">
+        <div className="max-w-[160rem] 2xl:max-w-[200rem] mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 py-8 lg:py-10">
             <Header
                 dictTagCount={dict.vocabulary.length}
                 onOpenLibrarySettings={() => {
@@ -198,14 +198,20 @@ export default function App() {
                 </div>
             )}
 
-            {/* Page grid: 1-col mobile → 2-col lg → 3-col dashboard at xl+.
-                Visual flow is Source → Edit → Output → Library at every
-                breakpoint. Base-level `order-*` utilities apply at every
-                size so the empty Output column never lands between Source
-                and Edit on mobile (1-col stack) or at lg (2-col).
+            {/* Top trio: 1-col mobile → 2-col lg → 3-col dashboard at xl+.
+                Visual flow is Source → Edit → Output at every breakpoint.
+                Base-level `order-*` utilities apply at every size so the
+                empty Output column never lands between Source and Edit on
+                mobile (1-col stack) or at lg (2-col).
                 items-start lets the Source column grow vertically (results
-                list) without dragging the other columns taller. */}
-            <section className="mt-8 lg:mt-10 grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-[3fr_4fr_3fr] gap-6 lg:gap-10 items-start">
+                list) without dragging the other columns taller.
+                At 2xl+ (ultrawide territory: 3440-wide and beyond) the
+                proportional 3:4:3 grid would stretch each column past
+                reading comfort, so we cap columns with minmax() and
+                justify-center the row inside the container. FileBrowser
+                sits in its own section below so it can still use the
+                full container width for the file list. */}
+            <section className="mt-8 lg:mt-10 grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-[3fr_4fr_3fr] 2xl:grid-cols-[minmax(0,28rem)_minmax(0,42rem)_minmax(0,28rem)] 2xl:justify-center gap-6 lg:gap-10 items-start">
                 <div className="order-1 flex flex-col min-h-0">
                     <Tabs
                         value={sourceMode}
@@ -286,17 +292,22 @@ export default function App() {
                         onGenerate={generate}
                     />
                 </div>
+            </section>
 
-                <div className="order-4 lg:col-span-2 xl:col-span-3">
-                    <FileBrowser
-                        outputDash={outputDash}
-                        outputPipe={outputPipe}
-                        extractedArtist={extractedArtist}
-                        defaultOpen={false}
-                        bridgeRequest={bridgeRequest}
-                        onBridgeConsumed={() => setBridgeRequest(null)}
-                    />
-                </div>
+            {/* FileBrowser lives outside the top grid so it can stretch
+                to the full container width on ultrawide screens (the
+                top trio is capped at 2xl+; the FileBrowser file list
+                benefits from horizontal room and is the densest surface
+                on the page). */}
+            <section className="mt-6 lg:mt-10">
+                <FileBrowser
+                    outputDash={outputDash}
+                    outputPipe={outputPipe}
+                    extractedArtist={extractedArtist}
+                    defaultOpen={false}
+                    bridgeRequest={bridgeRequest}
+                    onBridgeConsumed={() => setBridgeRequest(null)}
+                />
             </section>
 
             <Suspense fallback={null}>

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-05-17T00:00:00Z",
+  "generatedAt": "2026-05-20T00:00:00Z",
   "title": "Design System: ASMR Curator",
   "extensions": {
     "colorMeta": {
@@ -105,7 +105,8 @@
       { "name": "sm", "value": "640px" },
       { "name": "md", "value": "768px" },
       { "name": "lg", "value": "1024px" },
-      { "name": "xl", "value": "1280px" }
+      { "name": "xl", "value": "1280px" },
+      { "name": "2xl", "value": "1536px" }
     ]
   },
   "components": [
@@ -167,14 +168,16 @@
     }
   ],
   "narrative": {
-    "northStar": "The Penthouse Reading Nook",
-    "overview": "The product is what you reach for at night with headphones on, settled into a corner of a modern penthouse, the city glittering through the glass. The room is dim, the materials are cool (slate, polished concrete, glass, brushed metal), and one single accent carries the warmth: the brushed face of a hi-fi amplifier glowing teal-cyan from below. The visual system explicitly rejects four reflexes: not Spotify (saturated single accent on near-black), not Audacity (cold utilitarian DAW chrome), not Linear or Notion (cold-blue productivity SaaS), and not NSFW aggregator visual codes. The personality lives in the gap between those four.",
+    "northStar": "Calm, considered, quiet personality.",
+    "overview": "Tailscale's admin dashboard meets Raycast's empty states, with a little of Cron / Notion Calendar's quiet density. The chrome is utility-shaped (minimal, predictable, clean) but the seams carry the personality: long-task narration during patreon-dl fetches, empty-state copy, status feedback, the dictionary load-error retry banner. The visual system explicitly rejects four reflexes: not Spotify (saturated single accent on near-black), not Audacity (cold utilitarian DAW chrome), not Linear / Notion / generic productivity SaaS (and especially not the soulless-modern-app trap of minimal-without-personality), and not NSFW aggregator visual codes (aggressive red/orange/black, dense thumbnail grids, hard contrast, saturated hover states). Light and dark are first-class equals; the same character lives in both. Built for desktop including 21:9, 32:9, 5K, and 8K ultrawides.",
     "keyCharacteristics": [
       "Cool slate surfaces (hue 265, low chroma) carry the whole room.",
       "One teal-cyan accent (hue 195, deeper L for confidence) is the only chromatic interest.",
       "Foreground is warm cream (hue 85), the only warm element against the cool room.",
+      "Light and dark are first-class equals; the same character lives in both.",
       "Flat by default. No shadows at rest. Lift comes from value.",
-      "Designed for low light and imperfect eyesight: generous type, 48px tap targets.",
+      "Built for desktop including ultrawide (21:9, 32:9, 5K, 8K) as first-class viewports.",
+      "Designed for dim desks and imperfect eyesight: generous type, 44px+ tap targets.",
       "Two voices: display sans for human writing, mono for machine writing."
     ],
     "rules": [
@@ -187,26 +190,32 @@
       { "name": "The Display-Sparingly Rule", "body": "Bricolage Grotesque appears only in the page title and the headline of a result-state surface. Display type used everywhere is display type used nowhere.", "section": "typography" },
       { "name": "The Flat-By-Default Rule", "body": "At rest, no surface in the system casts a shadow. Lift only happens in response to state.", "section": "elevation" },
       { "name": "The Value-Lift Rule", "body": "When a surface needs to feel elevated, the lift is communicated by raising the background lightness within the same hue family, not by adding a shadow.", "section": "elevation" },
-      { "name": "The Tinted-Shadow Rule", "body": "Where shadows do appear (popover, dialog), they tint toward the cool slate family, never pure black.", "section": "elevation" }
+      { "name": "The Tinted-Shadow Rule", "body": "Where shadows do appear (popover, dialog), they tint toward the cool slate family, never pure black.", "section": "elevation" },
+      { "name": "The Personality-In-Seams Rule", "body": "Long-running fetches narrate progress (not a single static spinner). Empty states teach the interface in librarian-voice. Errors are plain-English and offer recovery inline. Character earns its place where it tells the user something they didn't already know, never decoratively.", "section": "elevation" }
     ],
     "dos": [
       "Do treat the room as cool and the foreground as warm. Surfaces sit at hue 265 with low chroma; foreground text and the primary accent provide the warmth.",
       "Do use Amplifier Cyan only where attention is intentional: the CTA, the focus ring, the active filter chip.",
       "Do use JetBrains Mono for every filename, tag chip, raw path, URL, and machine-generated string.",
-      "Do floor body text at 1rem and touch targets at 44 by 44px (48 by 48px on tablet surfaces).",
+      "Do floor body text at 1rem and touch targets at 44 by 44px (48 by 48px on the primary CTA which is 3rem tall).",
+      "Do put the personality in the seams: long-task narration, empty-state copy, status feedback, the dictionary load-error retry banner.",
+      "Do scale into available room on ultrawide. At 2xl+, cap top-trio column widths and let dense surfaces (FileBrowser) use the full container.",
       "Do respect prefers-reduced-motion: any motion not essential to feedback is stripped behind motion-safe:.",
-      "Do verify both light and dark mode at WCAG AA before merging. Dark gets extra scrutiny."
+      "Do verify both light and dark mode at WCAG AA before merging. Both are first-class equals."
     ],
     "donts": [
       "Don't look like Spotify or any commercial music app. The Amplifier Cyan must never read as neon.",
       "Don't look like Audacity or any pro-audio DAW. No cold-grey utilitarian chrome.",
-      "Don't look like Linear, Notion, or generic productivity SaaS. The accent is teal-cyan at hue 195, not a cold blue at 250.",
-      "Don't borrow visual codes from NSFW aggregators.",
+      "Don't look like Linear, Notion, or generic productivity SaaS, and especially don't fall into the soulless-modern-app trap of minimal-without-personality. The accent is teal-cyan at hue 195, not a cold blue at 250.",
+      "Don't borrow visual codes from NSFW aggregators: aggressive red/orange/black palettes, dense thumbnail grids, hard contrast, saturated hover states.",
       "Don't leak backend jargon into UI vocabulary (itag, CDP, signed URL, Playwright, metadata_only, dry_run).",
       "Don't introduce a second saturated accent color. The system is Committed to one warm-cool tension.",
       "Don't go warm-rose, mauve, or sepia. Past iterations failed in those directions.",
+      "Don't hard-cap the layout at SaaS-default 1280-1536px. The 2xl cap is 3200px; FileBrowser uses the full container.",
+      "Don't treat dark as the canonical mode and light as the polite afterthought. Both are first-class.",
       "Don't use orchestrated mount animations or staggered section reveals. Motion is Responsive, not Choreographed.",
       "Don't use side-stripe borders, gradient text, glassmorphism, hero-metric SaaS templates, identical card grids, or modals as a first thought.",
+      "Don't use em dashes in user-facing UI copy. Use commas, colons, semicolons, periods, or parentheses.",
       "Don't use #000 or #fff anywhere. Every neutral tilts toward the brand hue family."
     ]
   }
