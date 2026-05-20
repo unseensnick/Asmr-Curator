@@ -83,10 +83,14 @@ export default function TagChip({
     onPromoteToAlias,
 }: TagChipProps) {
     // Alias-picker popover state. Opens via the right-click menu's
-    // "Add as alias of…" item; the menu auto-closes on select, so we
-    // defer the open by one frame to avoid Radix focus-scope churn
-    // (same pattern LibraryExplorerSheet uses for menu → dialog).
+    // "Add as alias of…" item. Radix closes the menu on pointerdown,
+    // but pointerup + click still bubble to document afterwards — if
+    // the popover opens too early it sees those trailing events as
+    // outside-interaction and dismisses itself ("flash" bug). We defer
+    // the open to the next macrotask AND swallow the first outside
+    // event within a short grace window after open, belt-and-braces.
     const [aliasPickerOpen, setAliasPickerOpen] = useState(false);
+    const aliasPickerOpenedAtRef = useRef(0);
     const [promoting, setPromoting] = useState(false);
 
     if (editing) {
@@ -215,7 +219,14 @@ export default function TagChip({
                     <ContextMenuItem
                         disabled={!onPromoteToAlias || promoting || vocabulary.length === 0}
                         onSelect={() => {
-                            requestAnimationFrame(() => setAliasPickerOpen(true));
+                            // setTimeout(0) — runs in the next macrotask,
+                            // after the click event finishes bubbling. rAF
+                            // would fire before that and let the trailing
+                            // click reach the popover as outside-interaction.
+                            setTimeout(() => {
+                                aliasPickerOpenedAtRef.current = performance.now();
+                                setAliasPickerOpen(true);
+                            }, 0);
                         }}
                     >
                         <Plus aria-hidden />
@@ -223,7 +234,26 @@ export default function TagChip({
                     </ContextMenuItem>
                 </ContextMenuContent>
             </ContextMenu>
-            <PopoverContent side="bottom" align="start" className="w-72 p-2">
+            <PopoverContent
+                side="bottom"
+                align="start"
+                className="w-72 p-2"
+                onPointerDownOutside={(e) => {
+                    // Ignore the trailing pointerdown that fires from the
+                    // same click that closed the context menu. After the
+                    // grace window, behave normally — click-outside still
+                    // dismisses the picker.
+                    if (performance.now() - aliasPickerOpenedAtRef.current < 150) {
+                        e.preventDefault();
+                    }
+                }}
+                onFocusOutside={(e) => {
+                    // Same guard for focus restoration when the menu closes.
+                    if (performance.now() - aliasPickerOpenedAtRef.current < 150) {
+                        e.preventDefault();
+                    }
+                }}
+            >
                 <AliasPicker label={label} vocabulary={vocabulary} onPick={handlePickAlias} />
             </PopoverContent>
         </Popover>
