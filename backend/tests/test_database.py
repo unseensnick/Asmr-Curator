@@ -4,12 +4,12 @@
 `importlib.reload` to drive the module against a temp `DB_PATH`. The
 `_default_db_path()` helper is tested separately by patching `os.name`.
 """
+
 import importlib
 import os
 from pathlib import Path
 
 import pytest
-
 
 # ── _default_db_path ───────────────────────────────────────────────────────
 
@@ -31,6 +31,7 @@ class TestDefaultDbPath:
         monkeypatch.setattr(os, "name", "posix")
         monkeypatch.setenv("DB_PATH", str(tmp_path / "neutral.db"))
         import backend.database as database
+
         importlib.reload(database)
         assert database._default_db_path() == "/data/dictionary.db"
 
@@ -51,9 +52,10 @@ class TestDefaultDbPath:
         # must point inside the repo instead.
         monkeypatch.setenv("DB_PATH", str(tmp_path / "neutral.db"))
         import backend.database as database
+
         importlib.reload(database)
         result = database._default_db_path()
-        assert result.endswith(r"data\dictionary.db") or result.endswith("data/dictionary.db")
+        assert result.endswith((r"data\dictionary.db", "data/dictionary.db"))
         assert "data" in result
         assert "dictionary.db" in result
 
@@ -66,8 +68,9 @@ class TestDbPathEnvOverride:
         custom_db = tmp_path / "custom.db"
         monkeypatch.setenv("DB_PATH", str(custom_db))
         import backend.database as database
+
         importlib.reload(database)
-        assert database.DB_PATH == str(custom_db)
+        assert str(custom_db) == database.DB_PATH
 
 
 # ── settings CRUD ──────────────────────────────────────────────────────────
@@ -79,6 +82,7 @@ def db(monkeypatch, tmp_path: Path):
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("DB_PATH", str(db_path))
     import backend.database as database
+
     importlib.reload(database)
     yield database
 
@@ -116,7 +120,10 @@ class TestSettingsCrud:
         # Google cookie storage is a JSON-encoded list of cookie objects
         # — can be 5+ KB. Verify SQLite handles the size without issue.
         import json
-        cookies = [{"name": f"c{i}", "value": "x" * 200, "domain": ".google.com"} for i in range(50)]
+
+        cookies = [
+            {"name": f"c{i}", "value": "x" * 200, "domain": ".google.com"} for i in range(50)
+        ]
         payload = json.dumps(cookies)
         db.set_setting("big_payload", payload)
         assert db.get_setting("big_payload") == payload
@@ -146,7 +153,5 @@ class TestInitDb:
 
     def test_init_db_seeds_default_suppressed(self, db):
         with db.get_conn() as conn:
-            count = conn.execute(
-                "SELECT COUNT(*) AS n FROM suppressed_terms"
-            ).fetchone()["n"]
+            count = conn.execute("SELECT COUNT(*) AS n FROM suppressed_terms").fetchone()["n"]
         assert count > 0

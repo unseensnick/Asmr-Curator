@@ -4,9 +4,11 @@
 helpers (URL parsing, anchor text extraction, sidecar discovery) are pure
 and exercise the bug surfaces that recent iterations kept hitting.
 """
+
 import json
 from pathlib import Path
 
+from backend.audio_utils import flatten_dest_parts
 from backend.patreon_fetch import (
     EXTERNAL_HOST_ALLOWLIST,
     ExternalLink,
@@ -21,8 +23,6 @@ from backend.patreon_fetch import (
     _vanity_from_url,
     _walk_prosemirror_nodes,
 )
-from backend.audio_utils import flatten_dest_parts
-
 
 # ── _post_id_from_url ──────────────────────────────────────────────────────
 
@@ -135,9 +135,7 @@ class TestExtractExternalLinks:
         assert _extract_external_links(attrs) == []
 
     def test_extracts_anchor_with_text(self):
-        attrs = {
-            "content": '<p><a href="https://drive.google.com/file/d/A/view">Take One</a></p>'
-        }
+        attrs = {"content": '<p><a href="https://drive.google.com/file/d/A/view">Take One</a></p>'}
         result = _extract_external_links(attrs)
         assert len(result) == 1
         assert result[0].url == "https://drive.google.com/file/d/A/view"
@@ -163,9 +161,7 @@ class TestExtractExternalLinks:
         ]
 
     def test_extracts_iframe_with_empty_text(self):
-        attrs = {
-            "content": '<iframe src="https://drive.google.com/file/d/X/preview"></iframe>'
-        }
+        attrs = {"content": '<iframe src="https://drive.google.com/file/d/X/preview"></iframe>'}
         result = _extract_external_links(attrs)
         assert len(result) == 1
         assert result[0].url == "https://drive.google.com/file/d/X/preview"
@@ -234,9 +230,7 @@ class TestExtractExternalLinks:
                             "marks": [
                                 {
                                     "type": "link",
-                                    "attrs": {
-                                        "href": "https://drive.google.com/file/d/Y/view"
-                                    },
+                                    "attrs": {"href": "https://drive.google.com/file/d/Y/view"},
                                 }
                             ],
                         }
@@ -620,7 +614,10 @@ class TestFindCachedCreatorPosts:
         )
 
         found = _find_cached_creator_posts(
-            output_dir, "solargirlasmr", "2025-10-01", None,
+            output_dir,
+            "solargirlasmr",
+            "2025-10-01",
+            None,
         )
         assert [p.post_id for p in found] == ["200"]
 
@@ -638,7 +635,10 @@ class TestFindCachedCreatorPosts:
         )
 
         found = _find_cached_creator_posts(
-            output_dir, "solargirlasmr", None, "2025-10-01",
+            output_dir,
+            "solargirlasmr",
+            None,
+            "2025-10-01",
         )
         assert [p.post_id for p in found] == ["100"]
 
@@ -666,7 +666,8 @@ class TestFindCachedCreatorPosts:
     def test_skips_corrupt_sidecar(self, tmp_path: Path):
         output_dir = tmp_path / ".patreon-dl"
         _write_creator_sidecar(
-            output_dir / "Patreon" / "creator" / "posts" / "100", "100",
+            output_dir / "Patreon" / "creator" / "posts" / "100",
+            "100",
         )
         bad_dir = output_dir / "Patreon" / "creator" / "posts" / "bad" / "post_info"
         bad_dir.mkdir(parents=True)

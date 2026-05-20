@@ -1,5 +1,4 @@
 """Vision LLM extraction via Ollama + text-only preview for the dictionary test pane."""
-from typing import Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -33,8 +32,7 @@ def _build_extract_prompt() -> str:
         '  "raw_pill_tags": ["each pill/badge tag at the bottom — one entry per badge, keep multi-word badges as a single string verbatim"],\n'
         '  "creator_name": "the channel or creator name shown near a profile picture or avatar, or null if not visible",\n'
         '  "creator_confidence": "high if a clear creator name with profile picture was found, low otherwise"\n'
-        "}"
-        + _vocab_section()
+        "}" + _vocab_section()
     )
 
 
@@ -46,10 +44,7 @@ def _build_preview_prompt(text: str) -> str:
         "{\n"
         '  "raw_title_line": "the full title text as written",\n'
         '  "raw_pill_tags": ["each tag as one string — multi-word tags stay together"]\n'
-        "}\n"
-        + _vocab_section()
-        + "\nText to parse:\n"
-        + text
+        "}\n" + _vocab_section() + "\nText to parse:\n" + text
     )
 
 
@@ -70,7 +65,7 @@ async def _call_ollama(payload: dict) -> str:
 
 class ExtractIn(BaseModel):
     image_b64: str
-    model: Optional[str] = None
+    model: str | None = None
 
 
 @router.post("/api/extract")

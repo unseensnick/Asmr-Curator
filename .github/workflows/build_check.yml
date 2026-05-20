@@ -78,8 +78,14 @@ jobs:
       - name: Install backend dependencies
         run: pip install -r backend/requirements.txt
 
-      - name: Install test dependencies
-        run: pip install pytest pytest-asyncio
+      - name: Install test + lint dependencies
+        run: pip install pytest pytest-asyncio "ruff>=0.8.0"
+
+      - name: Ruff lint
+        run: ruff check backend --config backend/pyproject.toml
+
+      - name: Ruff format check
+        run: ruff format --check backend --config backend/pyproject.toml
 
       - name: Syntax check
         run: python -m compileall -q backend
