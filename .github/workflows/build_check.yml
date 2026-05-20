@@ -151,6 +151,25 @@ jobs:
           path: coverage.xml
           if-no-files-found: warn
 
+  gitleaks:
+    name: Secret scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clone repo
+        uses: actions/checkout@v4
+        with:
+          # Full history so gitleaks diffs against the merge base on
+          # PRs and the previous SHA on direct pushes. Default
+          # fetch-depth=1 only sees the tip commit and misses prior
+          # leaks.
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   publish-test-results:
     name: Publish JUnit reports
     needs: [frontend, backend]
