@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
-from backend.audio_utils import flatten_dest_parts
+from backend.audio_utils import flatten_dest_parts, unique_destination
 
 PATREON_DL_BIN = os.environ.get("PATREON_DL_BIN", "patreon-dl")
 # Hard cap so a runaway creator-wide download can't hang the API forever.
@@ -986,7 +986,7 @@ def _flatten_audio(
         except OSError:
             continue
         # Preserve patreon-dl's original filename inside the per-post folder.
-        target = _unique_path(dest_dir / src.name)
+        target = unique_destination(dest_dir / src.name)
         try:
             shutil.move(str(src), str(target))
         except OSError:
@@ -996,21 +996,6 @@ def _flatten_audio(
         post.audio_path = str(target)
         _rmdir_chain(src.parent, stop_at=patreon_root)
     return posts
-
-
-def _unique_path(target: Path) -> Path:
-    """Return `target`, or `target` with `_2`/`_3`/... if it already exists."""
-    if not target.exists():
-        return target
-    stem = target.stem
-    suffix = target.suffix
-    parent = target.parent
-    n = 2
-    while True:
-        candidate = parent / f"{stem}_{n}{suffix}"
-        if not candidate.exists():
-            return candidate
-        n += 1
 
 
 def _rmdir_chain(start: Path, stop_at: Path) -> None:
