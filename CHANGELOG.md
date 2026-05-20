@@ -13,7 +13,7 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ### Fixes
 
-- **Patches two starlette CVEs** (CVE-2025-54121, CVE-2025-62727) by bumping fastapi to 0.130.0 and pinning starlette to 0.52.1. Found by `pip-audit`, added to CI in the same release; full test suite (219 backend tests, including the new property tests) re-verified against the upgraded stack.
+- **Patches two starlette CVEs** (CVE-2025-54121, CVE-2025-62727) by bumping fastapi to 0.130.0 and pinning starlette to 0.52.1. Affects request-body and multipart handling — pull the new image to pick up the fix.
 - **File-API path validators now return a clean 403 on malformed input** (null bytes, paths the OS refuses to resolve). Previously these surfaced as a 500 with a Python stack trace — defence-in-depth tightening, not a known exploit. Found by a property-based test added in the same release.
 
 ## [2.0.4]
