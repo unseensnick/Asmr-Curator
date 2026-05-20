@@ -1,4 +1,8 @@
-fastapi==0.115.5
+fastapi==0.130.0
+# Pinned explicitly to patch CVE-2025-54121 + CVE-2025-62727 — fastapi
+# 0.130.0's bound (`>=0.40,<0.59`) admits versions older than the fix
+# (0.49.1), so we narrow the floor here.
+starlette==0.52.1
 uvicorn[standard]==0.32.1
 httpx==0.27.2
 mutagen==1.47.0
