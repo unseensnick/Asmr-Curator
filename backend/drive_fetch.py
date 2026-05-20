@@ -408,7 +408,10 @@ async def _dump_diagnostics(page, file_id: str, observed: list[str]) -> Path | N
     viewport-only so off-screen account UI isn't captured; a README warns
     the user the screenshot's page chrome may still show account info.
     """
-    download_path = Path(os.environ.get("DOWNLOAD_PATH", ".")).resolve()
+    # `backend.main` already errors at startup if DOWNLOAD_PATH is unset,
+    # so a missing env var here means the import order changed — fail loud
+    # rather than silently dump diagnostics into the CWD.
+    download_path = Path(os.environ["DOWNLOAD_PATH"]).resolve()
     debug_root = download_path / ".drive-debug"
     out_dir = debug_root / f"{file_id}-{int(time.time())}"
     try:
