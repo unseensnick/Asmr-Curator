@@ -155,7 +155,7 @@ export default function App() {
     }
 
     return (
-        <div className="max-w-[160rem] 2xl:max-w-[200rem] mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 py-8 lg:py-10">
+        <div className="max-w-[160rem] 2xl:max-w-none mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 py-8 lg:py-10">
             <Header
                 dictTagCount={dict.vocabulary.length}
                 onOpenLibrarySettings={() => {
@@ -205,13 +205,13 @@ export default function App() {
                 mobile (1-col stack) or at lg (2-col).
                 items-start lets the Source column grow vertically (results
                 list) without dragging the other columns taller.
-                At 2xl+ (ultrawide territory: 3440-wide and beyond) the
-                proportional 3:4:3 grid would stretch each column past
-                reading comfort, so we cap columns with minmax() and
-                justify-center the row inside the container. FileBrowser
-                sits in its own section below so it can still use the
-                full container width for the file list. */}
-            <section className="mt-8 lg:mt-10 grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-[3fr_4fr_3fr] 2xl:grid-cols-[minmax(0,28rem)_minmax(0,42rem)_minmax(0,28rem)] 2xl:justify-center gap-6 lg:gap-10 items-start">
+                The proportional 3:4:3 grid scales with the container at
+                every breakpoint, including ultrawide — the container cap
+                is removed at 2xl+ so the trio fills the available width
+                rather than centering narrow with background on each side.
+                FileBrowser sits in its own section below so its layout
+                stays independent from the trio. */}
+            <section className="mt-8 lg:mt-10 grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-[3fr_4fr_3fr] gap-6 lg:gap-10 2xl:gap-12 items-start">
                 <div className="order-1 flex flex-col min-h-0">
                     <Tabs
                         value={sourceMode}
@@ -294,11 +294,10 @@ export default function App() {
                 </div>
             </section>
 
-            {/* FileBrowser lives outside the top grid so it can stretch
-                to the full container width on ultrawide screens (the
-                top trio is capped at 2xl+; the FileBrowser file list
-                benefits from horizontal room and is the densest surface
-                on the page). */}
+            {/* FileBrowser lives outside the top grid so its layout is
+                decoupled from the trio's column tracks. Both surfaces
+                expand to the full container width on ultrawide, which
+                is the right shape for a dense file list. */}
             <section className="mt-6 lg:mt-10">
                 <FileBrowser
                     outputDash={outputDash}
