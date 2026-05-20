@@ -13,7 +13,7 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ### Changes
 
-- **The layout scales into ultrawide aspect ratios.** Above the 2xl breakpoint (1536px), the container cap raises from 2560px to 3200px, the top trio (Source / Edit / Output) caps each column at a comfortable reading width and centers in the container, and the FileBrowser below uses the full container width. Users on 21:9 (3440×1440) and 32:9 (5120×1440) monitors get a layout that grows into the screen instead of centred whitespace flanked by background.
+- **The layout scales into ultrawide aspect ratios.** Above the 2xl breakpoint (1536px) the container cap is removed so the 3-column dashboard (Source / Edit / Output) grows proportionally with the screen, and the FileBrowser sits in its own section below at the full container width. Users on 21:9 (3440×1440) and 32:9 / 5K (5120×2160) monitors get controls that fill the screen instead of narrow columns centred with background on each side.
 - **Secondary text in light mode now clears WCAG AA on tinted surfaces.** Log tails, code-block previews, and hints sitting on `bg-muted/40` were borderline against the contrast floor in light mode; the muted-foreground token nudged darker so legibility holds up in daylight.
 
 ### Fixes

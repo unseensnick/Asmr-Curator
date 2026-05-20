@@ -199,7 +199,7 @@
       "Do use JetBrains Mono for every filename, tag chip, raw path, URL, and machine-generated string.",
       "Do floor body text at 1rem and touch targets at 44 by 44px (48 by 48px on the primary CTA which is 3rem tall).",
       "Do put the personality in the seams: long-task narration, empty-state copy, status feedback, the dictionary load-error retry banner.",
-      "Do scale into available room on ultrawide. At 2xl+, cap top-trio column widths and let dense surfaces (FileBrowser) use the full container.",
+      "Do scale into available room on ultrawide. The container is uncapped at 2xl+ and the top trio grows proportionally — controls fill the screen, never centre narrow.",
       "Do respect prefers-reduced-motion: any motion not essential to feedback is stripped behind motion-safe:.",
       "Do verify both light and dark mode at WCAG AA before merging. Both are first-class equals."
     ],
@@ -211,7 +211,7 @@
       "Don't leak backend jargon into UI vocabulary (itag, CDP, signed URL, Playwright, metadata_only, dry_run).",
       "Don't introduce a second saturated accent color. The system is Committed to one warm-cool tension.",
       "Don't go warm-rose, mauve, or sepia. Past iterations failed in those directions.",
-      "Don't hard-cap the layout at SaaS-default 1280-1536px. The 2xl cap is 3200px; FileBrowser uses the full container.",
+      "Don't hard-cap the layout at SaaS-default 1280-1536px, and don't centre narrow columns with empty background on each side at 2xl+. The container uncaps so controls grow proportionally; the trio fills the screen on ultrawide, never sits in the middle.",
       "Don't treat dark as the canonical mode and light as the polite afterthought. Both are first-class.",
       "Don't use orchestrated mount animations or staggered section reveals. Motion is Responsive, not Choreographed.",
       "Don't use side-stripe borders, gradient text, glassmorphism, hero-metric SaaS templates, identical card grids, or modals as a first thought.",

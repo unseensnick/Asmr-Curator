@@ -249,14 +249,14 @@ The dictionary-load failure banner at the top of the page is the canonical recov
 
 ## 6. Ultrawide & responsive
 
-**Built for the desktop, including the wide end.** The 1080p monitor is the floor, not the target. The layout scales into available room rather than hard-capping at SaaS-default 1280–1536px widths. The supported ultrawide aspect ratios — 21:9 (3440×1440), 32:9 (5120×1440), 5K (5120×2160), 8K ultrawide (7680×2160) — should never look like centred whitespace flanked by ten inches of background.
+**Built for the desktop, including the wide end.** The 1080p monitor is the floor, not the target. The layout scales into available room rather than hard-capping at SaaS-default 1280–1536px widths. The supported ultrawide aspect ratios — 21:9 (3440×1440), 32:9 (5120×1440), 5K (5120×2160), 8K ultrawide (7680×2160) — should never look like centred whitespace flanked by background.
 
 ### Layout reflow
 
-- **Container caps:** `max-w-[160rem]` (2560px) at base, `2xl:max-w-[200rem]` (3200px) above the 2xl breakpoint. The wider cap engages on ultrawide viewports without giving up reading width on standard 1080p.
-- **Top trio at xl:** `xl:grid-cols-[3fr_4fr_3fr]` — proportional 3-column dashboard (Source / Edit / Output) that scales with the container.
-- **Top trio at 2xl+:** column widths are capped via `minmax(0, 28rem|42rem|28rem)` so they don't stretch past reading comfort, and the row centers in the container via `justify-content: center`. The trio is intentionally narrower than the container on ultrawide.
-- **FileBrowser stretches:** the file list sits in its own section below the top trio, so it uses the full container width regardless of the trio cap. File lists benefit from horizontal room and are the densest surface on the page.
+- **Container cap:** `max-w-[160rem]` (2560px) at base. **Uncapped at 2xl+** so the trio grows into available room on ultrawide. Padding bumps to `2xl:px-20` (80px) on each side for breathing room at the screen edges.
+- **Top trio at xl+:** `xl:grid-cols-[3fr_4fr_3fr]` — proportional 3-column dashboard (Source / Edit / Output) that scales freely with the container. The trio is wider on a 5K ultrawide than on a 1080p laptop, by design; the controls (URL input, title input, generated filename output) all benefit from horizontal room.
+- **Gap scales too:** `gap-6 lg:gap-10 2xl:gap-12` — slightly more breathing room between columns on ultrawide.
+- **FileBrowser stretches:** the file list sits in its own section below the top trio so its layout stays independent. Both surfaces expand to the full container width on ultrawide.
 
 ### Breakpoint behavior
 
@@ -264,10 +264,10 @@ The dictionary-load failure banner at the top of the page is the canonical recov
 | --- | --- | --- | --- |
 | Mobile (1-col) | full width | stacked (Source / Edit / Output) | full width |
 | `lg` ≥ 1024px | full width | 2-col (Source + Edit), Output spans below | full width |
-| `xl` ≥ 1280px | max 2560px | 3-col proportional 3:4:3 | full width |
-| `2xl` ≥ 1536px | max 3200px | 3-col capped + centered (28/42/28rem) | full container width |
+| `xl` ≥ 1280px | max 2560px | 3-col proportional 3:4:3 | full container width |
+| `2xl` ≥ 1536px | uncapped (full width minus padding) | 3-col proportional 3:4:3 — fills the screen | full container width |
 
-The 32:9 case (5120×1440) is the structural answer, not a stretch: top trio centered at ~1568px, FileBrowser below at the full 3200px container. The wide horizontal space around the trio reads as deliberate, not as empty SaaS centering.
+At 5K ultrawide (5120×2160), the trio takes the entire content width with proportional columns instead of sitting centered with empty space on each side. That's the principle in action: grows into the screen, doesn't centre narrow.
 
 ## 7. Do's and Don'ts
 
@@ -277,7 +277,7 @@ The 32:9 case (5120×1440) is the structural answer, not a stretch: top trio cen
 - **Do** use JetBrains Mono for every filename, tag chip, raw path, URL, and machine-generated string. Use Geist (or Bricolage at the page title) for everything the human writes.
 - **Do** floor body text at 1rem and touch targets at 44 by 44px (48 by 48px on the primary CTA which is 3rem tall).
 - **Do** put the personality in the seams: long-task narration, empty-state copy, status feedback, the dictionary load-error retry banner. The chrome stays utility-shaped; character earns its place where it tells the user something they didn't already know.
-- **Do** scale into available room on ultrawide. At 2xl+, cap top-trio column widths and let dense surfaces (FileBrowser) use the full container.
+- **Do** scale into available room on ultrawide. The container is uncapped at 2xl+, and the top trio grows proportionally — controls should fill the screen, not centre narrow.
 - **Do** respect `prefers-reduced-motion`: any motion not essential to feedback (the URL underline pulse during fetch, the staggered reveal) is stripped behind `motion-safe:`.
 - **Do** verify both light and dark mode at WCAG AA before merging. Both are first-class equals; neither is the canonical surface and bugs in either are equal-priority.
 
@@ -289,7 +289,7 @@ The 32:9 case (5120×1440) is the structural answer, not a stretch: top trio cen
 - **Don't** leak backend jargon into UI vocabulary. No `itag`, `CDP`, `signed URL`, `Playwright`, `metadata_only`, `dry_run`. Plain-English labels, or no label.
 - **Don't** introduce a second saturated accent color. The system is Committed to one warm-cool tension (cool surfaces, warm foreground, teal accent); a second saturated color converts it to Full Palette and breaks the architectural feel.
 - **Don't** go warm-rose, mauve, or sepia. Past iterations have all failed in that direction: warm pink reads as "intense" against the cool slate, mauve reads as "old chair in grandma's house," sepia reads as "brown." The warm-cool tension only works if the warm side is the foreground, not the accent.
-- **Don't** hard-cap the layout at SaaS-default 1280-1536px. The 2xl cap is 3200px; the FileBrowser uses the full container. Ultrawide users (21:9, 32:9) should see a system that grows into their screen, not centred whitespace flanked by background.
+- **Don't** hard-cap the layout at SaaS-default 1280-1536px, and **don't centre narrow columns with empty background on each side at 2xl+**. The container uncaps at 2xl+ so controls grow proportionally; columns should fill the screen on a 5K ultrawide, not sit in the middle. Ultrawide users (21:9, 32:9) should see a system that grows into their screen, not centred whitespace flanked by background.
 - **Don't** treat dark as the "real" mode and light as the polite afterthought. Both are first-class. Bugs in light mode are equal-priority bugs.
 - **Don't** use orchestrated mount animations or staggered section reveals. Motion is Responsive (state changes and feedback only), not Choreographed.
 - **Don't** use side-stripe borders (`border-left` greater than 1px as a colored accent), gradient text, glassmorphism-as-default, hero-metric SaaS templates, identical card grids, or modals as a first thought.
