@@ -53,6 +53,7 @@ import {
     SheetDescription,
     SheetTitle,
 } from "@/components/ui/sheet";
+import { useDragSelect } from "@/hooks/useDragSelect";
 import {
     API,
     apiGet,
@@ -62,6 +63,10 @@ import {
     type FileRoot,
 } from "@/lib/api";
 import { METADATA_COMPATIBLE_EXTS, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
+import {
+    selectAll,
+    selectionFromClick,
+} from "@/lib/explorerSelection";
 import type { FileEntry, ListedDirResponse } from "@/lib/types";
 import { getErrorMessage } from "@/lib/utils";
 
@@ -220,15 +225,6 @@ export default function LibraryExplorerSheet({
     // Cleared on next user action / close.
     const [moveNotice, setMoveNotice] = useState<string | null>(null);
 
-    // Drag-select (rubber-band) state. `dragStart` non-null = a drag is
-    // in progress; `dragRect` is the current rectangle in viewport
-    // coordinates rendered as a translucent overlay. `dragBaseSelection`
-    // captures `selectedPaths` at mousedown so Ctrl/Shift-drag can add
-    // to the previous set instead of replacing.
-    const [dragRect, setDragRect] = useState<
-        { left: number; top: number; width: number; height: number } | null
-    >(null);
-
     // Recursive search results. `null` means folder-listing mode (default,
     // shows the contents of the current subdir). A non-null array means
     // search mode — the filter input is non-empty and we've called
@@ -293,21 +289,22 @@ export default function LibraryExplorerSheet({
     // handlers on every list change.
     const visibleRef = useRef<Entry[] | null>(null);
 
-    // Drag-select (rubber-band) infrastructure. Refs for the bits that
-    // mutate per-mousemove (start point, base selection, last pointer,
-    // auto-scroll RAF handle) so the listener loop doesn't re-render
-    // the tree every frame; `dragRect` stays as state because the
-    // overlay <div> follows it.
-    const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-    const dragStartRef = useRef<{ x: number; y: number } | null>(null);
-    const dragBaseRef = useRef<Set<string>>(new Set());
-    const dragAdditiveRef = useRef(false);
-    const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
-    const autoScrollRafRef = useRef<number | null>(null);
-    // Holds the active drag's `onUp` so the close / unmount paths can
-    // force-tear the window listeners + RAF if the Sheet goes away
-    // before the user releases the mouse.
-    const dragCleanupRef = useRef<(() => void) | null>(null);
+    // Drag-select (rubber-band): the hit-test, auto-scroll RAF, and
+    // window-listener lifecycle all live in `useDragSelect`. The hook
+    // owns its own state for the overlay rectangle and exposes a
+    // `cleanup` we can call from the Sheet's close path so a drag in
+    // flight doesn't leak past unmount.
+    const {
+        scrollContainerRef,
+        onMouseDown: handleListMouseDown,
+        dragRect,
+        cleanup: cleanupDragSelect,
+    } = useDragSelect({
+        selectedPathsRef,
+        renamePathRef,
+        setSelectedPaths,
+        setAnchorPath,
+    });
 
     const resolveMenuTarget = useCallback((e: ReactMouseEvent) => {
         const row = (e.target as HTMLElement | null)?.closest?.(
@@ -462,20 +459,10 @@ export default function LibraryExplorerSheet({
             // Drag-select may still be live if the Sheet closed before
             // the user released the mouse. Tear it down so the window
             // listeners and auto-scroll RAF don't dangle.
-            dragCleanupRef.current?.();
+            cleanupDragSelect();
         }
         onOpenChange(next);
     }
-
-    // Component-unmount safety net for the drag-select listeners — covers
-    // the cases where the parent unmounts the Sheet without first toggling
-    // `open` to false (hot reload, route change).
-    useEffect(() => {
-        return () => {
-            dragCleanupRef.current?.();
-        };
-    }, []);
-
 
     // NOTE(unseensnick): defensive workaround for a Radix focus-scope
     // race. When nested portals (ContextMenu / AlertDialog) close out
@@ -581,12 +568,11 @@ export default function LibraryExplorerSheet({
                 !editable
             ) {
                 const list = visibleRef.current ?? [];
-                if (!list.length) return;
+                const update = selectAll(list);
+                if (!update) return;
                 e.preventDefault();
-                setSelectedPaths(new Set(list.map((en) => en.path)));
-                // Anchor at the first visible entry so a follow-up
-                // Shift-click extends from a sensible reference point.
-                setAnchorPath(list[0].path);
+                setSelectedPaths(update.selected);
+                setAnchorPath(update.anchor);
                 return;
             }
 
@@ -769,32 +755,15 @@ export default function LibraryExplorerSheet({
         entry: Entry,
         opts: { shift: boolean; toggle: boolean },
     ) {
-        // Shift-click extends from the last anchor to the current entry
-        // across the visible list (the same order shown in the UI, which
-        // already handles search-results vs folder-listing).
-        if (opts.shift && anchorPath && visible) {
-            const a = visible.findIndex((e) => e.path === anchorPath);
-            const b = visible.findIndex((e) => e.path === entry.path);
-            if (a >= 0 && b >= 0) {
-                const [lo, hi] = a < b ? [a, b] : [b, a];
-                const range = visible.slice(lo, hi + 1).map((e) => e.path);
-                setSelectedPaths(new Set(range));
-                return;
-            }
-        }
-        if (opts.toggle) {
-            setSelectedPaths((prev) => {
-                const next = new Set(prev);
-                if (next.has(entry.path)) next.delete(entry.path);
-                else next.add(entry.path);
-                return next;
-            });
-            setAnchorPath(entry.path);
-            return;
-        }
-        // Plain click — replace selection with this single entry.
-        setSelectedPaths(new Set([entry.path]));
-        setAnchorPath(entry.path);
+        const update = selectionFromClick(
+            visible ?? [],
+            selectedPathsRef.current,
+            anchorPath,
+            entry.path,
+            opts,
+        );
+        setSelectedPaths(update.selected);
+        setAnchorPath(update.anchor);
     }
 
     function handleEntryClick(entry: Entry, e: ReactMouseEvent) {
@@ -909,129 +878,6 @@ export default function LibraryExplorerSheet({
         } finally {
             setMoveBusy(false);
         }
-    }
-
-    function updateDragSelection(clientX: number, clientY: number) {
-        const start = dragStartRef.current;
-        const container = scrollContainerRef.current;
-        if (!start || !container) return;
-        const left = Math.min(start.x, clientX);
-        const right = Math.max(start.x, clientX);
-        const top = Math.min(start.y, clientY);
-        const bottom = Math.max(start.y, clientY);
-        setDragRect({
-            left,
-            top,
-            width: right - left,
-            height: bottom - top,
-        });
-        const inside = new Set<string>();
-        container
-            .querySelectorAll<HTMLElement>("[data-entry-path]")
-            .forEach((row) => {
-                const r = row.getBoundingClientRect();
-                if (
-                    r.right < left ||
-                    r.left > right ||
-                    r.bottom < top ||
-                    r.top > bottom
-                )
-                    return;
-                const p = row.getAttribute("data-entry-path");
-                if (p) inside.add(p);
-            });
-        const next = dragAdditiveRef.current
-            ? new Set([...dragBaseRef.current, ...inside])
-            : inside;
-        setSelectedPaths(next);
-    }
-
-    function ensureAutoScroll() {
-        // Only run while a drag is active and the pointer is close to an
-        // edge. Idempotent — re-entrant calls noop while the RAF is live.
-        if (autoScrollRafRef.current != null) return;
-        const tick = () => {
-            const container = scrollContainerRef.current;
-            const pointer = lastPointerRef.current;
-            if (!container || !pointer || !dragStartRef.current) {
-                autoScrollRafRef.current = null;
-                return;
-            }
-            const rect = container.getBoundingClientRect();
-            const edge = 40;
-            let dy = 0;
-            if (pointer.y < rect.top + edge) {
-                dy = -Math.max(2, (rect.top + edge - pointer.y) * 0.3);
-            } else if (pointer.y > rect.bottom - edge) {
-                dy = Math.max(2, (pointer.y - (rect.bottom - edge)) * 0.3);
-            }
-            if (dy === 0) {
-                autoScrollRafRef.current = null;
-                return;
-            }
-            container.scrollTop += dy;
-            // Content under the rect shifted — recompute hit-test so
-            // newly-revealed rows get picked up immediately.
-            updateDragSelection(pointer.x, pointer.y);
-            autoScrollRafRef.current = requestAnimationFrame(tick);
-        };
-        autoScrollRafRef.current = requestAnimationFrame(tick);
-    }
-
-    function stopAutoScroll() {
-        if (autoScrollRafRef.current != null) {
-            cancelAnimationFrame(autoScrollRafRef.current);
-            autoScrollRafRef.current = null;
-        }
-    }
-
-    function handleListMouseDown(e: ReactMouseEvent<HTMLDivElement>) {
-        if (e.button !== 0) return;
-        const target = e.target as HTMLElement | null;
-        // Mousedown on a row defers to its click handler — drag-select
-        // only starts in empty space (between rows or below the list).
-        if (target?.closest?.("[data-entry-path]")) return;
-        // Don't drag-select while the inline rename input is showing —
-        // it's already a focus-stealing surface.
-        if (renamePathRef.current) return;
-        e.preventDefault();
-        dragStartRef.current = { x: e.clientX, y: e.clientY };
-        dragBaseRef.current = new Set(selectedPathsRef.current);
-        dragAdditiveRef.current = e.ctrlKey || e.metaKey || e.shiftKey;
-        lastPointerRef.current = { x: e.clientX, y: e.clientY };
-        const onMove = (ev: MouseEvent) => {
-            if (!dragStartRef.current) return;
-            lastPointerRef.current = { x: ev.clientX, y: ev.clientY };
-            updateDragSelection(ev.clientX, ev.clientY);
-            ensureAutoScroll();
-        };
-        const onUp = () => {
-            const start = dragStartRef.current;
-            const last = lastPointerRef.current;
-            // No-drag click in empty space — clear selection if it was a
-            // genuine click (no Shift/Ctrl held to preserve, no
-            // movement). Mirrors what an OS file explorer does when you
-            // click the empty area of a folder.
-            if (start && last) {
-                const moved =
-                    Math.abs(last.x - start.x) > 3 ||
-                    Math.abs(last.y - start.y) > 3;
-                if (!moved && !dragAdditiveRef.current) {
-                    setSelectedPaths(new Set());
-                    setAnchorPath(null);
-                    setDragRect(null);
-                }
-            }
-            dragStartRef.current = null;
-            setDragRect(null);
-            stopAutoScroll();
-            window.removeEventListener("mousemove", onMove);
-            window.removeEventListener("mouseup", onUp);
-            dragCleanupRef.current = null;
-        };
-        window.addEventListener("mousemove", onMove);
-        window.addEventListener("mouseup", onUp);
-        dragCleanupRef.current = onUp;
     }
 
     async function deleteSelection() {
