@@ -12,11 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-    Collapsible,
-    CollapsibleContent,
-    CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { API, apiGet, apiPost, buildQueryString, type FileRoot } from "@/lib/api";
 import type { FileEntry, ListedDirResponse } from "@/lib/types";
@@ -67,9 +63,7 @@ export default function MoveToLibrarySection({
     // `librarySubdir`) so navigation here stays in sync with the
     // LibraryExplorerSheet — filing multiple files into the same
     // destination doesn't re-walk the tree.
-    const [entries, setEntries] = useState<
-        { name: string; type: "file" | "dir" }[] | null
-    >(null);
+    const [entries, setEntries] = useState<{ name: string; type: "file" | "dir" }[] | null>(null);
     const [loading, setLoading] = useState(false);
     const [moving, setMoving] = useState(false);
     // Default off: the move-and-rename is opt-in. Was opt-out previously,
@@ -91,8 +85,7 @@ export default function MoveToLibrarySection({
             setLoading(true);
             try {
                 const data = await apiGet<ListedDirResponse>(
-                    API.files +
-                        buildQueryString({ root: "library", subdir: s }),
+                    API.files + buildQueryString({ root: "library", subdir: s }),
                 );
                 setEntries(
                     data.entries
@@ -158,9 +151,7 @@ export default function MoveToLibrarySection({
             // failed. Surface as a warning so the user knows tags didn't
             // get written; the file is at its new location either way.
             if (data.metadata_error) {
-                onError(
-                    `Moved, but metadata embed failed: ${data.metadata_error}`,
-                );
+                onError(`Moved, but metadata embed failed: ${data.metadata_error}`);
             }
             onMoved(data.to_path, data.new_name);
         } catch (e) {
@@ -225,11 +216,7 @@ export default function MoveToLibrarySection({
                                 key={i}
                                 className="inline-flex items-center gap-1.5 text-muted-foreground"
                             >
-                                <ChevronRight
-                                    size={12}
-                                    aria-hidden
-                                    className="opacity-40"
-                                />
+                                <ChevronRight size={12} aria-hidden className="opacity-40" />
                                 <button
                                     type="button"
                                     onClick={() => popTo(i)}
@@ -268,9 +255,7 @@ export default function MoveToLibrarySection({
                             <Input
                                 autoFocus
                                 value={newFolderName}
-                                onChange={(e) =>
-                                    setNewFolderName(e.target.value)
-                                }
+                                onChange={(e) => setNewFolderName(e.target.value)}
                                 onKeyDown={(e) => {
                                     if (e.key === "Enter") {
                                         e.preventDefault();
@@ -290,9 +275,7 @@ export default function MoveToLibrarySection({
                                 size="sm"
                                 variant="outline"
                                 onClick={handleMkdir}
-                                disabled={
-                                    newFolderBusy || !newFolderName.trim()
-                                }
+                                disabled={newFolderBusy || !newFolderName.trim()}
                                 className="shrink-0"
                                 aria-label="Create folder"
                             >
@@ -318,11 +301,7 @@ export default function MoveToLibrarySection({
                     <div className="bg-muted/40 border border-border rounded-md max-h-[18rem] overflow-y-auto">
                         {loading ? (
                             <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
-                                <Loader2
-                                    size={14}
-                                    aria-hidden
-                                    className="animate-spin shrink-0"
-                                />
+                                <Loader2 size={14} aria-hidden className="animate-spin shrink-0" />
                                 Loading.
                             </div>
                         ) : !entries || entries.length === 0 ? (
@@ -360,16 +339,12 @@ export default function MoveToLibrarySection({
                         <label className="flex items-start gap-2 cursor-pointer select-none">
                             <Checkbox
                                 checked={applyRename}
-                                onCheckedChange={(v) =>
-                                    setApplyRename(v === true)
-                                }
+                                onCheckedChange={(v) => setApplyRename(v === true)}
                                 className="mt-0.5 shrink-0"
                             />
                             <span className="text-xs text-muted-foreground leading-relaxed">
                                 Rename to{" "}
-                                <span className="font-mono text-foreground">
-                                    {pendingNewName}
-                                </span>{" "}
+                                <span className="font-mono text-foreground">{pendingNewName}</span>{" "}
                                 during the move.
                             </span>
                         </label>
@@ -390,11 +365,7 @@ export default function MoveToLibrarySection({
                             size="lg"
                         >
                             {moving ? (
-                                <Loader2
-                                    size={14}
-                                    aria-hidden
-                                    className="animate-spin"
-                                />
+                                <Loader2 size={14} aria-hidden className="animate-spin" />
                             ) : (
                                 <Send size={14} aria-hidden />
                             )}

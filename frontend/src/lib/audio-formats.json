@@ -1,15 +1,25 @@
 {
-  "metadataCompatibleExts": [".mp3", ".flac", ".ogg"],
-  "needsConversionExts": [".wav", ".wma", ".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4a", ".aac"],
-  "outputFormats": [
-    { "value": "mp3",  "label": "MP3",  "lossless": false, "ext": ".mp3"  },
-    { "value": "flac", "label": "FLAC", "lossless": true,  "ext": ".flac" },
-    { "value": "ogg",  "label": "OGG",  "lossless": false, "ext": ".ogg"  }
-  ],
-  "qualityLevels": [
-    { "value": "low",      "label": "Low"      },
-    { "value": "standard", "label": "Standard" },
-    { "value": "high",     "label": "High"     },
-    { "value": "best",     "label": "Best"     }
-  ]
+    "metadataCompatibleExts": [".mp3", ".flac", ".ogg"],
+    "needsConversionExts": [
+        ".wav",
+        ".wma",
+        ".mp4",
+        ".mov",
+        ".avi",
+        ".mkv",
+        ".webm",
+        ".m4a",
+        ".aac"
+    ],
+    "outputFormats": [
+        { "value": "mp3", "label": "MP3", "lossless": false, "ext": ".mp3" },
+        { "value": "flac", "label": "FLAC", "lossless": true, "ext": ".flac" },
+        { "value": "ogg", "label": "OGG", "lossless": false, "ext": ".ogg" }
+    ],
+    "qualityLevels": [
+        { "value": "low", "label": "Low" },
+        { "value": "standard", "label": "Standard" },
+        { "value": "high", "label": "High" },
+        { "value": "best", "label": "Best" }
+    ]
 }

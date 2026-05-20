@@ -1,16 +1,8 @@
 import { AlertTriangle, File, Music2 } from "lucide-react";
 
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-    Tooltip,
-    TooltipContent,
-    TooltipProvider,
-    TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
-    METADATA_COMPATIBLE_EXTS,
-    NEEDS_CONVERSION_EXTS,
-} from "@/lib/audioFormats";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { METADATA_COMPATIBLE_EXTS, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
 import type { FileEntry } from "@/lib/types";
 
 interface FileBrowserItemProps {
@@ -47,8 +39,7 @@ export default function FileBrowserItem({
     onClick,
     onBatchToggle,
 }: FileBrowserItemProps) {
-    const fileNeedsConversion =
-        !!file.needs_conversion || NEEDS_CONVERSION_EXTS.has(file.ext);
+    const fileNeedsConversion = !!file.needs_conversion || NEEDS_CONVERSION_EXTS.has(file.ext);
 
     const highlight = batchMode ? isBatchSelected : isSelected;
     const rowClass = highlight
@@ -80,9 +71,7 @@ export default function FileBrowserItem({
                             )}
                         </div>
                         {fileNeedsConversion && (
-                            <span className="text-xs text-warning shrink-0">
-                                Convert
-                            </span>
+                            <span className="text-xs text-warning shrink-0">Convert</span>
                         )}
                     </div>
                 </TooltipTrigger>
@@ -90,9 +79,7 @@ export default function FileBrowserItem({
                     <div className="flex flex-col gap-0.5 font-mono text-left">
                         <span className="break-all">{file.name}</span>
                         {file.folder && (
-                            <span className="text-background/70 break-all">
-                                {file.folder}/
-                            </span>
+                            <span className="text-background/70 break-all">{file.folder}/</span>
                         )}
                     </div>
                 </TooltipContent>
@@ -103,26 +90,8 @@ export default function FileBrowserItem({
 
 function FileIcon({ ext }: { ext: string }) {
     if (NEEDS_CONVERSION_EXTS.has(ext))
-        return (
-            <AlertTriangle
-                size={18}
-                aria-hidden
-                className="text-warning shrink-0"
-            />
-        );
+        return <AlertTriangle size={18} aria-hidden className="text-warning shrink-0" />;
     if (METADATA_COMPATIBLE_EXTS.has(ext))
-        return (
-            <Music2
-                size={18}
-                aria-hidden
-                className="text-success shrink-0"
-            />
-        );
-    return (
-        <File
-            size={18}
-            aria-hidden
-            className="text-muted-foreground shrink-0"
-        />
-    );
+        return <Music2 size={18} aria-hidden className="text-success shrink-0" />;
+    return <File size={18} aria-hidden className="text-muted-foreground shrink-0" />;
 }

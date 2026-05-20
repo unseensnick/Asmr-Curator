@@ -10,11 +10,7 @@ import {
     ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { Input } from "@/components/ui/input";
-import {
-    Popover,
-    PopoverAnchor,
-    PopoverContent,
-} from "@/components/ui/popover";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import type { VocabEntry } from "@/lib/types";
 
 interface TagChipProps {
@@ -197,9 +193,7 @@ export default function TagChip({
                 aria-hidden
                 className="text-muted-foreground/60 opacity-0 group-hover/chip:opacity-100 group-focus-within/chip:opacity-100 transition-opacity shrink-0"
             />
-            <span className="font-mono text-xs text-foreground leading-none">
-                {label}
-            </span>
+            <span className="font-mono text-xs text-foreground leading-none">{label}</span>
             <button
                 type="button"
                 onClick={(e) => {
@@ -245,15 +239,9 @@ export default function TagChip({
                     </ContextMenuItem>
                     <ContextMenuSeparator />
                     <ContextMenuItem
-                        disabled={
-                            !onPromoteToAlias ||
-                            promoting ||
-                            vocabulary.length === 0
-                        }
+                        disabled={!onPromoteToAlias || promoting || vocabulary.length === 0}
                         onSelect={() => {
-                            requestAnimationFrame(() =>
-                                setAliasPickerOpen(true),
-                            );
+                            requestAnimationFrame(() => setAliasPickerOpen(true));
                         }}
                     >
                         <Plus aria-hidden />
@@ -262,11 +250,7 @@ export default function TagChip({
                 </ContextMenuContent>
             </ContextMenu>
             <PopoverContent side="bottom" align="start" className="w-72 p-2">
-                <AliasPicker
-                    label={label}
-                    vocabulary={vocabulary}
-                    onPick={handlePickAlias}
-                />
+                <AliasPicker label={label} vocabulary={vocabulary} onPick={handlePickAlias} />
             </PopoverContent>
         </Popover>
     );
@@ -306,9 +290,7 @@ function AliasPicker({ label, vocabulary, onPick }: AliasPickerProps) {
         <div className="flex flex-col gap-2">
             <div className="flex flex-col gap-1 px-1">
                 <p className="text-xs text-muted-foreground">
-                    Add{" "}
-                    <span className="font-mono text-foreground">{label}</span>{" "}
-                    as an alias of:
+                    Add <span className="font-mono text-foreground">{label}</span> as an alias of:
                 </p>
             </div>
             <Input
@@ -337,9 +319,7 @@ function AliasPicker({ label, vocabulary, onPick }: AliasPickerProps) {
                             onClick={() => onPick(entry)}
                             className="flex flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:outline-none transition-colors"
                         >
-                            <span className="font-mono text-foreground">
-                                {entry.canonical}
-                            </span>
+                            <span className="font-mono text-foreground">{entry.canonical}</span>
                             {entry.aliases.length > 0 && (
                                 <span className="font-mono text-[10px] text-muted-foreground truncate max-w-full">
                                     {entry.aliases.join(", ")}

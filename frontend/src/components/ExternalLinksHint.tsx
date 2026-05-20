@@ -33,7 +33,12 @@ type RowState =
  *
  * Per-row state is local (one URL succeeds or fails independently of others).
  */
-export default function ExternalLinksHint({ postId, artist, title, links }: ExternalLinksHintProps) {
+export default function ExternalLinksHint({
+    postId,
+    artist,
+    title,
+    links,
+}: ExternalLinksHintProps) {
     if (!links.length) return null;
     const n = links.length;
     return (
@@ -96,9 +101,10 @@ function stageLabel(event: IngestDriveLinkEvent): string {
             // full body; the backend retries the same URL automatically.
             // When retry_attempt > 1, prefix the stage so the user knows
             // it isn't stuck.
-            const retryPrefix = event.retry_attempt && event.retry_attempt > 1
-                ? `Retry ${event.retry_attempt}/${event.max_attempts ?? "?"}: `
-                : "";
+            const retryPrefix =
+                event.retry_attempt && event.retry_attempt > 1
+                    ? `Retry ${event.retry_attempt}/${event.max_attempts ?? "?"}: `
+                    : "";
             if (event.bytes != null && event.total != null && event.total > 0) {
                 const pct = ((event.bytes / event.total) * 100).toFixed(0);
                 return `${retryPrefix}Downloading ${formatMB(event.bytes)} / ${formatMB(event.total)} (${pct}%)`;

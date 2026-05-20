@@ -3,11 +3,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-    Collapsible,
-    CollapsibleContent,
-    CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Textarea } from "@/components/ui/textarea";
 import { API, apiPost } from "@/lib/api";
 import { parseLlmJson, parseTitleLine } from "@/lib/parser";
@@ -30,10 +26,7 @@ export interface DictionaryTesterProps {
     onQuickFix: (action: "vocab" | "suppress", token: string) => void;
 }
 
-export default function DictionaryTester({
-    dict,
-    onQuickFix,
-}: DictionaryTesterProps) {
+export default function DictionaryTester({ dict, onQuickFix }: DictionaryTesterProps) {
     const [raw, setRaw] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -54,10 +47,9 @@ export default function DictionaryTester({
         setRawLlmText("");
         setHasRun(true);
         try {
-            const { raw_text } = await apiPost<{ raw_text: string }>(
-                API.previewTags,
-                { text: raw },
-            );
+            const { raw_text } = await apiPost<{ raw_text: string }>(API.previewTags, {
+                text: raw,
+            });
             setRawLlmText(raw_text);
 
             const { raw_title_line, raw_pill_tags } = parseLlmJson(raw_text);
@@ -91,10 +83,8 @@ export default function DictionaryTester({
     }
 
     const matchedCount = result?.tags.filter((t) => t.canonical).length ?? 0;
-    const novelCount =
-        result?.tags.filter((t) => !t.canonical && !t.suppressed).length ?? 0;
-    const suppressedCount =
-        result?.tags.filter((t) => t.suppressed).length ?? 0;
+    const novelCount = result?.tags.filter((t) => !t.canonical && !t.suppressed).length ?? 0;
+    const suppressedCount = result?.tags.filter((t) => t.suppressed).length ?? 0;
 
     return (
         <div className="flex flex-col flex-1 min-h-0">
@@ -107,9 +97,8 @@ export default function DictionaryTester({
                         className="shrink-0 mt-1 text-muted-foreground/70"
                     />
                     <span>
-                        Paste raw post text to see how the LLM extracts title
-                        and tags against your vocabulary. Uses the same Ollama
-                        backend as the Screenshot panel.
+                        Paste raw post text to see how the LLM extracts title and tags against your
+                        vocabulary. Uses the same Ollama backend as the Screenshot panel.
                     </span>
                 </p>
 
@@ -123,11 +112,7 @@ export default function DictionaryTester({
                 />
 
                 <div className="flex items-center justify-end gap-3">
-                    <Button
-                        onClick={run}
-                        disabled={loading || !raw.trim()}
-                        className="gap-2"
-                    >
+                    <Button onClick={run} disabled={loading || !raw.trim()} className="gap-2">
                         {loading ? (
                             <Loader2 size={14} aria-hidden className="animate-spin" />
                         ) : (
@@ -139,18 +124,13 @@ export default function DictionaryTester({
 
                 {error && (
                     <Alert variant="destructive" className="py-2">
-                        <AlertDescription className="text-sm">
-                            {error}
-                        </AlertDescription>
+                        <AlertDescription className="text-sm">{error}</AlertDescription>
                     </Alert>
                 )}
             </div>
 
             {/* Scrollable results / empty state */}
-            <div
-                ref={scrollRef}
-                className="flex-1 min-h-0 overflow-y-auto px-6 pb-4"
-            >
+            <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-6 pb-4">
                 {result ? (
                     <div className="flex flex-col gap-3 pt-2">
                         {/* Title block */}
@@ -185,15 +165,8 @@ export default function DictionaryTester({
                                         <TagRow
                                             key={i}
                                             tag={t}
-                                            onAddToVocab={() =>
-                                                onQuickFix("vocab", t.raw)
-                                            }
-                                            onSuppress={() =>
-                                                onQuickFix(
-                                                    "suppress",
-                                                    t.raw,
-                                                )
-                                            }
+                                            onAddToVocab={() => onQuickFix("vocab", t.raw)}
+                                            onSuppress={() => onQuickFix("suppress", t.raw)}
                                         />
                                     ))}
                                 </div>
@@ -203,8 +176,8 @@ export default function DictionaryTester({
                         {/* Summary */}
                         {result.tags.length > 0 && (
                             <p className="text-xs text-muted-foreground font-mono tabular-nums">
-                                {matchedCount} matched · {novelCount} novel ·{" "}
-                                {suppressedCount} suppressed
+                                {matchedCount} matched · {novelCount} novel · {suppressedCount}{" "}
+                                suppressed
                             </p>
                         )}
 
@@ -272,13 +245,10 @@ function TagRow({ tag, onAddToVocab, onSuppress }: TagRowProps) {
         );
     }
     if (tag.canonical) {
-        const wasDifferent =
-            tag.canonical.toLowerCase() !== tag.raw.toLowerCase();
+        const wasDifferent = tag.canonical.toLowerCase() !== tag.raw.toLowerCase();
         return (
             <div className="flex items-center gap-2 flex-wrap py-1.5">
-                <span className="font-mono text-sm text-foreground">
-                    {tag.canonical}
-                </span>
+                <span className="font-mono text-sm text-foreground">{tag.canonical}</span>
                 <StatusPill kind="matched" />
                 {wasDifferent && (
                     <span className="font-mono text-xs text-muted-foreground/70">
@@ -290,9 +260,7 @@ function TagRow({ tag, onAddToVocab, onSuppress }: TagRowProps) {
     }
     return (
         <div className="flex items-center gap-2 flex-wrap py-1.5">
-            <span className="font-mono text-sm text-foreground">
-                {tag.raw}
-            </span>
+            <span className="font-mono text-sm text-foreground">{tag.raw}</span>
             <StatusPill kind="novel" />
             <div className="flex items-center gap-1.5 ml-auto">
                 <Button

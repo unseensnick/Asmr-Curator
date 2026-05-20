@@ -47,26 +47,11 @@ import {
     ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { Input } from "@/components/ui/input";
-import {
-    Sheet,
-    SheetContent,
-    SheetDescription,
-    SheetTitle,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { useDragSelect } from "@/hooks/useDragSelect";
-import {
-    API,
-    apiGet,
-    apiPost,
-    buildQueryString,
-    moveBatchStream,
-    type FileRoot,
-} from "@/lib/api";
+import { API, apiGet, apiPost, buildQueryString, moveBatchStream, type FileRoot } from "@/lib/api";
 import { METADATA_COMPATIBLE_EXTS, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
-import {
-    selectAll,
-    selectionFromClick,
-} from "@/lib/explorerSelection";
+import { selectAll, selectionFromClick } from "@/lib/explorerSelection";
 import type { FileEntry, ListedDirResponse } from "@/lib/types";
 import { getErrorMessage } from "@/lib/utils";
 
@@ -186,8 +171,7 @@ export default function LibraryExplorerSheet({
     const [newFolderName, setNewFolderName] = useState("");
     const [newFolderBusy, setNewFolderBusy] = useState(false);
 
-    const [deleteCandidate, setDeleteCandidate] =
-        useState<DeleteCandidate | null>(null);
+    const [deleteCandidate, setDeleteCandidate] = useState<DeleteCandidate | null>(null);
     const [deleteBusy, setDeleteBusy] = useState(false);
 
     // Inline rename. `renamePath` matches a single entry's `path` while
@@ -217,9 +201,7 @@ export default function LibraryExplorerSheet({
     // navigation (the whole point — you cut here, navigate elsewhere,
     // paste there) until paste, Escape, or Sheet close clears it.
     const [cutPaths, setCutPaths] = useState<Set<string> | null>(null);
-    const [cutOrigin, setCutOrigin] = useState<
-        { root: FileRoot; subdir: string } | null
-    >(null);
+    const [cutOrigin, setCutOrigin] = useState<{ root: FileRoot; subdir: string } | null>(null);
     const [moveBusy, setMoveBusy] = useState(false);
     // Transient post-move banner ("Moved 4 of 5. Couldn't move foo: …").
     // Cleared on next user action / close.
@@ -231,9 +213,7 @@ export default function LibraryExplorerSheet({
     // /api/files/search?subdir=<current>&q=… so the user can find files
     // buried deeper in the tree without drilling. Empty array = no
     // matches.
-    const [searchResults, setSearchResults] = useState<FileEntry[] | null>(
-        null,
-    );
+    const [searchResults, setSearchResults] = useState<FileEntry[] | null>(null);
     const [searchBusy, setSearchBusy] = useState(false);
 
     // Whatever row the cursor is currently hovering, or null when the
@@ -307,9 +287,7 @@ export default function LibraryExplorerSheet({
     });
 
     const resolveMenuTarget = useCallback((e: ReactMouseEvent) => {
-        const row = (e.target as HTMLElement | null)?.closest?.(
-            "[data-entry-path]",
-        );
+        const row = (e.target as HTMLElement | null)?.closest?.("[data-entry-path]");
         if (!row) {
             setMenuTarget(null);
             return;
@@ -320,9 +298,7 @@ export default function LibraryExplorerSheet({
     }, []);
 
     const handleBodyMouseOver = useCallback((e: ReactMouseEvent) => {
-        const row = (e.target as HTMLElement | null)?.closest?.(
-            "[data-entry-path]",
-        );
+        const row = (e.target as HTMLElement | null)?.closest?.("[data-entry-path]");
         if (!row) {
             hoverRef.current = null;
             return;
@@ -401,12 +377,12 @@ export default function LibraryExplorerSheet({
             try {
                 const data = await apiGet<SearchResponse>(
                     API.search +
-                    buildQueryString({
-                        root,
-                        q,
-                        search_in: "both",
-                        subdir,
-                    }),
+                        buildQueryString({
+                            root,
+                            q,
+                            search_in: "both",
+                            subdir,
+                        }),
                 );
                 if (stale) return;
                 setSearchResults(data.files);
@@ -478,9 +454,7 @@ export default function LibraryExplorerSheet({
         if (!open) return;
         const id = window.setTimeout(() => {
             document
-                .querySelectorAll<HTMLElement>(
-                    '[data-slot="sheet-content"][data-state="open"]',
-                )
+                .querySelectorAll<HTMLElement>('[data-slot="sheet-content"][data-state="open"]')
                 .forEach((el) => {
                     if (el.getAttribute("aria-hidden") === "true") {
                         el.removeAttribute("aria-hidden");
@@ -489,15 +463,7 @@ export default function LibraryExplorerSheet({
                 });
         }, 0);
         return () => window.clearTimeout(id);
-    }, [
-        open,
-        menuTarget,
-        cutPaths,
-        moveNotice,
-        deleteCandidate,
-        moveBusy,
-        renamePath,
-    ]);
+    }, [open, menuTarget, cutPaths, moveNotice, deleteCandidate, moveBusy, renamePath]);
 
     // File-explorer hotkeys: N / F2 / Del.
     //
@@ -521,9 +487,7 @@ export default function LibraryExplorerSheet({
             const target = e.target as HTMLElement | null;
             const tag = target?.tagName ?? "";
             const editable =
-                tag === "INPUT" ||
-                tag === "TEXTAREA" ||
-                target?.isContentEditable === true;
+                tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable === true;
 
             // Ctrl/Cmd+X — stage selection for move. Library only.
             if (
@@ -583,9 +547,7 @@ export default function LibraryExplorerSheet({
                 // refuse outright). Refuse outright + hint, so the user
                 // doesn't lose their selection to a half-applied rename.
                 if (selectedPathsRef.current.size > 1) {
-                    setMoveNotice(
-                        "Rename only works on one item at a time.",
-                    );
+                    setMoveNotice("Rename only works on one item at a time.");
                     return;
                 }
                 // Anchor wins over hover/menuTarget when a single-item
@@ -595,12 +557,9 @@ export default function LibraryExplorerSheet({
                 const list = visibleRef.current ?? [];
                 const fromAnchor =
                     anchorPathRef.current && selectedPathsRef.current.size === 1
-                        ? list.find(
-                            (en) => en.path === anchorPathRef.current,
-                        ) ?? null
+                        ? (list.find((en) => en.path === anchorPathRef.current) ?? null)
                         : null;
-                const ent =
-                    fromAnchor ?? hoverRef.current ?? menuTargetRef.current;
+                const ent = fromAnchor ?? hoverRef.current ?? menuTargetRef.current;
                 if (!ent) return;
                 e.preventDefault();
                 startRename(ent);
@@ -751,10 +710,7 @@ export default function LibraryExplorerSheet({
         handleOpenChange(false);
     }
 
-    function handleSelect(
-        entry: Entry,
-        opts: { shift: boolean; toggle: boolean },
-    ) {
+    function handleSelect(entry: Entry, opts: { shift: boolean; toggle: boolean }) {
         const update = selectionFromClick(
             visible ?? [],
             selectedPathsRef.current,
@@ -834,9 +790,7 @@ export default function LibraryExplorerSheet({
             return;
         }
         setMoveBusy(true);
-        setMoveNotice(
-            `Moving 0 / ${cut.size} ${cut.size === 1 ? "item" : "items"}…`,
-        );
+        setMoveNotice(`Moving 0 / ${cut.size} ${cut.size === 1 ? "item" : "items"}…`);
         try {
             const data = await moveBatchStream(
                 {
@@ -846,24 +800,19 @@ export default function LibraryExplorerSheet({
                 },
                 (event) => {
                     if (event.event === "item") {
-                        setMoveNotice(
-                            `Moving ${event.index + 1} / ${event.total}…`,
-                        );
+                        setMoveNotice(`Moving ${event.index + 1} / ${event.total}…`);
                     }
                 },
             );
             const total = data.results.length;
             const fails = data.results.filter((r) => !r.ok);
             if (fails.length === 0) {
-                setMoveNotice(
-                    `Moved ${data.moved} ${data.moved === 1 ? "item" : "items"}.`,
-                );
+                setMoveNotice(`Moved ${data.moved} ${data.moved === 1 ? "item" : "items"}.`);
             } else {
                 // Show the first failure's reason so the user sees the
                 // concrete cause. Subsequent failures get a generic suffix.
                 const first = fails[0];
-                const tail =
-                    fails.length > 1 ? ` (+${fails.length - 1} more)` : "";
+                const tail = fails.length > 1 ? ` (+${fails.length - 1} more)` : "";
                 setMoveNotice(
                     `Moved ${data.moved} of ${total}. Couldn't move ${first.from_path}: ${first.error?.message ?? "unknown error"}${tail}`,
                 );
@@ -897,12 +846,8 @@ export default function LibraryExplorerSheet({
         const fileCount = entries.filter((en) => en.type === "file").length;
         const folderCount = entries.length - fileCount;
         const summary = [
-            fileCount > 0
-                ? `${fileCount} ${fileCount === 1 ? "file" : "files"}`
-                : null,
-            folderCount > 0
-                ? `${folderCount} ${folderCount === 1 ? "folder" : "folders"}`
-                : null,
+            fileCount > 0 ? `${fileCount} ${fileCount === 1 ? "file" : "files"}` : null,
+            folderCount > 0 ? `${folderCount} ${folderCount === 1 ? "folder" : "folders"}` : null,
         ]
             .filter(Boolean)
             .join(" and ");
@@ -1008,9 +953,7 @@ export default function LibraryExplorerSheet({
                 setAnchorPath(null);
                 loadSubdir(subdir, root);
                 if (failures.length) {
-                    setError(
-                        `Couldn't delete ${failures.length} item(s). First: ${failures[0]}`,
-                    );
+                    setError(`Couldn't delete ${failures.length} item(s). First: ${failures[0]}`);
                 }
                 return;
             }
@@ -1056,8 +999,8 @@ export default function LibraryExplorerSheet({
                     f.folder === subdir
                         ? ""
                         : prefix && f.folder.startsWith(prefix)
-                            ? f.folder.slice(prefix.length)
-                            : f.folder,
+                          ? f.folder.slice(prefix.length)
+                          : f.folder,
             }));
         }
         if (!entries) return null;
@@ -1117,19 +1060,17 @@ export default function LibraryExplorerSheet({
                 >
                     <SheetTitle className="sr-only">Browse files</SheetTitle>
                     <SheetDescription className="sr-only">
-                        Navigate the library and downloads folder trees. The
-                        left rail switches between roots. In Library, click a
-                        file to select, double-click to open, right-click for
-                        actions, F2 to rename, Delete to delete, N for new
-                        folder, Ctrl/Cmd+X then Ctrl/Cmd+V to cut and paste.
-                        In Downloads, click a file to open it in the work
-                        area.
+                        Navigate the library and downloads folder trees. The left rail switches
+                        between roots. In Library, click a file to select, double-click to open,
+                        right-click for actions, F2 to rename, Delete to delete, N for new folder,
+                        Ctrl/Cmd+X then Ctrl/Cmd+V to cut and paste. In Downloads, click a file to
+                        open it in the work area.
                     </SheetDescription>
 
                     {/* Header — spans the full Sheet width above the rail
-                 *  + main split. Lives outside the ContextMenu wrapper
-                 *  so right-click on the title bar uses the browser
-                 *  default (the file menu is content-only). */}
+                     *  + main split. Lives outside the ContextMenu wrapper
+                     *  so right-click on the title bar uses the browser
+                     *  default (the file menu is content-only). */}
                     <div className="flex items-center gap-3 px-5 py-4 border-b border-border shrink-0">
                         <span className="text-sm font-medium tracking-wide text-foreground">
                             Browse files
@@ -1167,12 +1108,12 @@ export default function LibraryExplorerSheet({
                     </div>
 
                     {/* Body — horizontal split. Left rail = root selector
-                 *  (Library / Downloads), always visible so root
-                 *  switching is one click away. Right column = the
-                 *  active root's content, wrapped in the ContextMenu
-                 *  so right-click anywhere in the file area opens the
-                 *  Sheet's own menu (and right-click on the rail
-                 *  falls through to the browser default). */}
+                     *  (Library / Downloads), always visible so root
+                     *  switching is one click away. Right column = the
+                     *  active root's content, wrapped in the ContextMenu
+                     *  so right-click anywhere in the file area opens the
+                     *  Sheet's own menu (and right-click on the rail
+                     *  falls through to the browser default). */}
                     <div className="flex flex-1 min-h-0">
                         <aside
                             className="flex flex-col gap-1 w-40 shrink-0 px-3 py-3 border-r border-border bg-muted/15"
@@ -1201,7 +1142,7 @@ export default function LibraryExplorerSheet({
                                     onMouseLeave={handleBodyMouseLeave}
                                 >
                                     {/* Action row: filter input + New folder + Refresh. Stays
-                 *  one line at every width thanks to flex-1 on the filter. */}
+                                     *  one line at every width thanks to flex-1 on the filter. */}
                                     <div className="flex items-center gap-2 px-5 py-2.5 border-b border-border shrink-0">
                                         <div className="relative flex-1 min-w-0">
                                             <Search
@@ -1222,10 +1163,10 @@ export default function LibraryExplorerSheet({
                                             />
                                         </div>
                                         {/* New folder is library-only: /api/mkdir is scoped
-                     *  to LIBRARY_PATH (curating Downloads makes no sense
-                     *  — it's transient ingest staging). The button hides
-                     *  rather than disables so the toolbar stays uncluttered
-                     *  on the views where it isn't an option. */}
+                                         *  to LIBRARY_PATH (curating Downloads makes no sense
+                                         *  — it's transient ingest staging). The button hides
+                                         *  rather than disables so the toolbar stays uncluttered
+                                         *  on the views where it isn't an option. */}
                                         {root === "library" && (
                                             <Button
                                                 size="sm"
@@ -1260,9 +1201,9 @@ export default function LibraryExplorerSheet({
                                     </div>
 
                                     {/* Breadcrumb row: leads with the active root (Library
-                 *  or Downloads). The rail handles root *switching*; the
-                 *  breadcrumb root crumb pops to the chosen root's top
-                 *  level (resets subdir to "").  */}
+                                     *  or Downloads). The rail handles root *switching*; the
+                                     *  breadcrumb root crumb pops to the chosen root's top
+                                     *  level (resets subdir to "").  */}
                                     <div className="flex items-center gap-1.5 flex-wrap px-5 py-2 border-b border-border shrink-0 text-xs">
                                         <button
                                             type="button"
@@ -1293,15 +1234,15 @@ export default function LibraryExplorerSheet({
                                     </div>
 
                                     {/* Move/cut banner — a single mode-switching slot that
-                 *  carries three states: a cut clipboard waiting to
-                 *  paste (Scissors + Paste/Cancel buttons), an in-
-                 *  flight paste (spinning Loader + progress message),
-                 *  and a completed paste notice (Check + dismiss X).
-                 *  The previous design had two separate banners that
-                 *  could stack during a paste — collapsing them keeps
-                 *  the chrome's row count predictable. aria-live=polite
-                 *  so SR users hear progress and final results without
-                 *  losing focus. */}
+                                     *  carries three states: a cut clipboard waiting to
+                                     *  paste (Scissors + Paste/Cancel buttons), an in-
+                                     *  flight paste (spinning Loader + progress message),
+                                     *  and a completed paste notice (Check + dismiss X).
+                                     *  The previous design had two separate banners that
+                                     *  could stack during a paste — collapsing them keeps
+                                     *  the chrome's row count predictable. aria-live=polite
+                                     *  so SR users hear progress and final results without
+                                     *  losing focus. */}
                                     {(() => {
                                         const cutCount = cutPaths?.size ?? 0;
                                         const visible =
@@ -1343,10 +1284,7 @@ export default function LibraryExplorerSheet({
                                                             onClick={pasteHere}
                                                             className="h-6 px-2 text-xs"
                                                         >
-                                                            <ClipboardPaste
-                                                                size={12}
-                                                                aria-hidden
-                                                            />
+                                                            <ClipboardPaste size={12} aria-hidden />
                                                             Paste here
                                                         </Button>
                                                         <Button
@@ -1445,7 +1383,8 @@ export default function LibraryExplorerSheet({
                                      *  wins. */}
                                     {visible && visible.length > 0 && (
                                         <p className="px-5 py-1.5 text-[11px] italic text-muted-foreground/70 border-b border-border shrink-0">
-                                            Click to select. Double-click to open. Right-click for more.
+                                            Click to select. Double-click to open. Right-click for
+                                            more.
                                         </p>
                                     )}
 
@@ -1460,114 +1399,118 @@ export default function LibraryExplorerSheet({
                                         aria-busy={isSearching ? searchBusy : loading}
                                         aria-label={`${rootLabel(root)} contents`}
                                     >
-                                        {(
+                                        {
                                             // While typing, `isSearching` flips true on the
                                             // same render the filter changes but `searchBusy`
                                             // is only set inside the debounce effect that
                                             // runs after — the `searchResults === null` guard
                                             // prevents the empty-state from flickering for
                                             // one frame.
-                                            isSearching
-                                                ? searchBusy || searchResults === null
-                                                : loading
-                                        ) ? (
-                                            <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
-                                                <Loader2
-                                                    size={14}
-                                                    aria-hidden
-                                                    className="animate-spin shrink-0"
-                                                />
-                                                {isSearching ? "Searching." : "Loading."}
-                                            </div>
-                                        ) : !visible || visible.length === 0 ? (
-                                            <div className="flex items-center justify-center py-10 text-sm text-muted-foreground italic px-4 text-center leading-relaxed">
-                                                {isSearching
-                                                    ? subdir
-                                                        ? `No matches under ${breadcrumbs[breadcrumbs.length - 1]}.`
-                                                        : `No matches in ${rootLabel(root).toLowerCase()}.`
-                                                    : subdir
-                                                        ? root === "library"
-                                                            ? "Empty folder. Use New folder to add subfolders."
-                                                            : "Empty folder."
-                                                        : root === "library"
+                                            (
+                                                isSearching
+                                                    ? searchBusy || searchResults === null
+                                                    : loading
+                                            ) ? (
+                                                <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+                                                    <Loader2
+                                                        size={14}
+                                                        aria-hidden
+                                                        className="animate-spin shrink-0"
+                                                    />
+                                                    {isSearching ? "Searching." : "Loading."}
+                                                </div>
+                                            ) : !visible || visible.length === 0 ? (
+                                                <div className="flex items-center justify-center py-10 text-sm text-muted-foreground italic px-4 text-center leading-relaxed">
+                                                    {isSearching
+                                                        ? subdir
+                                                            ? `No matches under ${breadcrumbs[breadcrumbs.length - 1]}.`
+                                                            : `No matches in ${rootLabel(root).toLowerCase()}.`
+                                                        : subdir
+                                                          ? root === "library"
+                                                              ? "Empty folder. Use New folder to add subfolders."
+                                                              : "Empty folder."
+                                                          : root === "library"
                                                             ? "Nothing filed yet. When you've fetched a post you can move it in here from Downloads."
                                                             : "No pending downloads."}
-                                            </div>
-                                        ) : (
-                                            <>
-                                                {/* Cut-state SR hint. Rows in the cut clipboard
-                             *  reference this via aria-describedby so screen
-                             *  readers announce "Marked for move" alongside
-                             *  the visual italic + opacity treatment. */}
-                                                <span id="lex-cut-hint" className="sr-only">
-                                                    Marked for move.
-                                                </span>
-                                                {/* Bundle the two pieces of state the row's
-                             *  callbacks branch on but EntryRow doesn't
-                             *  visibly render. Memo's comparator picks
-                             *  this up; drag-select (root + anchor
-                             *  unchanged) lets unaffected rows skip
-                             *  re-renders entirely. */}
-                                                {(() => {
-                                                    const cacheKey = `${root}:${anchorPath ?? ""}`;
-                                                    return visible.map((entry, idx) => {
-                                                        const activateVerb =
-                                                            entry.type === "dir"
-                                                                ? "drill in"
-                                                                : "open";
-                                                        const rowTitle = `Double-click to ${activateVerb} · F2 to rename · Del to delete`;
-                                                        const isRowRenaming =
-                                                            renamePath === entry.path;
-                                                        return (
-                                                            <MemoEntryRow
-                                                                key={entry.path}
-                                                                entry={entry}
-                                                                isLast={idx === visible.length - 1}
-                                                                isRenaming={isRowRenaming}
-                                                                // Only the renaming row sees
-                                                                // live keystroke updates;
-                                                                // others get a stable empty
-                                                                // string so per-key state
-                                                                // changes don't invalidate
-                                                                // the whole list's memos.
-                                                                renameValue={
-                                                                    isRowRenaming
-                                                                        ? renameValue
-                                                                        : ""
-                                                                }
-                                                                renameBusy={
-                                                                    isRowRenaming && renameBusy
-                                                                }
-                                                                selected={selectedPaths.has(
-                                                                    entry.path,
-                                                                )}
-                                                                cut={
-                                                                    cutPaths?.has(entry.path) ??
-                                                                    false
-                                                                }
-                                                                rowTitle={rowTitle}
-                                                                cacheKey={cacheKey}
-                                                                onRenameChange={setRenameValue}
-                                                                onRenameSubmit={() =>
-                                                                    commitRename(entry)
-                                                                }
-                                                                onRenameCancel={cancelRename}
-                                                                onClick={(e) =>
-                                                                    handleEntryClick(entry, e)
-                                                                }
-                                                            />
-                                                        );
-                                                    });
-                                                })()}
-                                            </>
-                                        )}
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    {/* Cut-state SR hint. Rows in the cut clipboard
+                                                     *  reference this via aria-describedby so screen
+                                                     *  readers announce "Marked for move" alongside
+                                                     *  the visual italic + opacity treatment. */}
+                                                    <span id="lex-cut-hint" className="sr-only">
+                                                        Marked for move.
+                                                    </span>
+                                                    {/* Bundle the two pieces of state the row's
+                                                     *  callbacks branch on but EntryRow doesn't
+                                                     *  visibly render. Memo's comparator picks
+                                                     *  this up; drag-select (root + anchor
+                                                     *  unchanged) lets unaffected rows skip
+                                                     *  re-renders entirely. */}
+                                                    {(() => {
+                                                        const cacheKey = `${root}:${anchorPath ?? ""}`;
+                                                        return visible.map((entry, idx) => {
+                                                            const activateVerb =
+                                                                entry.type === "dir"
+                                                                    ? "drill in"
+                                                                    : "open";
+                                                            const rowTitle = `Double-click to ${activateVerb} · F2 to rename · Del to delete`;
+                                                            const isRowRenaming =
+                                                                renamePath === entry.path;
+                                                            return (
+                                                                <MemoEntryRow
+                                                                    key={entry.path}
+                                                                    entry={entry}
+                                                                    isLast={
+                                                                        idx === visible.length - 1
+                                                                    }
+                                                                    isRenaming={isRowRenaming}
+                                                                    // Only the renaming row sees
+                                                                    // live keystroke updates;
+                                                                    // others get a stable empty
+                                                                    // string so per-key state
+                                                                    // changes don't invalidate
+                                                                    // the whole list's memos.
+                                                                    renameValue={
+                                                                        isRowRenaming
+                                                                            ? renameValue
+                                                                            : ""
+                                                                    }
+                                                                    renameBusy={
+                                                                        isRowRenaming && renameBusy
+                                                                    }
+                                                                    selected={selectedPaths.has(
+                                                                        entry.path,
+                                                                    )}
+                                                                    cut={
+                                                                        cutPaths?.has(entry.path) ??
+                                                                        false
+                                                                    }
+                                                                    rowTitle={rowTitle}
+                                                                    cacheKey={cacheKey}
+                                                                    onRenameChange={setRenameValue}
+                                                                    onRenameSubmit={() =>
+                                                                        commitRename(entry)
+                                                                    }
+                                                                    onRenameCancel={cancelRename}
+                                                                    onClick={(e) =>
+                                                                        handleEntryClick(entry, e)
+                                                                    }
+                                                                />
+                                                            );
+                                                        });
+                                                    })()}
+                                                </>
+                                            )
+                                        }
                                     </div>
                                 </div>
                             </ContextMenuTrigger>
                             <ContextMenuContent>
                                 {/* New folder / Cut / Paste are library-only —
-                         *  /api/mkdir is scoped to LIBRARY_PATH and the
-                         *  move endpoint's destination is always library. */}
+                                 *  /api/mkdir is scoped to LIBRARY_PATH and the
+                                 *  move endpoint's destination is always library. */}
                                 {root === "library" && (
                                     <>
                                         <ContextMenuItem
@@ -1583,105 +1526,97 @@ export default function LibraryExplorerSheet({
                                         {selectedPaths.size > 0 && (
                                             <ContextMenuItem
                                                 onSelect={() => {
-                                                    requestAnimationFrame(() =>
-                                                        cutSelection(),
-                                                    );
+                                                    requestAnimationFrame(() => cutSelection());
                                                 }}
                                             >
                                                 <Scissors aria-hidden />
                                                 Cut {selectedPaths.size}{" "}
-                                                {selectedPaths.size === 1
-                                                    ? "item"
-                                                    : "items"}
+                                                {selectedPaths.size === 1 ? "item" : "items"}
                                                 <Kbd>Ctrl+X</Kbd>
                                             </ContextMenuItem>
                                         )}
                                         {cutPaths && cutPaths.size > 0 && (
                                             <ContextMenuItem
                                                 onSelect={() => {
-                                                    requestAnimationFrame(() =>
-                                                        pasteHere(),
-                                                    );
+                                                    requestAnimationFrame(() => pasteHere());
                                                 }}
                                             >
                                                 <ClipboardPaste aria-hidden />
                                                 Paste {cutPaths.size}{" "}
-                                                {cutPaths.size === 1
-                                                    ? "item"
-                                                    : "items"}{" "}
-                                                here
+                                                {cutPaths.size === 1 ? "item" : "items"} here
                                                 <Kbd>Ctrl+V</Kbd>
                                             </ContextMenuItem>
                                         )}
                                     </>
                                 )}
-                                {menuTarget && (() => {
-                                    // When the right-click lands on a row that
-                                    // is part of an active multi-selection, the
-                                    // Delete item acts on the whole selection
-                                    // (matches Windows Explorer / macOS Finder).
-                                    // Rename hides in that case — multi-rename
-                                    // has no clean semantics.
-                                    const isBulkContext =
-                                        selectedPaths.size > 1 &&
-                                        selectedPaths.has(menuTarget.path);
-                                    return (
-                                        <>
-                                            {!isBulkContext && (
+                                {menuTarget &&
+                                    (() => {
+                                        // When the right-click lands on a row that
+                                        // is part of an active multi-selection, the
+                                        // Delete item acts on the whole selection
+                                        // (matches Windows Explorer / macOS Finder).
+                                        // Rename hides in that case — multi-rename
+                                        // has no clean semantics.
+                                        const isBulkContext =
+                                            selectedPaths.size > 1 &&
+                                            selectedPaths.has(menuTarget.path);
+                                        return (
+                                            <>
+                                                {!isBulkContext && (
+                                                    <ContextMenuItem
+                                                        onSelect={() => {
+                                                            // rAF: let the menu close
+                                                            // + restore focus before
+                                                            // swapping the row for
+                                                            // the inline rename input
+                                                            // (which steals focus
+                                                            // itself).
+                                                            const target = menuTarget;
+                                                            requestAnimationFrame(() =>
+                                                                startRename(target),
+                                                            );
+                                                        }}
+                                                    >
+                                                        <PenLine aria-hidden />
+                                                        Rename
+                                                        <Kbd>F2</Kbd>
+                                                    </ContextMenuItem>
+                                                )}
+                                                <ContextMenuSeparator />
                                                 <ContextMenuItem
+                                                    variant="destructive"
                                                     onSelect={() => {
-                                                        // rAF: let the menu close
-                                                        // + restore focus before
-                                                        // swapping the row for
-                                                        // the inline rename input
-                                                        // (which steals focus
-                                                        // itself).
+                                                        // rAF for the same aria-hidden
+                                                        // focus-race reason: let the
+                                                        // ContextMenu release focus
+                                                        // before the AlertDialog mounts.
                                                         const target = menuTarget;
-                                                        requestAnimationFrame(() =>
-                                                            startRename(target),
-                                                        );
+                                                        if (isBulkContext) {
+                                                            requestAnimationFrame(() =>
+                                                                deleteSelection(),
+                                                            );
+                                                        } else {
+                                                            requestAnimationFrame(() =>
+                                                                requestDelete(target),
+                                                            );
+                                                        }
                                                     }}
                                                 >
-                                                    <PenLine aria-hidden />
-                                                    Rename
-                                                    <Kbd>F2</Kbd>
+                                                    <Trash2 aria-hidden />
+                                                    {isBulkContext
+                                                        ? `Delete ${selectedPaths.size} items`
+                                                        : `Delete ${menuTarget.type === "dir" ? "folder" : "file"}`}
+                                                    <Kbd>Del</Kbd>
                                                 </ContextMenuItem>
-                                            )}
-                                            <ContextMenuSeparator />
-                                            <ContextMenuItem
-                                                variant="destructive"
-                                                onSelect={() => {
-                                                    // rAF for the same aria-hidden
-                                                    // focus-race reason: let the
-                                                    // ContextMenu release focus
-                                                    // before the AlertDialog mounts.
-                                                    const target = menuTarget;
-                                                    if (isBulkContext) {
-                                                        requestAnimationFrame(() =>
-                                                            deleteSelection(),
-                                                        );
-                                                    } else {
-                                                        requestAnimationFrame(() =>
-                                                            requestDelete(target),
-                                                        );
-                                                    }
-                                                }}
-                                            >
-                                                <Trash2 aria-hidden />
-                                                {isBulkContext
-                                                    ? `Delete ${selectedPaths.size} items`
-                                                    : `Delete ${menuTarget.type === "dir" ? "folder" : "file"}`}
-                                                <Kbd>Del</Kbd>
-                                            </ContextMenuItem>
-                                        </>
-                                    );
-                                })()}
+                                            </>
+                                        );
+                                    })()}
                             </ContextMenuContent>
                         </ContextMenu>
                     </div>
                     {/* Drag-select rectangle overlay — viewport-coords via
-                 *  `position: fixed`, pointer-events-none so it never
-                 *  intercepts the click that ends the drag. */}
+                     *  `position: fixed`, pointer-events-none so it never
+                     *  intercepts the click that ends the drag. */}
                     {dragRect && (
                         <div
                             aria-hidden
@@ -1698,10 +1633,10 @@ export default function LibraryExplorerSheet({
             </Sheet>
 
             {/* Sibling to the Sheet, not a child. Nesting an AlertDialog
-         *  inside the Sheet's Radix Root makes the focus manager apply
-         *  aria-hidden to SheetContent while it still holds focus —
-         *  hoisting the dialog out of the Sheet's React subtree lets
-         *  Radix treat them as independent dialog stacks. */}
+             *  inside the Sheet's Radix Root makes the focus manager apply
+             *  aria-hidden to SheetContent while it still holds focus —
+             *  hoisting the dialog out of the Sheet's React subtree lets
+             *  Radix treat them as independent dialog stacks. */}
             <AlertDialog
                 open={deleteCandidate !== null}
                 onOpenChange={(v) => {
@@ -1714,28 +1649,24 @@ export default function LibraryExplorerSheet({
                             {deleteCandidate?.entry.path === BULK_DELETE_SENTINEL
                                 ? `Delete ${deleteCandidate.entry.name}?`
                                 : deleteCandidate?.entry.type === "file"
-                                    ? "Delete this file?"
-                                    : deleteCandidate?.contentsCount === 0
-                                        ? "Delete this empty folder?"
-                                        : "Delete this folder and everything inside?"}
+                                  ? "Delete this file?"
+                                  : deleteCandidate?.contentsCount === 0
+                                    ? "Delete this empty folder?"
+                                    : "Delete this folder and everything inside?"}
                         </AlertDialogTitle>
                         {/* asChild so the description can host a list for the
-                     *  bulk-delete preview without invalid <p>-wrapped-<ul>
-                     *  HTML (Radix's Description renders as <p> by default). */}
+                         *  bulk-delete preview without invalid <p>-wrapped-<ul>
+                         *  HTML (Radix's Description renders as <p> by default). */}
                         <AlertDialogDescription asChild>
                             <div>
                                 {deleteCandidate && (
-                                    <DeleteCandidateSummary
-                                        candidate={deleteCandidate}
-                                    />
+                                    <DeleteCandidateSummary candidate={deleteCandidate} />
                                 )}
                             </div>
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                        <AlertDialogCancel disabled={deleteBusy}>
-                            Cancel
-                        </AlertDialogCancel>
+                        <AlertDialogCancel disabled={deleteBusy}>Cancel</AlertDialogCancel>
                         <AlertDialogAction
                             onClick={confirmDelete}
                             disabled={deleteBusy}
@@ -1750,25 +1681,16 @@ export default function LibraryExplorerSheet({
     );
 }
 
-function DeleteCandidateSummary({
-    candidate,
-}: {
-    candidate: DeleteCandidate;
-}) {
+function DeleteCandidateSummary({ candidate }: { candidate: DeleteCandidate }) {
     const { entry, contentsCount, bulkPreview } = candidate;
     if (entry.path === BULK_DELETE_SENTINEL) {
-        const overflow = bulkPreview
-            ? bulkPreview.total - bulkPreview.names.length
-            : 0;
+        const overflow = bulkPreview ? bulkPreview.total - bulkPreview.names.length : 0;
         return (
             <>
                 <span className="block mb-2">
                     The selected items (
-                    <span className="font-mono text-foreground">
-                        {entry.name}
-                    </span>
-                    ) will be removed. Folders include everything inside.
-                    This can&apos;t be undone.
+                    <span className="font-mono text-foreground">{entry.name}</span>) will be
+                    removed. Folders include everything inside. This can&apos;t be undone.
                 </span>
                 {bulkPreview && bulkPreview.names.length > 0 && (
                     <ul className="font-mono text-xs text-foreground/80 space-y-0.5 pl-4 list-disc">
@@ -1790,20 +1712,16 @@ function DeleteCandidateSummary({
     if (entry.type === "file") {
         return (
             <>
-                <span className="font-mono text-foreground break-all">
-                    {entry.name}
-                </span>{" "}
-                will be removed from the library. This can&apos;t be undone.
+                <span className="font-mono text-foreground break-all">{entry.name}</span> will be
+                removed from the library. This can&apos;t be undone.
             </>
         );
     }
     if (contentsCount === 0) {
         return (
             <>
-                <span className="font-mono text-foreground break-all">
-                    {entry.path}
-                </span>{" "}
-                is empty and will be removed. This can&apos;t be undone.
+                <span className="font-mono text-foreground break-all">{entry.path}</span> is empty
+                and will be removed. This can&apos;t be undone.
             </>
         );
     }
@@ -1813,10 +1731,8 @@ function DeleteCandidateSummary({
             : "every item inside";
     return (
         <>
-            <span className="font-mono text-foreground break-all">
-                {entry.path}
-            </span>{" "}
-            and {phrase} will be removed. This can&apos;t be undone.
+            <span className="font-mono text-foreground break-all">{entry.path}</span> and {phrase}{" "}
+            will be removed. This can&apos;t be undone.
         </>
     );
 }
@@ -1852,10 +1768,7 @@ interface EntryRowProps {
 // row's JSX on every mousemove. Callback closures stay valid because
 // `cacheKey` invalidates all rows whenever the state those closures
 // branch on (root, anchor) actually changes.
-function entryRowPropsEqual(
-    prev: EntryRowProps,
-    next: EntryRowProps,
-): boolean {
+function entryRowPropsEqual(prev: EntryRowProps, next: EntryRowProps): boolean {
     return (
         prev.entry.path === next.entry.path &&
         prev.entry.name === next.entry.name &&
@@ -1927,11 +1840,7 @@ function EntryRow({
                 data-entry-path={entry.path}
                 onClick={(e) => e.stopPropagation()}
             >
-                <EntryIcon
-                    type={entry.type}
-                    ext={ext}
-                    needsConversion={!!entry.needs_conversion}
-                />
+                <EntryIcon type={entry.type} ext={ext} needsConversion={!!entry.needs_conversion} />
                 <Input
                     ref={inputRef}
                     value={renameValue}
@@ -1982,11 +1891,7 @@ function EntryRow({
                 " data-[cut=true]:opacity-55 data-[cut=true]:italic"
             }
         >
-            <EntryIcon
-                type={entry.type}
-                ext={ext}
-                needsConversion={!!entry.needs_conversion}
-            />
+            <EntryIcon type={entry.type} ext={ext} needsConversion={!!entry.needs_conversion} />
             <div className="flex-1 min-w-0">
                 <span
                     className={
@@ -2077,34 +1982,10 @@ function EntryIcon({
     needsConversion: boolean;
 }) {
     if (type === "dir")
-        return (
-            <Folder
-                size={16}
-                aria-hidden
-                className="text-muted-foreground shrink-0"
-            />
-        );
+        return <Folder size={16} aria-hidden className="text-muted-foreground shrink-0" />;
     if (needsConversion || NEEDS_CONVERSION_EXTS.has(ext))
-        return (
-            <File
-                size={16}
-                aria-hidden
-                className="text-warning/80 shrink-0"
-            />
-        );
+        return <File size={16} aria-hidden className="text-warning/80 shrink-0" />;
     if (METADATA_COMPATIBLE_EXTS.has(ext))
-        return (
-            <Music2
-                size={16}
-                aria-hidden
-                className="text-success shrink-0"
-            />
-        );
-    return (
-        <File
-            size={16}
-            aria-hidden
-            className="text-muted-foreground shrink-0"
-        />
-    );
+        return <Music2 size={16} aria-hidden className="text-success shrink-0" />;
+    return <File size={16} aria-hidden className="text-muted-foreground shrink-0" />;
 }

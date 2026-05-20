@@ -6,13 +6,13 @@ import { useSyncExternalStore } from "react";
 // pass doesn't crash on `window` access; for this client-only app it's just
 // hygiene.
 export function useMediaQuery(query: string): boolean {
-  return useSyncExternalStore(
-    (notify) => {
-      const mql = window.matchMedia(query);
-      mql.addEventListener("change", notify);
-      return () => mql.removeEventListener("change", notify);
-    },
-    () => window.matchMedia(query).matches,
-    () => false,
-  );
+    return useSyncExternalStore(
+        (notify) => {
+            const mql = window.matchMedia(query);
+            mql.addEventListener("change", notify);
+            return () => mql.removeEventListener("change", notify);
+        },
+        () => window.matchMedia(query).matches,
+        () => false,
+    );
 }

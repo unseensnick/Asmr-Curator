@@ -1,12 +1,7 @@
 import { X } from "lucide-react";
 
 import CookiePane from "@/components/dictionary/CookiePane";
-import {
-    Sheet,
-    SheetContent,
-    SheetDescription,
-    SheetTitle,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 
 interface CookiesSheetProps {
     open: boolean;
@@ -28,14 +23,11 @@ interface CookiesSheetProps {
 export default function CookiesSheet({ open, onClose }: CookiesSheetProps) {
     return (
         <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
-            <SheetContent
-                className="w-full sm:max-w-xl overflow-hidden"
-                showCloseButton={false}
-            >
+            <SheetContent className="w-full sm:max-w-xl overflow-hidden" showCloseButton={false}>
                 <SheetTitle className="sr-only">Cookies</SheetTitle>
                 <SheetDescription className="sr-only">
-                    Patreon and Google session cookies for the URL fetch and
-                    Drive download workflows.
+                    Patreon and Google session cookies for the URL fetch and Drive download
+                    workflows.
                 </SheetDescription>
 
                 <div className="flex items-center gap-3 px-5 py-4 border-b border-border shrink-0">

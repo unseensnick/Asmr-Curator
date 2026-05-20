@@ -64,10 +64,7 @@ export function extendRange(
 /** Toggle-select: Ctrl/Cmd+click flips a single entry in the current
  *  Set. The anchor moves to the toggled entry so a subsequent
  *  Shift-click extends from there. */
-export function toggleOne(
-    prev: ReadonlySet<string>,
-    targetPath: string,
-): SelectionUpdate {
+export function toggleOne(prev: ReadonlySet<string>, targetPath: string): SelectionUpdate {
     const next = new Set(prev);
     if (next.has(targetPath)) next.delete(targetPath);
     else next.add(targetPath);
@@ -113,9 +110,7 @@ export function selectionFromClick(
  *  follow-up Shift-click extends from a sensible reference point.
  *  Returns null when the list is empty (caller should no-op rather
  *  than clobber state). */
-export function selectAll(
-    visible: readonly SelectablePath[],
-): SelectionUpdate | null {
+export function selectAll(visible: readonly SelectablePath[]): SelectionUpdate | null {
     if (visible.length === 0) return null;
     return {
         selected: new Set(visible.map((e) => e.path)),

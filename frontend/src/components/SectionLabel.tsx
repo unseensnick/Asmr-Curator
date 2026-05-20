@@ -35,10 +35,7 @@ export default function SectionLabel({
         <div
             className={`flex items-center gap-2 text-[10px] font-bold tracking-[0.14em] uppercase text-muted-foreground ${className}`}
         >
-            <span
-                aria-hidden
-                className={`size-1.5 rounded-full shrink-0 ${TONE_TO_BG[tone]}`}
-            />
+            <span aria-hidden className={`size-1.5 rounded-full shrink-0 ${TONE_TO_BG[tone]}`} />
             {children}
             {hint && (
                 <span className="opacity-45 text-[9px] tracking-[0.08em] font-medium normal-case">

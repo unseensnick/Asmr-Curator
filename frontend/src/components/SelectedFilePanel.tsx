@@ -3,22 +3,13 @@ import { useEffect, useRef, useState } from "react";
 
 import { API, apiPost, type FileRoot } from "@/lib/api";
 import { FORMAT_EXT, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
-import type {
-    ConvertFormat,
-    ConvertQuality,
-    FileEntry,
-    RenameSep,
-} from "@/lib/types";
+import type { ConvertFormat, ConvertQuality, FileEntry, RenameSep } from "@/lib/types";
 import { getErrorMessage, sanitizeFilename } from "@/lib/utils";
 
 import MoveToLibrarySection from "./MoveToLibrarySection";
 import RenameSection, { RequiredConversion } from "./RenameSection";
-import {
-    byteLength,
-    FileIcon,
-    getExt,
-    MAX_BYTES,
-} from "./selectedFile/helpers";
+import { FileIcon } from "./selectedFile/helpers";
+import { byteLength, getExt, MAX_BYTES } from "./selectedFile/utils";
 
 interface SelectedFilePanelProps {
     selected: FileEntry;
@@ -108,10 +99,8 @@ export default function SelectedFilePanel({
     const convertedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     useEffect(() => {
         return () => {
-            if (renamedTimerRef.current)
-                clearTimeout(renamedTimerRef.current);
-            if (convertedTimerRef.current)
-                clearTimeout(convertedTimerRef.current);
+            if (renamedTimerRef.current) clearTimeout(renamedTimerRef.current);
+            if (convertedTimerRef.current) clearTimeout(convertedTimerRef.current);
         };
     }, []);
 
@@ -148,9 +137,7 @@ export default function SelectedFilePanel({
 
     // ── Derived state ────────────────────────────────────────────────────
 
-    const needsConversion =
-        !!selected.needs_conversion ||
-        NEEDS_CONVERSION_EXTS.has(selected.ext);
+    const needsConversion = !!selected.needs_conversion || NEEDS_CONVERSION_EXTS.has(selected.ext);
 
     const newName = (() => {
         const text = renameSep === "dash" ? outputDash : outputPipe;
@@ -163,14 +150,14 @@ export default function SelectedFilePanel({
     const bytesWarn = bytes > 200 && !bytesOver;
 
     // For optional conversion, drop the current format from the choices.
-    const optionalConvertFormats = (
-        ["mp3", "flac", "ogg"] as ConvertFormat[]
-    ).filter((fmt) => FORMAT_EXT[fmt] !== selected.ext);
+    const optionalConvertFormats = (["mp3", "flac", "ogg"] as ConvertFormat[]).filter(
+        (fmt) => FORMAT_EXT[fmt] !== selected.ext,
+    );
 
     // Guard against showing optional convert in the current format.
     const safeConvertFormat =
         !needsConversion && FORMAT_EXT[convertFormat] === selected.ext
-            ? optionalConvertFormats[0] ?? "mp3"
+            ? (optionalConvertFormats[0] ?? "mp3")
             : convertFormat;
 
     // ── Actions ──────────────────────────────────────────────────────────
@@ -188,9 +175,7 @@ export default function SelectedFilePanel({
                     title: metaTitle,
                     artist: metaArtist,
                     album: metaAlbum,
-                    album_artist: linkArtists
-                        ? metaArtist
-                        : metaAlbumArtist,
+                    album_artist: linkArtists ? metaArtist : metaAlbumArtist,
                 },
             });
             onSelectedChange({
@@ -199,19 +184,13 @@ export default function SelectedFilePanel({
                 name: data.new_name,
             });
             setRenamed(true);
-            if (renamedTimerRef.current)
-                clearTimeout(renamedTimerRef.current);
-            renamedTimerRef.current = setTimeout(
-                () => setRenamed(false),
-                2500,
-            );
+            if (renamedTimerRef.current) clearTimeout(renamedTimerRef.current);
+            renamedTimerRef.current = setTimeout(() => setRenamed(false), 2500);
             // Surface the partial-success path: rename committed, metadata
             // embed didn't. The file is on disk under the new name, but the
             // user expected tags written too.
             if (data.metadata_error) {
-                onError(
-                    `Renamed, but metadata embed failed: ${data.metadata_error}`,
-                );
+                onError(`Renamed, but metadata embed failed: ${data.metadata_error}`);
             }
             onListReload();
         } catch (e) {
@@ -225,8 +204,7 @@ export default function SelectedFilePanel({
         setConverting(true);
         onError("");
         try {
-            const quality =
-                convertFormat === "flac" ? "lossless" : convertQuality;
+            const quality = convertFormat === "flac" ? "lossless" : convertQuality;
             const data = await apiPost<ConvertResponse>(API.convert, {
                 path: selected.path,
                 output_format: convertFormat,
@@ -243,12 +221,8 @@ export default function SelectedFilePanel({
                 needs_conversion: false,
             });
             setConverted(true);
-            if (convertedTimerRef.current)
-                clearTimeout(convertedTimerRef.current);
-            convertedTimerRef.current = setTimeout(
-                () => setConverted(false),
-                2500,
-            );
+            if (convertedTimerRef.current) clearTimeout(convertedTimerRef.current);
+            convertedTimerRef.current = setTimeout(() => setConverted(false), 2500);
             onListReload();
         } catch (e) {
             onError("Conversion failed: " + getErrorMessage(e));
@@ -338,11 +312,7 @@ export default function SelectedFilePanel({
                  * from the current filename, the move offers to apply it
                  * during the move (one server call instead of two) along
                  * with the metadata tags below. */
-                pendingNewName={
-                    newName && !bytesOver && newName !== selected.name
-                        ? newName
-                        : null
-                }
+                pendingNewName={newName && !bytesOver && newName !== selected.name ? newName : null}
                 pendingMetadata={{
                     title: metaTitle,
                     artist: metaArtist,

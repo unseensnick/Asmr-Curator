@@ -3,11 +3,7 @@ import { Calendar as CalendarIcon, X } from "lucide-react";
 import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
-import {
-    Popover,
-    PopoverContent,
-    PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
 interface DatePickerProps {
@@ -36,10 +32,7 @@ export default function DatePicker({
     disabled = false,
     className,
 }: DatePickerProps) {
-    const selected = useMemo(
-        () => (value ? safeParse(value) : undefined),
-        [value],
-    );
+    const selected = useMemo(() => (value ? safeParse(value) : undefined), [value]);
 
     return (
         <Popover>

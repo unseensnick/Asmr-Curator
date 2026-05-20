@@ -10,10 +10,7 @@ import ScreenshotPanel from "@/components/ScreenshotPanel";
 import TagsEditor from "@/components/TagsEditor";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiGet, API, apiPatch, apiPost } from "@/lib/api";
-import {
-    dictFromApiResponse,
-    emptyDict,
-} from "@/lib/types";
+import { dictFromApiResponse, emptyDict } from "@/lib/types";
 import type { AppDict, DictionaryApiResponse, VocabEntry } from "@/lib/types";
 import { getErrorMessage, sanitizeFilename } from "@/lib/utils";
 
@@ -55,9 +52,9 @@ export default function App() {
     // jump straight to the FileBrowser Downloads tab with the downloaded
     // file pre-selected. Lifted state because PatreonPanel and FileBrowser
     // live in different columns and need to coordinate.
-    const [bridgeRequest, setBridgeRequest] = useState<
-        { path: string; filename: string } | null
-    >(null);
+    const [bridgeRequest, setBridgeRequest] = useState<{ path: string; filename: string } | null>(
+        null,
+    );
 
     // Persist power mode so the toggle survives reloads.
     useEffect(() => {
@@ -76,16 +73,11 @@ export default function App() {
         // are left alone — they're usually part of the actual title.
         const pipeTitle = stripBrackets
             ? title
-                .replace(/^(?:\s*\[[^\]]*\]\s*)+/, "")
-                .replace(/(?:\s*\[[^\]]*\]\s*)+$/, "")
-                .trim()
+                  .replace(/^(?:\s*\[[^\]]*\]\s*)+/, "")
+                  .replace(/(?:\s*\[[^\]]*\]\s*)+$/, "")
+                  .trim()
             : title;
-        setOutputDash(
-            [title, ...tags, sfx]
-                .map(sanitizeFilename)
-                .filter(Boolean)
-                .join(" - "),
-        );
+        setOutputDash([title, ...tags, sfx].map(sanitizeFilename).filter(Boolean).join(" - "));
         setOutputPipe([pipeTitle, ...tags, sfx].join(" | "));
     }
 
@@ -108,20 +100,14 @@ export default function App() {
                 // explanation reads as "the app is broken" to the
                 // sleepy persona — librarian voice + a Retry button
                 // beats a silent empty state every time.
-                setDictLoadError(
-                    "Couldn't reach the dictionary. " + getErrorMessage(e),
-                );
+                setDictLoadError("Couldn't reach the dictionary. " + getErrorMessage(e));
             });
     }
     useEffect(() => {
         fetchDictionary();
     }, []);
 
-    function handleExtracted(
-        newTitle: string,
-        newTags: string[],
-        artist: string,
-    ) {
+    function handleExtracted(newTitle: string, newTags: string[], artist: string) {
         setTitle(newTitle);
         setTags(newTags);
         setExtractedArtist(artist);
@@ -151,23 +137,16 @@ export default function App() {
         }));
     }
 
-    async function promoteToAlias(
-        text: string,
-        canonical: VocabEntry,
-    ): Promise<void> {
-        const row = await apiPatch<VocabEntry>(
-            API.vocabEntry(canonical.id),
-            {
-                canonical: canonical.canonical,
-                aliases: [...canonical.aliases, text],
-            },
-        );
+    async function promoteToAlias(text: string, canonical: VocabEntry): Promise<void> {
+        const row = await apiPatch<VocabEntry>(API.vocabEntry(canonical.id), {
+            canonical: canonical.canonical,
+            aliases: [...canonical.aliases, text],
+        });
         setDict((prev) => ({
             ...prev,
             vocabulary: prev.vocabulary.map((x) => (x.id === row.id ? row : x)),
         }));
     }
-
 
     return (
         <div className="max-w-[160rem] mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 py-8 lg:py-10">
@@ -195,8 +174,7 @@ export default function App() {
             {dictLoadError && (
                 <div className="mt-6 flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground/90">
                     <span className="flex-1 leading-relaxed">
-                        {dictLoadError} Tags won&apos;t match canonical
-                        forms until this resolves.
+                        {dictLoadError} Tags won&apos;t match canonical forms until this resolves.
                     </span>
                     <button
                         type="button"
@@ -321,10 +299,7 @@ export default function App() {
                 dict={dict}
                 onDictChange={setDict}
             />
-            <CookiesSheet
-                open={cookiesOpen}
-                onClose={() => setCookiesOpen(false)}
-            />
+            <CookiesSheet open={cookiesOpen} onClose={() => setCookiesOpen(false)} />
         </div>
     );
 }
