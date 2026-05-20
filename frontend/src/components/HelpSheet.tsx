@@ -1,4 +1,14 @@
-import { Download, FileAudio, FileText, Globe, Keyboard, MousePointerClick, X } from "lucide-react";
+import {
+    Cloud,
+    FileAudio,
+    FileText,
+    Globe,
+    Keyboard,
+    MousePointerClick,
+    Network,
+    Sparkles,
+    X,
+} from "lucide-react";
 
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 
@@ -93,13 +103,29 @@ export default function HelpSheet({ open, onClose }: HelpSheetProps) {
                             </li>
                             <li>
                                 <span className="text-foreground/90 font-medium">
-                                    2. Sign in to Patreon and Google
+                                    2. Point the extension at this backend.
+                                </span>{" "}
+                                Open the extension popup, hit Settings, and set the Backend URL.
+                                Default is{" "}
+                                <code className="font-mono text-foreground/80">
+                                    http://localhost:8000
+                                </code>
+                                . If the app runs on another machine (homelab NAS, separate
+                                workstation) or behind a reverse proxy, use{" "}
+                                <code className="font-mono text-foreground/80">
+                                    http://&lt;ip&gt;:&lt;port&gt;
+                                </code>{" "}
+                                or your domain. Click Test connection to confirm.
+                            </li>
+                            <li>
+                                <span className="text-foreground/90 font-medium">
+                                    3. Sign in to Patreon and Google
                                 </span>{" "}
                                 in the same browser profile the extension lives in.
                             </li>
                             <li>
                                 <span className="text-foreground/90 font-medium">
-                                    3. Click Sync cookies once.
+                                    4. Click Sync cookies once.
                                 </span>{" "}
                                 The popup confirms how many cookies were synced. Patreon and Drive
                                 workflows now work until the session expires (~30 days for Patreon,
@@ -115,6 +141,16 @@ export default function HelpSheet({ open, onClose }: HelpSheetProps) {
                         </h2>
                         <div className="flex flex-col gap-2.5">
                             <HelpCard
+                                icon={<Cloud size={14} aria-hidden />}
+                                title="Drive-hosted audio works through the Patreon URL"
+                                body="When a creator links to Google Drive instead of uploading to Patreon, fetch the post normally. The External links section appears under the post — click Download on a Drive link and the backend scrapes it server-side through a headless browser using the Google cookie the extension synced. Needs the Google cookie; no in-browser download triggered."
+                            />
+                            <HelpCard
+                                icon={<Network size={14} aria-hidden />}
+                                title="Self-hosting on another machine?"
+                                body="The extension defaults to http://localhost:8000. If the backend runs on your homelab, a separate workstation, or behind a reverse proxy, open the extension's Settings and set the Backend URL to wherever it's reachable (http://10.0.0.5:8000 or https://asmr.example.com). Click Test connection to confirm."
+                            />
+                            <HelpCard
                                 icon={<MousePointerClick size={14} aria-hidden />}
                                 title="Right-click a tag chip"
                                 body="Add it to your dictionary as a new canonical, or as an alias of an existing one. Novel (warm-amber) chips are tags the dictionary doesn't recognise yet."
@@ -125,7 +161,7 @@ export default function HelpSheet({ open, onClose }: HelpSheetProps) {
                                 body="Fires Generate filename from inside the title or format input. Useful when you're working through a batch and want to skip the mouse."
                             />
                             <HelpCard
-                                icon={<Download size={14} aria-hidden />}
+                                icon={<Sparkles size={14} aria-hidden />}
                                 title="Power mode"
                                 body="Toggle in Settings. Auto-expands More options on the source panels, surfaces raw LLM output on screenshot fetches, and turns on advanced filters."
                             />
