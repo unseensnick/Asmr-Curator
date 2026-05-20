@@ -102,7 +102,7 @@ Open **http://localhost:8000**. The dictionary database is created and seeded au
 | Layer            | Tech                                                  |
 | ---------------- | ----------------------------------------------------- |
 | Frontend         | React 19, Vite, Tailwind CSS v4, shadcn/ui            |
-| Backend          | Python 3.12+, FastAPI, Uvicorn                        |
+| Backend          | Python 3.14+, FastAPI, Uvicorn                        |
 | Database         | SQLite — single file, zero config                     |
 | Drive scrape     | Playwright + headless Chromium                        |
 | LLM (optional)   | Ollama (`qwen2.5vl:7b`) — runs outside the container  |
