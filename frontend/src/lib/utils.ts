@@ -46,7 +46,7 @@ export function normalizeTag(
     const k = val.trim().toLowerCase();
     if (!k) return null;
     if (dict._suppressed.has(k)) return null;
-    if (k in dict._canonicalMap) return dict._canonicalMap[k];
+    if (k in dict._canonicalMap) return dict._canonicalMap[k] ?? null;
     if (/^(sfw|nsfw)$/i.test(k)) return k.toUpperCase();
     const trimmed = val.trim();
     return opts?.titleCase ? trimmed.replace(/\b\w/g, (c) => c.toUpperCase()) : trimmed;

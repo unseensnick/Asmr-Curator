@@ -69,7 +69,8 @@ export function parseTitleLine(raw: string): { title: string; embeddedTags: stri
         .filter(Boolean);
 
     if (segments.length >= 2 && segments.every((s) => s.length <= 140)) {
-        const title = segments[0]
+        // segments.length >= 2 guarantees segments[0] is defined.
+        const title = segments[0]!
             .replace(/[-–\s]+$/, "")
             .replace(/^[\s&#+¥*~©®°|\\/<>@]+/, "")
             .trim();
@@ -89,7 +90,8 @@ export function parseTitleLine(raw: string): { title: string; embeddedTags: stri
     const rx = /\(([^)]{2,200})\)/g;
     let m: RegExpExecArray | null;
     while ((m = rx.exec(clean)) !== null) {
-        const inner = m[1].trim();
+        // Capture group 1 is always present when the regex matches.
+        const inner = m[1]!.trim();
         if (/^[\s\p{P}]+$/u.test(inner)) continue;
         if (/^\d+\s*(days?|hours?|ago)/i.test(inner) || /^[;:,.]/.test(inner)) continue;
         embeddedTags.push(inner);

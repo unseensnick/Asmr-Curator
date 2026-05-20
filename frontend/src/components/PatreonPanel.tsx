@@ -147,7 +147,7 @@ export default function PatreonPanel({
             if (res.posts.length > 1) {
                 setPosts(res.posts);
             } else {
-                setPost(res.posts[0]);
+                setPost(res.posts[0] ?? null);
             }
         } catch (err) {
             const { head, logTail: tail } = splitLogTail(getErrorMessage(err));
