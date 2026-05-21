@@ -3,6 +3,7 @@ import { AlertCircle, Loader2, RefreshCw, X } from "lucide-react";
 
 import LibrarySubdirPicker from "@/components/LibrarySubdirPicker";
 import SectionLabel from "@/components/SectionLabel";
+import TagsField from "@/components/TagsField";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -10,7 +11,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { bulkWrite, BulkWriteValidationError, loadCachedMetadata } from "@/lib/api";
 import { parseTitleLine } from "@/lib/parser";
-import type { AppDict, FileEntry } from "@/lib/types";
+import type { AppDict, FileEntry, VocabEntry } from "@/lib/types";
 import {
     getErrorMessage,
     normaliseAndDedupeTags,
@@ -22,21 +23,18 @@ export type BulkEditRoot = "library" | "downloads";
 
 /**
  * Per-file local edits. Both fields start empty; the backend treats an
- * empty title as 'leave existing alone' (skip-on-empty), and empty tags
- * mean 'no tags in the new filename' when rename is on. Phase 6 will add
- * a Load-from-cache button that pre-fills these from `post-api.json`
- * sidecars.
+ * empty title as 'leave existing alone' (skip-on-empty), and an empty
+ * tags list means 'no tags in the new filename' when rename is on.
+ * Load-from-cache fills these from `post-api.json` sidecars; the user
+ * refines via the per-row TagsField (drag to reorder, click to edit,
+ * right-click novel chips to promote into the dictionary).
  */
 interface PerFileEdit {
     title: string;
-    /** Comma-separated input the user types. Split into a tag array only
-     *  when composing the new filename in phase 7; kept as raw text here
-     *  so the user can free-form edit without the comma roundtrip
-     *  rewriting whitespace as they type. */
-    tags: string;
+    tags: string[];
 }
 
-const EMPTY_EDIT: PerFileEdit = { title: "", tags: "" };
+const EMPTY_EDIT: PerFileEdit = { title: "", tags: [] };
 
 /**
  * Shared values written to every selected file in one stroke. The three
@@ -98,6 +96,15 @@ interface BulkEditSheetProps {
      * surfaces tabbed-off callers can skip the remove UI by omitting.
      */
     onRemoveFile?: (path: string) => void;
+    /**
+     * Dictionary promotions for novel tags surfaced via the per-row
+     * TagsField's right-click menu. Routes through App.tsx's single
+     * vocabulary mutation path so a promotion here updates every
+     * surface (TagsEditor, LibrarySettingsSheet) that reads from the
+     * dictionary.
+     */
+    onPromoteToCanonical: (text: string) => Promise<void>;
+    onPromoteToAlias: (text: string, canonical: VocabEntry) => Promise<void>;
 }
 
 /**
@@ -130,6 +137,8 @@ export default function BulkEditSheet({
     root,
     dict,
     onRemoveFile,
+    onPromoteToCanonical,
+    onPromoteToAlias,
 }: BulkEditSheetProps) {
     // Keyed by `FileEntry.path` (relative to the chosen root). Paths the
     // user hasn't touched aren't in the map — `editFor` falls back to
@@ -229,7 +238,7 @@ export default function BulkEditSheet({
                 const normalised = normaliseAndDedupeTags(allTags, dict);
                 nextEdits[item.path] = {
                     title: cleanTitle || item.title || "",
-                    tags: normalised.join(", "),
+                    tags: normalised,
                 };
                 if (item.artist) artistsSeen.add(item.artist);
             }
@@ -328,11 +337,7 @@ export default function BulkEditSheet({
     function composeProposedName(edit: PerFileEdit, ext: string): string | null {
         if (!edit.title.trim()) return null;
         const sfx = shared.suffix.trim() || "F4A";
-        const tagList = edit.tags
-            .split(",")
-            .map((t) => t.trim())
-            .filter(Boolean);
-        const parts = [edit.title, ...tagList, sfx].map(sanitizeFilename).filter(Boolean);
+        const parts = [edit.title, ...edit.tags, sfx].map(sanitizeFilename).filter(Boolean);
         if (parts.length === 0) return "";
         return `${parts.join(" - ")}${ext}`;
     }
@@ -371,7 +376,7 @@ export default function BulkEditSheet({
     // Mirrors the backend's no-op detection so we don't fire a request
     // that would be a 200 with all `unchanged` rows.
 
-    const hasPerFileEdit = Object.values(edits).some((e) => e.title || e.tags);
+    const hasPerFileEdit = Object.values(edits).some((e) => e.title || e.tags.length > 0);
     // When linkArtists is on, the album_artist contribution to the commit
     // is `shared.artist`, not the (potentially stale) `shared.album_artist`
     // sitting in state from before the link was toggled. Match the
@@ -570,7 +575,6 @@ export default function BulkEditSheet({
                                         {files.map((file, idx) => {
                                             const edit = editFor(file.path);
                                             const titleId = `bulk-title-${idx}`;
-                                            const tagsId = `bulk-tags-${idx}`;
                                             return (
                                                 <div
                                                     key={file.path}
@@ -636,24 +640,27 @@ export default function BulkEditSheet({
                                                             className="flex-1 font-mono text-sm"
                                                         />
                                                     </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <label
-                                                            htmlFor={tagsId}
-                                                            className="w-12 shrink-0 text-xs text-muted-foreground"
-                                                        >
+                                                    <div className="flex items-start gap-2">
+                                                        <span className="w-12 shrink-0 text-xs text-muted-foreground pt-2">
                                                             Tags
-                                                        </label>
-                                                        <Input
-                                                            id={tagsId}
-                                                            value={edit.tags}
-                                                            onChange={(ev) =>
-                                                                patchEdit(file.path, {
-                                                                    tags: ev.target.value,
-                                                                })
-                                                            }
-                                                            placeholder="tag1, tag2, …"
-                                                            className="flex-1 font-mono text-sm"
-                                                        />
+                                                        </span>
+                                                        <div className="flex-1 min-w-0">
+                                                            <TagsField
+                                                                tags={edit.tags}
+                                                                onTagsChange={(next) =>
+                                                                    patchEdit(file.path, {
+                                                                        tags: next,
+                                                                    })
+                                                                }
+                                                                dict={dict}
+                                                                onPromoteToCanonical={
+                                                                    onPromoteToCanonical
+                                                                }
+                                                                onPromoteToAlias={onPromoteToAlias}
+                                                                placeholder="Add a tag"
+                                                                ariaLabel={`Add a tag for ${file.name}`}
+                                                            />
+                                                        </div>
                                                     </div>
                                                 </div>
                                             );

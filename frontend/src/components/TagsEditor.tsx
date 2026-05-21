@@ -1,11 +1,10 @@
-import { useMemo, useRef, useState } from "react";
-import { Plus, Sparkles, User } from "lucide-react";
+import { useState } from "react";
+import { Sparkles, User } from "lucide-react";
 
-import TagChip from "@/components/TagChip";
+import TagsField from "@/components/TagsField";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { AppDict, VocabEntry } from "@/lib/types";
-import { normalizeTag } from "@/lib/utils";
 
 /** How long the title input flashes red when Generate is pressed with
  *  an empty title. */
@@ -60,80 +59,7 @@ export default function TagsEditor({
     onPromoteToAlias,
     onGenerate,
 }: TagsEditorProps) {
-    const [tagInputVal, setTagInputVal] = useState("");
     const [titleError, setTitleError] = useState(false);
-    const [editingIdx, setEditingIdx] = useState<number | null>(null);
-    const [editingVal, setEditingVal] = useState("");
-    const dragSrcIdx = useRef<number | null>(null);
-
-    // Lowercase canonical lookup so each chip can flag whether it's in the
-    // dictionary. Tags come in normalized via normalizeTag (which resolves
-    // aliases to the canonical Title Case form), so a direct lowercase
-    // membership check is enough — no need to walk aliases again per chip.
-    const canonicalSet = useMemo(
-        () => new Set(dict.vocabulary.map((v) => v.canonical.toLowerCase())),
-        [dict.vocabulary],
-    );
-
-    // Wrap the alias-promotion handler so that, after the dictionary
-    // PATCH succeeds, this chip's displayed text snaps to the canonical
-    // form (matches what normalizeTag would have produced if the
-    // dictionary entry had existed at extract time). Dedupe in case the
-    // canonical is already present elsewhere in the list.
-    async function handlePromoteToAlias(text: string, canonical: VocabEntry): Promise<void> {
-        await onPromoteToAlias(text, canonical);
-        const textLc = text.toLowerCase();
-        const seen = new Set<string>();
-        const next: string[] = [];
-        for (const t of tags) {
-            const display = t.toLowerCase() === textLc ? canonical.canonical : t;
-            const key = display.toLowerCase();
-            if (seen.has(key)) continue;
-            seen.add(key);
-            next.push(display);
-        }
-        const changed = next.length !== tags.length || next.some((v, i) => v !== tags[i]);
-        if (changed) onTagsChange(next);
-    }
-
-    // ── Tag CRUD ──────────────────────────────────────────────────────────────
-
-    function addTag() {
-        const val = tagInputVal.trim();
-        if (!val) return;
-        const display = normalizeTag(val, dict) || val;
-        if (!tags.map((t) => t.toLowerCase()).includes(display.toLowerCase())) {
-            onTagsChange([...tags, display]);
-        }
-        setTagInputVal("");
-    }
-
-    function removeTag(i: number) {
-        onTagsChange(tags.filter((_, idx) => idx !== i));
-    }
-
-    function startEdit(i: number) {
-        setEditingIdx(i);
-        setEditingVal(tags[i] ?? "");
-    }
-
-    function saveEdit(i: number) {
-        const display = normalizeTag(editingVal, dict) || editingVal.trim();
-        if (display) {
-            const next = [...tags];
-            next[i] = display;
-            onTagsChange(next);
-        }
-        setEditingIdx(null);
-        setEditingVal("");
-    }
-
-    function cancelEdit() {
-        setEditingIdx(null);
-        setEditingVal("");
-    }
-
-    // ── Generate ──────────────────────────────────────────────────────────────
 
     function handleGenerate() {
         if (!title.trim()) {
@@ -142,24 +68,6 @@ export default function TagsEditor({
             return;
         }
         onGenerate();
-    }
-
-    // ── Drag and drop ─────────────────────────────────────────────────────────
-
-    function onDragStart(i: number) {
-        dragSrcIdx.current = i;
-    }
-
-    function onDrop(e: React.DragEvent, i: number) {
-        e.preventDefault();
-        const src = dragSrcIdx.current;
-        if (src === null || src === i) return;
-        const next = [...tags];
-        const [moved] = next.splice(src, 1);
-        if (moved === undefined) return;
-        next.splice(i, 0, moved);
-        dragSrcIdx.current = null;
-        onTagsChange(next);
     }
 
     // ── Render ────────────────────────────────────────────────────────────────
@@ -217,54 +125,13 @@ export default function TagsEditor({
                         </span>
                     )}
                 </div>
-
-                {tags.length > 0 && (
-                    <div
-                        className="flex flex-wrap gap-1.5 p-3 bg-muted/40 border border-border rounded-md transition-colors"
-                        onDragOver={(e) => e.preventDefault()}
-                    >
-                        {tags.map((tag, i) => (
-                            <TagChip
-                                key={i}
-                                label={tag}
-                                novel={!canonicalSet.has(tag.toLowerCase())}
-                                editing={editingIdx === i}
-                                editingValue={editingVal}
-                                onEditingValueChange={setEditingVal}
-                                onStartEdit={() => startEdit(i)}
-                                onSaveEdit={() => saveEdit(i)}
-                                onCancelEdit={cancelEdit}
-                                onRemove={() => removeTag(i)}
-                                onDragStart={() => onDragStart(i)}
-                                onDragOver={(e) => e.preventDefault()}
-                                onDrop={(e) => onDrop(e, i)}
-                                vocabulary={dict.vocabulary}
-                                onPromoteToCanonical={onPromoteToCanonical}
-                                onPromoteToAlias={handlePromoteToAlias}
-                            />
-                        ))}
-                    </div>
-                )}
-
-                <div className="flex gap-2 mt-1">
-                    <Input
-                        value={tagInputVal}
-                        onChange={(e) => setTagInputVal(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                                e.preventDefault();
-                                addTag();
-                            }
-                        }}
-                        placeholder="Add a tag"
-                        className="flex-1 font-mono text-sm"
-                        aria-label="Add a new tag"
-                    />
-                    <Button variant="outline" onClick={addTag} className="gap-1.5 shrink-0">
-                        <Plus size={14} aria-hidden />
-                        Add
-                    </Button>
-                </div>
+                <TagsField
+                    tags={tags}
+                    onTagsChange={onTagsChange}
+                    dict={dict}
+                    onPromoteToCanonical={onPromoteToCanonical}
+                    onPromoteToAlias={onPromoteToAlias}
+                />
             </div>
 
             {/* Generate row */}

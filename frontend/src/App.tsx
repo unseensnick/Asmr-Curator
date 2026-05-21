@@ -376,6 +376,8 @@ export default function App() {
                     root={bulkEditRoot}
                     dict={dict}
                     onRemoveFile={removeBulkEditFile}
+                    onPromoteToCanonical={promoteToCanonical}
+                    onPromoteToAlias={promoteToAlias}
                 />
             </Suspense>
             <CookiesSheet open={cookiesOpen} onClose={() => setCookiesOpen(false)} />
