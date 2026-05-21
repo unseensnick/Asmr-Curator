@@ -337,7 +337,7 @@ export default function LibrarySettingsSheet({
                         variant="outline"
                         size="sm"
                         onClick={() => setResetOpen(true)}
-                        className="gap-1.5 ml-auto border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        className="gap-1.5 ml-auto"
                     >
                         <RotateCcw size={14} aria-hidden />
                         Reset to defaults
