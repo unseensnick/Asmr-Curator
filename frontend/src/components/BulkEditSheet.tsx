@@ -24,6 +24,8 @@ import {
     stripOuterBrackets,
 } from "@/lib/utils";
 
+import { byteLength, MAX_BYTES } from "./selectedFile/utils";
+
 export type BulkEditRoot = "library" | "downloads";
 
 /**
@@ -853,6 +855,18 @@ export default function BulkEditSheet({
                                         {files.map((file, idx) => {
                                             const edit = editFor(file.path);
                                             const titleId = `bulk-title-${idx}`;
+                                            // Live filename-length feedback. Mirrors the
+                                            // single-file rename's bytes/255 indicator so
+                                            // the user catches a too-long name while
+                                            // editing the inputs, not after toggling Rename
+                                            // and reading the Preview error. Only renders
+                                            // once a title exists — without one, no rename
+                                            // is proposed for this row, so there's no
+                                            // length to count.
+                                            const proposed = composeProposedName(edit, file.ext);
+                                            const bytes = proposed ? byteLength(proposed) : 0;
+                                            const bytesOver = bytes > MAX_BYTES;
+                                            const bytesWarn = bytes > 200 && !bytesOver;
                                             return (
                                                 <div
                                                     key={file.path}
@@ -922,7 +936,7 @@ export default function BulkEditSheet({
                                                         <span className="w-12 shrink-0 text-xs text-muted-foreground pt-2">
                                                             Tags
                                                         </span>
-                                                        <div className="flex-1 min-w-0">
+                                                        <div className="flex flex-col flex-1 min-w-0 gap-1">
                                                             <TagsField
                                                                 tags={edit.tags}
                                                                 onTagsChange={(next) =>
@@ -938,6 +952,27 @@ export default function BulkEditSheet({
                                                                 placeholder="Add a tag"
                                                                 ariaLabel={`Add a tag for ${file.name}`}
                                                             />
+                                                            {proposed && (
+                                                                <p
+                                                                    className={
+                                                                        bytesOver
+                                                                            ? "text-xs text-destructive"
+                                                                            : bytesWarn
+                                                                              ? "text-xs text-warning"
+                                                                              : "text-xs text-muted-foreground"
+                                                                    }
+                                                                >
+                                                                    <span className="font-mono tabular-nums">
+                                                                        {bytes} / {MAX_BYTES}
+                                                                    </span>{" "}
+                                                                    bytes
+                                                                    {bytesOver
+                                                                        ? ", too long, remove some tags."
+                                                                        : bytesWarn
+                                                                          ? ", approaching limit."
+                                                                          : "."}
+                                                                </p>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 </div>

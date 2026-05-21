@@ -21,6 +21,7 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 - **Cmd / Ctrl + Enter from the title or format input fires Generate filename.** The shortcut shows next to the button label (`⌘↵` on macOS, `Ctrl↵` elsewhere) so the late-night repeat workflow doesn't have to reach for the mouse.
 - **The FileBrowser remembers which tab you were on across reloads.** Previously every refresh reset to Library; users who live in Downloads after a Patreon bridge had to switch back manually each time.
 - **Secondary text in light mode now clears WCAG AA on tinted surfaces.** Log tails, code-block previews, and hints sitting on `bg-muted/40` were borderline against the contrast floor in light mode; the muted-foreground token nudged darker so legibility holds up in daylight.
+- **Each row in the Bulk edit sheet now shows the proposed filename's byte count under its Tags field.** Same `bytes / 255 bytes` indicator the single-file rename uses (warning past 200, destructive past 255) — so you catch a too-long name while editing tags, not after toggling Rename and scrolling to the preview.
 
 ### Fixes
 
