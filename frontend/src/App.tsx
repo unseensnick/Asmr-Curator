@@ -393,6 +393,7 @@ export default function App() {
                     onPromoteToAlias={promoteToAlias}
                     librarySubdir={librarySubdir}
                     onLibrarySubdirChange={setLibrarySubdir}
+                    onOpenDictionary={() => setLibraryOpen(true)}
                 />
             </Suspense>
             <CookiesSheet open={cookiesOpen} onClose={() => setCookiesOpen(false)} />

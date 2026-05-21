@@ -22,6 +22,7 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 - **The FileBrowser remembers which tab you were on across reloads.** Previously every refresh reset to Library; users who live in Downloads after a Patreon bridge had to switch back manually each time.
 - **Secondary text in light mode now clears WCAG AA on tinted surfaces.** Log tails, code-block previews, and hints sitting on `bg-muted/40` were borderline against the contrast floor in light mode; the muted-foreground token nudged darker so legibility holds up in daylight.
 - **Each row in the Bulk edit sheet now shows the proposed filename's byte count under its Tags field.** Same `bytes / 255 bytes` indicator the single-file rename uses (warning past 200, destructive past 255) — so you catch a too-long name while editing tags, not after toggling Rename and scrolling to the preview.
+- **The Bulk edit sheet header gets a Dictionary shortcut, and hovering a filename no longer shows the text cursor.** Click Dictionary inside Bulk edit to open the canonical-tags sheet on top with all in-flight edits preserved; closing it returns you to Bulk edit. Opening Dictionary from the app header still returns you to where you were. The per-row filename also picks up `cursor-default` so the read-only header text doesn't read as an editable input.
 
 ### Fixes
 

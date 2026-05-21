@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Eraser, Loader2, RefreshCw, X } from "lucide-react";
+import { AlertCircle, BookOpen, Eraser, Loader2, RefreshCw, X } from "lucide-react";
 
 import LibrarySubdirPicker from "@/components/LibrarySubdirPicker";
 import SectionLabel from "@/components/SectionLabel";
@@ -149,6 +149,14 @@ interface BulkEditSheetProps {
      *  `to_subdir`. */
     librarySubdir: string;
     onLibrarySubdirChange: (subdir: string) => void;
+    /**
+     * Open the Dictionary sheet on top of this one. Lets the user
+     * inspect / promote / alias canonical tags while mid-bulk-edit
+     * without losing their in-flight per-row edits. The Dictionary
+     * sheet is its own right-side Sheet that stacks above this one
+     * — closing it returns the user here, with all state intact.
+     */
+    onOpenDictionary: () => void;
 }
 
 /**
@@ -185,6 +193,7 @@ export default function BulkEditSheet({
     onPromoteToAlias,
     librarySubdir,
     onLibrarySubdirChange,
+    onOpenDictionary,
 }: BulkEditSheetProps) {
     // Keyed by `FileEntry.path` (relative to the chosen root). Paths the
     // user hasn't touched aren't in the map — `editFor` falls back to
@@ -738,10 +747,28 @@ export default function BulkEditSheet({
                     <span className="text-sm text-muted-foreground" aria-live="polite">
                         {count} {fileWord}
                     </span>
+                    {/* Dictionary shortcut. Opens the LibrarySettingsSheet on
+                        top of this one — Radix stacks the two right-side
+                        sheets, so the user can promote / alias / inspect
+                        canonical tags without losing in-flight bulk-edit
+                        state. Closing the Dictionary returns focus + view
+                        to this sheet (App.tsx's libraryOpen and bulkEditOpen
+                        are independent). */}
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={onOpenDictionary}
+                        className="ml-auto gap-1.5"
+                        aria-label="Open dictionary"
+                        title="Open dictionary (stays on top — close to return here)"
+                    >
+                        <BookOpen size={14} aria-hidden />
+                        Dictionary
+                    </Button>
                     <button
                         type="button"
                         onClick={onClose}
-                        className="ml-auto text-muted-foreground hover:text-foreground transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                        className="text-muted-foreground hover:text-foreground transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                         aria-label="Close bulk edit"
                         title="Close"
                     >
@@ -879,7 +906,15 @@ export default function BulkEditSheet({
                                                     <div className="flex items-center gap-2 min-w-0">
                                                         <Tooltip>
                                                             <TooltipTrigger asChild>
-                                                                <span className="flex-1 min-w-0 block font-mono text-xs text-foreground truncate">
+                                                                {/* cursor-default overrides the
+                                                                    browser's text-cursor default
+                                                                    on selectable text — the
+                                                                    filename is read-only context
+                                                                    here, not an editable input
+                                                                    (the actual editable lives in
+                                                                    the Title row below). Keep
+                                                                    text selectable for copy. */}
+                                                                <span className="flex-1 min-w-0 block font-mono text-xs text-foreground truncate cursor-default">
                                                                     {file.name}
                                                                 </span>
                                                             </TooltipTrigger>
