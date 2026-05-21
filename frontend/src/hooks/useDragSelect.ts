@@ -19,53 +19,29 @@ export interface DragRect {
 }
 
 export interface UseDragSelectOptions {
-    /** Live mirror of the current selection. Read inside the hook's
-     *  closures so the listener loop doesn't capture a stale Set on
-     *  mousedown. */
+    /** Live mirror of the selection so the listener loop doesn't capture
+     *  a stale Set at mousedown. */
     selectedPathsRef: MutableRefObject<Set<string>>;
-    /** When non-null an inline rename is active and drag-select should
-     *  not start (the rename input is already a focus-stealing surface). */
+    /** Non-null means an inline rename is active; drag-select stays off. */
     renamePathRef: MutableRefObject<string | null>;
-    /** Apply the hit-test result. Receives the new Set; the caller owns
-     *  the React state update. */
     setSelectedPaths: (next: Set<string>) => void;
-    /** Cleared together with the selection on a no-op empty-area click,
-     *  so the next Shift-click has no stale anchor. */
+    /** Cleared alongside the selection on an empty-area no-op click. */
     setAnchorPath: (next: string | null) => void;
 }
 
 export interface UseDragSelectResult {
-    /** Attach to the scrollable list container — the rectangle's edges
-     *  are clamped against this element's bounding box for auto-scroll,
-     *  and rows inside it are the hit-test universe. */
     scrollContainerRef: MutableRefObject<HTMLDivElement | null>;
-    /** Attach to the same container's `onMouseDown`. The handler bails
-     *  early on right-click, on row clicks (the row's onClick wins),
-     *  and while a rename input is showing. */
     onMouseDown: (e: ReactMouseEvent<HTMLDivElement>) => void;
-    /** Current rectangle to render as an overlay, or null when no drag
-     *  is in flight. */
     dragRect: DragRect | null;
-    /** Force-teardown of the window listeners + auto-scroll RAF. The
-     *  Sheet's close path calls this so a drag in flight doesn't leak
-     *  past unmount. Idempotent. */
+    /** Force-teardown of the window listeners + auto-scroll RAF.
+     *  Idempotent; safe from Sheet close / unmount paths. */
     cleanup: () => void;
 }
 
 /**
- * Drag-rectangle (rubber-band) selection with auto-scroll near the
- * container's vertical edges. Extracted from `LibraryExplorerSheet`
- * — behaviour is preserved exactly, including:
- *
- *   • mousedown on a row defers to the row's click handler
- *   • Ctrl/Cmd/Shift held at mousedown makes the drag additive
- *     (otherwise it replaces the previous selection)
- *   • near-edge auto-scroll runs in a RAF loop that idles itself when
- *     the pointer leaves the edge band
- *   • a genuine non-additive empty-space click (no movement) clears
- *     the selection — mirrors OS file-explorer behaviour
- *   • unmount / Sheet-close paths can tear down a live drag via
- *     `cleanup` so the window listeners + RAF don't dangle
+ * Drag-rectangle (rubber-band) selection with near-edge auto-scroll.
+ * Ctrl/Cmd/Shift at mousedown make the drag additive; a no-movement
+ * empty-area click clears the selection (OS file-explorer parity).
  */
 export function useDragSelect(options: UseDragSelectOptions): UseDragSelectResult {
     const { selectedPathsRef, renamePathRef, setSelectedPaths, setAnchorPath } = options;
