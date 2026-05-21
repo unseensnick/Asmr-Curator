@@ -471,13 +471,17 @@ async def ingest_drive_link(body: IngestDriveLinkIn):
                     "debug_dir": str(e.debug_dir) if e.debug_dir else None,
                 }
             )
-        except Exception as e:
+        except Exception:
+            # Log full traceback server-side; surface only a generic message
+            # to the client. Stringifying the bare exception risks leaking
+            # internal paths, library messages, or whatever third-party error
+            # shape happened to bubble. error-handling.md forbids this.
             log.exception("ingest-drive-link: unexpected failure")
             await queue.put(
                 {
                     "state": "error",
                     "code": "internal",
-                    "message": f"Unexpected backend error: {e}",
+                    "message": "Drive download failed unexpectedly. Check the backend logs for details.",
                     "debug_dir": None,
                 }
             )
