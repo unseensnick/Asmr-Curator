@@ -384,21 +384,15 @@ class BulkWriteIn(BaseModel):
 
 
 def _validate_bulk_rename_name(name: str) -> str | None:
-    """Same rule set as /api/rename (no /, no \\, not . / .., no leading
-    dot, ≤255 UTF-8 bytes) but collects instead of raising so phase 1 can
-    surface every offending file in one response."""
-    name = name.strip()
-    if not name:
-        return "Filename cannot be empty."
-    if "/" in name or "\\" in name:
-        return "Filename can't contain `/` or `\\`."
-    if name in (".", ".."):
-        return "Invalid filename."
-    if name.startswith("."):
-        return "Filename can't start with a dot."
-    name_bytes = len(name.encode("utf-8"))
-    if name_bytes > 255:
-        return f"Filename too long: {name_bytes} bytes (max 255)."
+    """Same rule set as `_validate_name`, but collects the error message
+    instead of raising so phase 1 of bulk-write can surface every offending
+    file in one response. Thin wrapper — the rules live in `_validate_name`.
+    """
+    try:
+        _validate_name(name, max_bytes=255, term="Filename")
+    except HTTPException as e:
+        # `detail` is a str on every call site here (no dict variants).
+        return str(e.detail)
     return None
 
 
@@ -657,28 +651,33 @@ def bulk_write(body: BulkWriteIn):
 # different volumes).
 
 
-def _validate_name(name: str, *, max_bytes: int | None = None) -> str:
+def _validate_name(name: str, *, max_bytes: int | None = None, term: str = "Name") -> str:
     """Reject names that would escape path validation or create dotfiles the
-    FileBrowser hides. Shared between mkdir + the rename endpoints.
+    FileBrowser hides. Shared between mkdir + the rename endpoints + the
+    bulk-edit rename validator.
 
     Strips whitespace and rejects: empty, contains `/` or `\\`, equals
     `.` or `..`, starts with `.`. When `max_bytes` is set, also rejects
     names whose UTF-8 byte length exceeds the cap (Linux filesystem limit
     is 255; callers pass that when relevant).
+
+    `term` controls user-facing wording — "Name" for folder/general,
+    "Filename" for the rename endpoints. Source of truth for the same
+    rules, instead of four near-identical inline ladders.
     """
     name = name.strip()
     if not name:
-        raise HTTPException(400, "Name cannot be empty.")
+        raise HTTPException(400, f"{term} cannot be empty.")
     if "/" in name or "\\" in name:
-        raise HTTPException(400, "Names can't contain `/` or `\\`.")
+        raise HTTPException(400, f"{term}s can't contain `/` or `\\`.")
     if name in (".", ".."):
-        raise HTTPException(400, "Invalid name.")
+        raise HTTPException(400, f"Invalid {term.lower()}.")
     if name.startswith("."):
-        raise HTTPException(400, "Names can't start with a dot.")
+        raise HTTPException(400, f"{term}s can't start with a dot.")
     if max_bytes is not None:
         name_bytes = len(name.encode("utf-8"))
         if name_bytes > max_bytes:
-            raise HTTPException(422, f"Name too long: {name_bytes} bytes (max {max_bytes}).")
+            raise HTTPException(422, f"{term} too long: {name_bytes} bytes (max {max_bytes}).")
     return name
 
 
@@ -761,15 +760,7 @@ def _plan_move(
         if dest_resolved == src_resolved or src_resolved in dest_resolved.parents:
             raise HTTPException(400, "Can't move a folder into itself.")
 
-    final_name = (new_name or src.name).strip()
-    if not final_name or "/" in final_name or "\\" in final_name:
-        raise HTTPException(400, "Invalid name.")
-    name_bytes = len(final_name.encode("utf-8"))
-    if name_bytes > 255:
-        raise HTTPException(
-            422,
-            f"Name too long: {name_bytes} bytes (max 255). Shorten it.",
-        )
+    final_name = _validate_name(new_name or src.name, max_bytes=255)
 
     dest_rel = (
         f"{dest_dir.relative_to(_main.LIBRARY_PATH.resolve())}/{final_name}"
@@ -1098,19 +1089,12 @@ def rename_file(body: RenameIn):
             f"Cannot rename {src.suffix} files — convert to a metadata-compatible format first (MP3, FLAC, AAC, or OGG)",
         )
 
-    new_name = body.new_name.strip()
-    if not new_name or "/" in new_name or "\\" in new_name:
-        raise HTTPException(400, "Invalid filename")
+    # Shared name-rule validator: same empty / slash / dotfile / 255-byte
+    # checks the bulk-write phase-1 collector and mkdir use.
+    new_name = _validate_name(body.new_name, max_bytes=255, term="Filename")
 
     dest = validate_under_root(str(src.parent.relative_to(root_path) / new_name), root_path)
     reject_if_exists(dest)
-
-    # Linux max filename length is 255 bytes (not chars — encode to check).
-    name_bytes = len(new_name.encode("utf-8"))
-    if name_bytes > 255:
-        raise HTTPException(
-            422, f"Filename too long: {name_bytes} bytes (max 255). Remove some tags to shorten it."
-        )
 
     try:
         src.rename(dest)
