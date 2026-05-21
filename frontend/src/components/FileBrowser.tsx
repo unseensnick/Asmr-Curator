@@ -10,7 +10,9 @@ import {
 } from "react";
 import {
     ChevronDown,
+    ChevronRight,
     FilePen,
+    Folder,
     FolderOpen,
     ListChecks,
     Loader2,
@@ -51,7 +53,14 @@ import { type DragRect, useDragSelect } from "@/hooks/useDragSelect";
 import { API, apiGet, apiPost, buildQueryString, type FileRoot } from "@/lib/api";
 import { FORMAT_EXT, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
 import { selectAll, selectionFromClick } from "@/lib/explorerSelection";
-import type { ConvertFormat, ConvertQuality, FileEntry, SearchMode } from "@/lib/types";
+import type {
+    ConvertFormat,
+    ConvertQuality,
+    FileEntry,
+    ListedDirResponse,
+    ListedEntry,
+    SearchMode,
+} from "@/lib/types";
 import { getErrorMessage } from "@/lib/utils";
 
 // Lazy-loaded heavy Browse sheet. Mounts only on first Browse click.
@@ -126,6 +135,13 @@ export default function FileBrowser({
         }
     });
     const [files, setFiles] = useState<FileEntry[]>([]);
+    // Library-tab subdir listing: holds the raw `/api/files` response so we
+    // can render folder rows + a breadcrumb when the user is browsing a
+    // folder tree. `null` whenever we're in flat search mode (Downloads, or
+    // Library with an active query). Files derived from this list also flow
+    // into the `files` state above so the existing selection / bulk-edit /
+    // batch logic keeps working without branching every call site.
+    const [subdirEntries, setSubdirEntries] = useState<ListedEntry[] | null>(null);
     const [query, setQuery] = useState("");
     const [searchMode, setSearchMode] = useState<SearchMode>("filename");
     const [selected, setSelected] = useState<FileEntry | null>(null);
@@ -266,19 +282,50 @@ export default function FileBrowser({
 
     // ── Load files ────────────────────────────────────────────────────────
 
+    /** True when the active list is a single-level folder listing instead of
+     *  a recursive search. Library tab + empty query gives the user a real
+     *  file browser; Downloads stays flat (it's transient ingest staging,
+     *  and the post-Apply bridge expects every file at one zoom level). */
+    function isSubdirListingMode(rt: FileRoot, q: string): boolean {
+        return rt === "library" && !q.trim();
+    }
+
     async function loadFiles(q: string, mode: SearchMode, rt: FileRoot) {
         setLoading(true);
         setError("");
         try {
-            const data = await apiGet<SearchResponse>(
-                API.search +
-                    buildQueryString({
-                        q: q.trim(),
-                        search_in: mode,
-                        root: rt,
-                    }),
-            );
-            setFiles(data.files);
+            if (isSubdirListingMode(rt, q)) {
+                // Single-level listing inside librarySubdir; renders folders
+                // (drill-down) + files together. librarySubdir doubles as the
+                // move-target cursor so navigating here aims the per-file +
+                // bulk move pickers at the same place.
+                const data = await apiGet<ListedDirResponse>(
+                    API.files + buildQueryString({ root: rt, subdir: librarySubdir }),
+                );
+                setSubdirEntries(data.entries);
+                setFiles(
+                    data.entries
+                        .filter((e) => e.type === "file")
+                        .map((e) => ({
+                            name: e.name,
+                            ext: e.ext ?? "",
+                            path: e.path,
+                            folder: "",
+                            needs_conversion: e.needs_conversion,
+                        })),
+                );
+            } else {
+                const data = await apiGet<SearchResponse>(
+                    API.search +
+                        buildQueryString({
+                            q: q.trim(),
+                            search_in: mode,
+                            root: rt,
+                        }),
+                );
+                setSubdirEntries(null);
+                setFiles(data.files);
+            }
         } catch (e) {
             const envName = rt === "library" ? "LIBRARY_PATH" : "DOWNLOAD_PATH";
             setError(
@@ -286,6 +333,7 @@ export default function FileBrowser({
                     getErrorMessage(e),
             );
             setFiles([]);
+            setSubdirEntries(null);
         } finally {
             setLoading(false);
         }
@@ -331,6 +379,27 @@ export default function FileBrowser({
     function handleModeChange(mode: SearchMode) {
         setSearchMode(mode);
         loadFiles(query, mode, root);
+    }
+
+    // Reload when the shared library-subdir position changes (Browse sheet
+    // navigates here, single-file Move flow lands on a folder, BulkEdit's
+    // move section picks a target). Only matters in subdir-listing mode —
+    // search mode is recursive across the whole root.
+    useEffect(() => {
+        if (!open || !loadedOnceRef.current) return;
+        if (!isSubdirListingMode(root, query)) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- data-fetching kickoff
+        loadFiles(query, searchMode, root);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- responds to subdir nav only
+    }, [librarySubdir]);
+
+    function navigateToSubdir(next: string) {
+        // Selection is path-keyed and a folder change invalidates every
+        // previously-selected path — mirror handleRootChange's cleanup.
+        setSelected(null);
+        commitSelection(new Set());
+        setSelectionAnchor(null);
+        setLibrarySubdir(next);
     }
 
     // Consume bridge requests from PatreonPanel: open the panel, switch
@@ -770,9 +839,27 @@ export default function FileBrowser({
                                     DismissableLayer. */}
                                 <ContextMenu modal={false}>
                                     <ContextMenuTrigger asChild>
-                                        <div onContextMenu={resolveMenuTarget}>
+                                        <div
+                                            onContextMenu={resolveMenuTarget}
+                                            className="flex flex-col gap-2"
+                                        >
+                                            {isSubdirListingMode(root, query) && (
+                                                <FileBrowserBreadcrumb
+                                                    subdir={librarySubdir}
+                                                    onNavigate={navigateToSubdir}
+                                                    onOpenExplorer={() => setExplorerOpen(true)}
+                                                />
+                                            )}
                                             <FileList
                                                 files={files}
+                                                folders={
+                                                    subdirEntries
+                                                        ? subdirEntries.filter(
+                                                              (e) => e.type === "dir",
+                                                          )
+                                                        : undefined
+                                                }
+                                                onOpenFolder={navigateToSubdir}
                                                 loading={loading}
                                                 selected={selected}
                                                 batchMode={batchMode}
@@ -786,7 +873,9 @@ export default function FileBrowser({
                                                     root === "library"
                                                         ? query
                                                             ? "No matching files."
-                                                            : "Library is empty. Fetch some posts and use Move to library to file them here."
+                                                            : librarySubdir
+                                                              ? "This folder is empty."
+                                                              : "Library is empty. Fetch some posts and use Move to library to file them here."
                                                         : query
                                                           ? "No matching downloads."
                                                           : "No pending downloads."
@@ -1152,6 +1241,11 @@ function SearchRow({
 
 interface FileListProps {
     files: FileEntry[];
+    /** Subdir-listing mode only: folder rows rendered above the file rows.
+     *  Click a folder to drill into it. Undefined / empty when not in
+     *  subdir-listing mode (Downloads tab, or any active search). */
+    folders?: ListedEntry[];
+    onOpenFolder?: (path: string) => void;
     loading: boolean;
     selected: FileEntry | null;
     batchMode: boolean;
@@ -1176,6 +1270,8 @@ interface FileListProps {
 
 function FileList({
     files,
+    folders,
+    onOpenFolder,
     loading,
     selected,
     batchMode,
@@ -1192,6 +1288,7 @@ function FileList({
     onRenameSubmit,
     onRenameCancel,
 }: FileListProps) {
+    const hasFolders = (folders?.length ?? 0) > 0;
     return (
         // The list shell receives drag-select's mousedown directly so
         // the rubber-band's coordinate frame matches the scroll
@@ -1215,33 +1312,125 @@ function FileList({
                     />
                     Loading.
                 </div>
-            ) : files.length === 0 ? (
+            ) : files.length === 0 && !hasFolders ? (
                 <div className="flex items-center justify-center py-10 text-sm text-muted-foreground italic px-4 text-center leading-relaxed">
                     {emptyText}
                 </div>
             ) : (
-                files.map((file) => (
-                    <FileBrowserItem
-                        key={file.path}
-                        file={file}
-                        isSelected={selected?.path === file.path}
-                        batchMode={batchMode}
-                        isBatchSelected={batchSelected.has(file.path)}
-                        renaming={renamePath === file.path}
-                        renameValue={renamePath === file.path ? renameValue : ""}
-                        onRenameChange={onRenameChange}
-                        onRenameSubmit={onRenameSubmit}
-                        onRenameCancel={onRenameCancel}
-                        onClick={onSelect}
-                        onBatchToggle={onBatchToggle}
-                    />
-                ))
+                <>
+                    {hasFolders &&
+                        folders!.map((dir) => (
+                            <FolderRow
+                                key={dir.path}
+                                name={dir.name}
+                                onOpen={() => onOpenFolder?.(dir.path)}
+                            />
+                        ))}
+                    {files.map((file) => (
+                        <FileBrowserItem
+                            key={file.path}
+                            file={file}
+                            isSelected={selected?.path === file.path}
+                            batchMode={batchMode}
+                            isBatchSelected={batchSelected.has(file.path)}
+                            renaming={renamePath === file.path}
+                            renameValue={renamePath === file.path ? renameValue : ""}
+                            onRenameChange={onRenameChange}
+                            onRenameSubmit={onRenameSubmit}
+                            onRenameCancel={onRenameCancel}
+                            onClick={onSelect}
+                            onBatchToggle={onBatchToggle}
+                        />
+                    ))}
+                </>
             )}
             {/* Drag-select overlay. Rendered as a portal-like absolute
                 element inside the scroll container so the rectangle sits
                 visually on top of the rows. The hook itself owns the
                 math; we just paint what it tells us. */}
             {dragRect && <DragSelectOverlay rect={dragRect} containerRef={scrollContainerRef} />}
+        </div>
+    );
+}
+
+/** Folder row inside the Library tab's subdir listing. Click to drill in;
+ *  no selection behaviour (folders aren't bulk-edit targets). */
+function FolderRow({ name, onOpen }: { name: string; onOpen: () => void }) {
+    return (
+        <button
+            type="button"
+            onClick={onOpen}
+            className="flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-border last:border-b-0 transition-colors hover:bg-muted/60 w-full text-left"
+        >
+            <Folder size={18} aria-hidden className="text-muted-foreground shrink-0" />
+            <span className="flex-1 font-medium text-foreground truncate">{name}</span>
+            <ChevronRight size={14} aria-hidden className="text-muted-foreground/50 shrink-0" />
+        </button>
+    );
+}
+
+/** Breadcrumb shown above the file list when in Library + subdir-listing
+ *  mode. Crumbs map to librarySubdir segments; clicking jumps to that
+ *  ancestor. The trailing "Open in Browse" affordance opens
+ *  LibraryExplorerSheet at the same path so the user can switch from
+ *  inline navigation to the grid + cut/paste surface without losing
+ *  position. */
+function FileBrowserBreadcrumb({
+    subdir,
+    onNavigate,
+    onOpenExplorer,
+}: {
+    subdir: string;
+    onNavigate: (next: string) => void;
+    onOpenExplorer: () => void;
+}) {
+    const parts = subdir ? subdir.split("/").filter(Boolean) : [];
+    return (
+        <div className="flex items-center gap-1 flex-wrap font-mono text-xs text-muted-foreground">
+            <button
+                type="button"
+                onClick={() => onNavigate("")}
+                className={
+                    parts.length === 0
+                        ? "px-1.5 py-0.5 rounded text-foreground"
+                        : "px-1.5 py-0.5 rounded hover:bg-muted/60 hover:text-foreground transition-colors focus-ring"
+                }
+            >
+                Library
+            </button>
+            {parts.map((part, idx) => {
+                const isLast = idx === parts.length - 1;
+                const path = parts.slice(0, idx + 1).join("/");
+                return (
+                    <span key={path} className="flex items-center gap-1">
+                        <span className="text-muted-foreground/50">/</span>
+                        {isLast ? (
+                            <span className="px-1.5 py-0.5 text-foreground">{part}</span>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={() => onNavigate(path)}
+                                className="px-1.5 py-0.5 rounded hover:bg-muted/60 hover:text-foreground transition-colors focus-ring"
+                            >
+                                {part}
+                            </button>
+                        )}
+                    </span>
+                );
+            })}
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <button
+                        type="button"
+                        onClick={onOpenExplorer}
+                        aria-label="Open in Browse sheet at this path"
+                        className="ml-auto p-1 rounded hover:bg-muted/60 hover:text-foreground transition-colors focus-ring"
+                    >
+                        <FolderOpen size={12} aria-hidden />
+                    </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Open in Browse</TooltipContent>
+            </Tooltip>
         </div>
     );
 }
