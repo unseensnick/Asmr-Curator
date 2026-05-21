@@ -342,6 +342,21 @@ export default function BulkEditSheet({
         return `${parts.join(" - ")}${ext}`;
     }
 
+    /** Pipe-delimited ID3 title that mirrors the single-file flow's
+     *  outputPipe in App.tsx. Brackets get stripped from the title,
+     *  then tags + suffix join via " | " — the convention the rest of
+     *  the app uses to fold per-file tags into TIT2 (there's no
+     *  dedicated tags frame; the pipe-string IS the tag storage).
+     *  Returns "" when the user hasn't set a title so `_write_metadata`
+     *  takes its skip-on-empty path and leaves the existing title
+     *  alone. */
+    function composeMetadataTitle(edit: PerFileEdit): string {
+        if (!edit.title.trim()) return "";
+        const sfx = shared.suffix.trim() || "F4A";
+        const pipeTitle = stripOuterBrackets(edit.title);
+        return [pipeTitle, ...edit.tags, sfx].join(" | ");
+    }
+
     interface PreviewRow {
         file: FileEntry;
         proposed: string | null;
@@ -406,7 +421,7 @@ export default function BulkEditSheet({
                 const proposed = rename ? composeProposedName(edit, file.ext) : null;
                 return {
                     path: file.path,
-                    title: edit.title ? stripOuterBrackets(edit.title) : "",
+                    title: composeMetadataTitle(edit),
                     new_name: proposed ?? "",
                 };
             });
