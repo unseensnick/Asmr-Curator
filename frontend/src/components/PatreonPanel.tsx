@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Download, ExternalLink, Link2, User } from "lucide-react";
 
 import DatePicker from "@/components/DatePicker";
@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { fetchPatreonPost } from "@/lib/api";
 import { parseTitleLine } from "@/lib/parser";
-import type { AppDict, PatreonContentType, PatreonPost } from "@/lib/types";
+import type { AppDict, PatreonContentType, PatreonFetchEvent, PatreonPost } from "@/lib/types";
 import { getErrorMessage, normaliseAndDedupeTags, splitLogTail } from "@/lib/utils";
 
 interface PatreonPanelProps {
@@ -87,9 +87,21 @@ export default function PatreonPanel({
     const [post, setPost] = useState<PatreonPost | null>(null);
     const [posts, setPosts] = useState<PatreonPost[]>([]);
     const [logTail, setLogTail] = useState<string>("");
+    // Latest SSE phase event from /api/patreon/fetch — drives the live
+    // narration under the URL input. `null` while idle.
+    const [phase, setPhase] = useState<PatreonFetchEvent | null>(null);
     // Remember the last post the user applied so the bridge link knows
     // which downloaded file to hand off to the FileBrowser Downloads tab.
     const [lastApplied, setLastApplied] = useState<PatreonPost | null>(null);
+    // AbortController so unmount / re-fetch cancels the in-flight SSE
+    // stream and the server's runner task tears down cleanly.
+    const fetchAbortRef = useRef<AbortController | null>(null);
+
+    useEffect(() => {
+        return () => {
+            fetchAbortRef.current?.abort();
+        };
+    }, []);
 
     // Power mode controls the "More options" disclosure: on means open, off
     // means closed. We let the Collapsible own its own open state via
@@ -109,6 +121,11 @@ export default function PatreonPanel({
     async function handleFetch() {
         const trimmed = url.trim();
         if (!trimmed) return;
+        // Cancel any in-flight stream before kicking off a new one.
+        fetchAbortRef.current?.abort();
+        const controller = new AbortController();
+        fetchAbortRef.current = controller;
+
         setFetching(true);
         setFetchStatus(null);
         setApplyStatus(null);
@@ -116,14 +133,22 @@ export default function PatreonPanel({
         setPost(null);
         setPosts([]);
         setLogTail("");
+        setPhase({ state: "starting" });
         try {
-            const res = await fetchPatreonPost(trimmed, {
-                metadataOnly,
-                contentTypes,
-                publishedAfter: publishedAfter || undefined,
-                publishedBefore: publishedBefore || undefined,
-                dryRun,
-            });
+            const res = await fetchPatreonPost(
+                trimmed,
+                {
+                    metadataOnly,
+                    contentTypes,
+                    publishedAfter: publishedAfter || undefined,
+                    publishedBefore: publishedBefore || undefined,
+                    dryRun,
+                },
+                (event) => {
+                    setPhase(event);
+                },
+                controller.signal,
+            );
             if (res.dry_run) {
                 setFetchStatus({
                     type: "info",
@@ -150,6 +175,7 @@ export default function PatreonPanel({
                 setPost(res.posts[0] ?? null);
             }
         } catch (err) {
+            if (controller.signal.aborted) return;
             const { head, logTail: tail } = splitLogTail(getErrorMessage(err));
             setFetchStatus({
                 type: "error",
@@ -159,7 +185,11 @@ export default function PatreonPanel({
             });
             if (tail) setLogTail(tail);
         } finally {
+            if (fetchAbortRef.current === controller) {
+                fetchAbortRef.current = null;
+            }
             setFetching(false);
+            setPhase(null);
         }
     }
 
@@ -182,11 +212,13 @@ export default function PatreonPanel({
           ? "Fetch info only"
           : "Fetch from Patreon";
 
-    const workingLabel = dryRun
+    const idleWorkingLabel = dryRun
         ? "Previewing the pipeline."
         : metadataOnly
           ? "Fetching post info."
           : "Pulling from Patreon.";
+
+    const workingLabel = phase ? phaseLabel(phase, idleWorkingLabel) : idleWorkingLabel;
 
     const hasResult = post !== null || posts.length > 0;
 
@@ -219,7 +251,13 @@ export default function PatreonPanel({
                     )}
                 </div>
                 {fetching ? (
-                    <p className="text-sm text-muted-foreground">{workingLabel}</p>
+                    <p
+                        className="text-sm text-muted-foreground"
+                        aria-live="polite"
+                        aria-atomic="true"
+                    >
+                        {workingLabel}
+                    </p>
                 ) : fetchStatus ? (
                     <div className="flex flex-col gap-1.5">
                         <StatusBanner status={fetchStatus} />
@@ -365,6 +403,80 @@ export default function PatreonPanel({
             {logTail && <LogTail tail={logTail} />}
         </div>
     );
+}
+
+// ── Phase narration ───────────────────────────────────────────────────────────
+//
+// Map one SSE event from /api/patreon/fetch to the librarian-voice line we
+// render under the URL input. patreon-dl's pipeline goes:
+//   starting → resolving → fetching_posts → posts_found → post_progress
+//             → downloading → wrote_file → … → phase_done → done
+// Anything we don't recognise falls back to the caller's idle label so the
+// user never sees an empty bar.
+
+function formatMB(bytes: number | null | undefined): string {
+    if (bytes == null) return "?";
+    const mb = bytes / (1024 * 1024);
+    if (mb >= 1) return `${mb.toFixed(1)} MB`;
+    return `${(bytes / 1024).toFixed(0)} KB`;
+}
+
+function truncate(s: string, max = 60): string {
+    if (s.length <= max) return s;
+    return `${s.slice(0, max - 1).trimEnd()}…`;
+}
+
+function phaseLabel(event: PatreonFetchEvent, idleLabel: string): string {
+    switch (event.state) {
+        case "starting":
+            return idleLabel;
+        case "cached":
+            return event.count === 1
+                ? "Found the post in your library cache. No re-download needed."
+                : `Found ${event.count} cached posts. No re-download needed.`;
+        case "resolving":
+            if (event.target_kind === "creator") {
+                return `Looking up ${event.label} on Patreon.`;
+            }
+            if (event.target_kind === "post") {
+                return `Looking up post #${event.label}.`;
+            }
+            return "Resolving the link with Patreon.";
+        case "fetching_posts":
+            if (event.total > 0) {
+                return `Reading the post list (${event.fetched} of ${event.total}).`;
+            }
+            return `Reading the post list (${event.fetched} found).`;
+        case "posts_found":
+            return event.count === 1
+                ? "Found 1 post. Starting the download."
+                : `Found ${event.count} posts. Starting the downloads.`;
+        case "post_progress": {
+            const title = event.title ? `: ${truncate(event.title)}` : "";
+            return `Downloading post #${event.post_id}${title}`;
+        }
+        case "downloading": {
+            const speed = event.speed_kbs != null ? ` at ${event.speed_kbs} kB/s` : "";
+            if (event.total > 0) {
+                return `Downloading ${formatMB(event.bytes)} of ${formatMB(event.total)} (${event.percent}%)${speed}.`;
+            }
+            return `Downloading ${formatMB(event.bytes)}${speed}.`;
+        }
+        case "wrote_file": {
+            const name = event.path.split(/[/\\]/).pop() ?? event.path;
+            return `Saved ${truncate(name, 50)}.`;
+        }
+        case "skipped":
+            // patreon-dl emits reasons like "already downloaded and nothing
+            // has changed since last download" — too long for inline copy.
+            return `Skipped #${event.post_id}. Already in your library.`;
+        case "phase_done":
+            return "Wrapping up. Tidying the files.";
+        case "done":
+            return "Done.";
+        case "error":
+            return event.message;
+    }
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────

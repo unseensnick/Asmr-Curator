@@ -104,8 +104,63 @@ class PatreonFetchIn(BaseModel):
     dry_run: bool = False
 
 
+def _rel_to_download(download_path: Path, p: str | None) -> str | None:
+    """Render a patreon-dl-emitted path as a string relative to DOWNLOAD_PATH.
+
+    Returns the original input on resolve failures so the API response never
+    leaks an absolute host path — the relative form is what the file browser
+    consumes. `download_path` is passed in (rather than recomputed) so the
+    SSE generator and the synchronous fast-path see the same resolved root.
+    """
+    if not p:
+        return None
+    try:
+        return str(Path(p).resolve().relative_to(download_path))
+    except ValueError, OSError:
+        # ValueError: path outside DOWNLOAD_PATH or null-byte input.
+        # OSError: any other resolve failure. Mirrors validate_under_root.
+        return p
+
+
+def _serialise_post(post, download_path: Path) -> dict:
+    return {
+        "post_id": post.post_id,
+        "title": post.title,
+        "tags": post.tags,
+        "artist": post.artist,
+        "post_dir": _rel_to_download(download_path, post.post_dir),
+        "audio_path": _rel_to_download(download_path, post.audio_path),
+        "external_links": [{"url": link.url, "text": link.text} for link in post.external_links],
+    }
+
+
 @router.post("/api/patreon/fetch")
-def patreon_fetch_endpoint(body: PatreonFetchIn):
+async def patreon_fetch_endpoint(body: PatreonFetchIn):
+    """Stream patreon-dl progress as SSE while the subprocess runs.
+
+    Frame shapes (one `data: <json>\\n\\n` per event):
+      - `{"state": "starting"}` — subprocess just spawned (or fast-path hit).
+      - `{"state": "cached", "count": N}` — metadata-only fast-path served
+        from cached sidecars; no subprocess ran.
+      - `{"state": "resolving", "target_kind": "creator"|"url"|"post",
+         "label": str}` — patreon-dl logged its target.
+      - `{"state": "fetching_posts", "fetched": N, "total": M}` — post-list
+        pagination progress (creator URLs).
+      - `{"state": "posts_found", "count": N}` — final tally before
+        downloads begin.
+      - `{"state": "post_progress", "post_id": str, "title": str}` —
+        per-post start.
+      - `{"state": "downloading", "bytes": N, "total": M, "percent": N,
+         "speed_kbs": N|null}` — throttled per-file bytes.
+      - `{"state": "wrote_file", "path": str}` — one media file saved.
+      - `{"state": "skipped", "post_id": str, "reason": str}` — patreon-dl
+        skipped this post (already-downloaded cache hit, tier mismatch, …).
+      - `{"state": "phase_done"}` — patreon-dl emitted its terminal info
+        line; the wrapper still has post-processing (flatten / cleanup) to
+        run before `done`.
+      - `{"state": "done", ...PatreonFetchResponse}` — final aggregate.
+      - `{"state": "error", "message": str}` — terminal failure.
+    """
     url = require_non_empty(body.url, "url")
     cookie = database.get_setting(PATREON_COOKIE_KEY) or ""
     if not cookie:
@@ -115,72 +170,102 @@ def patreon_fetch_endpoint(body: PatreonFetchIn):
     published_before = _validate_iso_date(body.published_before, "published_before")
 
     output_dir = _main.DOWNLOAD_PATH / PATREON_OUTPUT_SUBDIR
-    try:
-        result = patreon_fetch(
-            url,
-            cookie,
-            output_dir,
-            metadata_only=body.metadata_only,
-            content_types=body.content_types,
-            published_after=published_after,
-            published_before=published_before,
-            dry_run=body.dry_run,
-        )
-    except PatreonFetchError as e:
-        raise HTTPException(502, str(e))
-
     download_path = _main.DOWNLOAD_PATH.resolve()
 
-    def _rel(p: str | None) -> str | None:
-        if not p:
-            return None
-        try:
-            return str(Path(p).resolve().relative_to(download_path))
-        except ValueError, OSError:
-            # ValueError: path falls outside DOWNLOAD_PATH (the intended
-            # branch), or null-byte input from patreon-dl. OSError: any
-            # other OS-layer resolve failure. Mirrors the resolve()
-            # guard added to validate_under_root.
-            return p
+    queue: asyncio.Queue = asyncio.Queue()
+    DONE_SENTINEL = object()
+    loop = asyncio.get_running_loop()
 
-    posts = [
-        {
-            "post_id": p.post_id,
-            "title": p.title,
-            "tags": p.tags,
-            "artist": p.artist,
-            "post_dir": _rel(p.post_dir),
-            "audio_path": _rel(p.audio_path),
-            "external_links": [{"url": link.url, "text": link.text} for link in p.external_links],
-        }
-        for p in result.posts
-    ]
-    response = {
-        "output_dir": _rel(result.output_dir),
-        "count": len(posts),
-        "metadata_only": body.metadata_only,
-        "dry_run": body.dry_run,
-        "posts": posts,
-    }
-    if body.dry_run:
-        response["log_tail"] = result.log_tail
-        if not posts:
-            response["hint"] = (
-                "Dry run complete — patreon-dl walked the pipeline without writing files. "
-                "Check the log tail for the posts it would have downloaded. "
-                "Untoggle 'Dry run' and re-fetch to commit."
+    def push_threadsafe(event: dict) -> None:
+        # patreon_fetch.fetch runs in a worker thread; the queue lives on
+        # the FastAPI event loop. call_soon_threadsafe is the bridge.
+        loop.call_soon_threadsafe(queue.put_nowait, event)
+
+    async def runner() -> None:
+        try:
+            result = await asyncio.to_thread(
+                patreon_fetch,
+                url,
+                cookie,
+                output_dir,
+                metadata_only=body.metadata_only,
+                content_types=body.content_types,
+                published_after=published_after,
+                published_before=published_before,
+                dry_run=body.dry_run,
+                on_progress=push_threadsafe,
             )
-    elif not posts:
-        response["hint"] = (
-            "No new posts were fetched. Most common cause: every matching post is "
-            "already in patreon-dl's status cache from a previous run (re-fetches "
-            "intentionally skip those — only new posts come back). Other causes: "
-            "the URL points to a post you can't access, the cookie has expired, "
-            "or the post is gated behind a tier you're not subscribed to. Check "
-            "the log tail to confirm which."
-        )
-        response["log_tail"] = result.log_tail
-    return response
+            posts = [_serialise_post(p, download_path) for p in result.posts]
+            done_event: dict = {
+                "state": "done",
+                "output_dir": _rel_to_download(download_path, result.output_dir),
+                "count": len(posts),
+                "metadata_only": body.metadata_only,
+                "dry_run": body.dry_run,
+                "posts": posts,
+            }
+            if body.dry_run:
+                done_event["log_tail"] = result.log_tail
+                if not posts:
+                    done_event["hint"] = (
+                        "Dry run complete — patreon-dl walked the pipeline without writing "
+                        "files. Check the log tail for the posts it would have downloaded. "
+                        "Untoggle 'Dry run' and re-fetch to commit."
+                    )
+            elif not posts:
+                done_event["hint"] = (
+                    "No new posts were fetched. Most common cause: every matching post is "
+                    "already in patreon-dl's status cache from a previous run (re-fetches "
+                    "intentionally skip those — only new posts come back). Other causes: "
+                    "the URL points to a post you can't access, the cookie has expired, "
+                    "or the post is gated behind a tier you're not subscribed to. Check "
+                    "the log tail to confirm which."
+                )
+                done_event["log_tail"] = result.log_tail
+            await queue.put(done_event)
+        except PatreonFetchError as e:
+            await queue.put({"state": "error", "message": str(e)})
+        except Exception:
+            # Log full traceback server-side; surface only a generic message
+            # to the client. Stringifying the bare exception risks leaking
+            # internal paths or third-party error shapes (error-handling.md).
+            log.exception("patreon fetch: unexpected failure")
+            await queue.put(
+                {
+                    "state": "error",
+                    "message": (
+                        "Patreon fetch failed unexpectedly. Check the backend logs for details."
+                    ),
+                }
+            )
+        finally:
+            await queue.put(DONE_SENTINEL)
+
+    async def event_stream():
+        task = asyncio.create_task(runner())
+        try:
+            while True:
+                event = await queue.get()
+                if event is DONE_SENTINEL:
+                    return
+                yield f"data: {json.dumps(event, separators=(',', ':'))}\n\n"
+        finally:
+            # Client disconnect — cancel the underlying work so we don't
+            # leak a patreon-dl subprocess for a closed tab.
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            # Prevent any proxy from buffering the stream (matters in dev
+            # behind Vite's proxy).
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ── External audio ingest ─────────────────────────────────────────────────────

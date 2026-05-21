@@ -11,6 +11,10 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
+### Changes
+
+- **The Patreon fetch now narrates as it runs.** A creator-wide pull used to sit on one static label for what could be a multi-hour download; the URL panel now shows live phases — looking up the creator, reading the post list (N of M), found N posts, downloading post #X (title), saved <filename>, skipped, wrapping up — driven by patreon-dl's own stdout. `POST /api/patreon/fetch` is now a `text/event-stream` so single-post and creator-wide pulls report progress identically. The final `done` event carries the same shape the synchronous endpoint used to return, so the result UI didn't change. Cancelling the in-flight stream (close the panel, paste a different URL and fetch again) tears the server-side runner task down cleanly.
+
 ### Additions
 
 - **Help &amp; reference sheet in the header.** A new `?` button next to Dictionary opens a calm right-side sheet covering the three workflows (Patreon URL / Screenshot / files on disk), first-time cookie setup, and the non-obvious affordances (right-click a tag chip, Cmd / Ctrl + Enter, Power mode). A small dot next to the icon clears on first open. Not a tutorial — it's a reference card the user pulls open when they want it.

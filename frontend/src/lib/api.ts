@@ -40,11 +40,11 @@ const ENDPOINT_TIMEOUTS: Array<{ match: RegExp; ms: number }> = [
     { match: /^\/api\/extract\b/, ms: 120_000 }, // Ollama vision can be slow on cold start
     { match: /^\/api\/preview-tags\b/, ms: 120_000 },
     { match: /^\/api\/convert\b/, ms: 600_000 }, // ffmpeg encodes; matches backend timeout
-    { match: /^\/api\/patreon\/fetch\b/, ms: 1_800_000 }, // creator-wide downloads
     { match: /^\/api\/patreon\/ingest-external-audio\b/, ms: 600_000 },
-    // `/api/patreon/ingest-drive-link` and `/api/move/batch` are SSE
-    // streams (see ingestDriveLinkStream / moveBatchStream) — no total
-    // timeout, that would cut healthy long streams short.
+    // `/api/patreon/fetch`, `/api/patreon/ingest-drive-link`, and
+    // `/api/move/batch` are SSE streams (see fetchPatreonPost /
+    // ingestDriveLinkStream / moveBatchStream) — no total timeout, that
+    // would cut healthy long streams short.
 ];
 
 function timeoutFor(path: string): number {
@@ -132,6 +132,7 @@ import type {
     IngestDriveLinkEvent,
     IngestDriveLinkResponse,
     PatreonCookieStatus,
+    PatreonFetchEvent,
     PatreonFetchOptions,
     PatreonFetchResponse,
 } from "./types";
@@ -259,9 +260,25 @@ export async function ingestDriveLinkStream(
     return finalResult;
 }
 
-export function fetchPatreonPost(
+/**
+ * Stream Patreon-fetch progress via SSE.
+ *
+ * `onEvent` fires for each progress event (`starting` → `resolving` →
+ * `fetching_posts` → `posts_found` → `post_progress` → `downloading` →
+ * `wrote_file` → … → `done` | `error`). Resolves with the final response
+ * payload on `done`, rejects on `error`. `AbortSignal` cancels mid-stream
+ * — the backend cancels its runner task on client disconnect, though an
+ * already-spawned patreon-dl subprocess may continue to its own timeout.
+ *
+ * The returned shape matches what the prior synchronous endpoint returned
+ * (`PatreonFetchResponse`) so call sites only have to add the `onEvent`
+ * narration hook.
+ */
+export async function fetchPatreonPost(
     url: string,
     options: PatreonFetchOptions = {},
+    onEvent?: (event: PatreonFetchEvent) => void,
+    signal?: AbortSignal,
 ): Promise<PatreonFetchResponse> {
     const body: Record<string, unknown> = {
         url,
@@ -279,7 +296,73 @@ export function fetchPatreonPost(
     if (options.dryRun) {
         body.dry_run = true;
     }
-    return apiPost<PatreonFetchResponse>(API.patreonFetch, body);
+
+    const response = await fetch(API.patreonFetch, {
+        method: "POST",
+        headers: { ...JSON_HEADERS, Accept: "text/event-stream" },
+        body: JSON.stringify(body),
+        signal,
+    });
+    if (!response.ok) {
+        // Up-front validation errors (412 missing cookie, 400 bad date) come
+        // through as regular JSON responses, not SSE. Surface their `detail`.
+        const text = await response.text().catch(() => "");
+        throw new Error(text || `Request failed: ${response.status}`);
+    }
+    if (!response.body) {
+        throw new Error("Response has no body — SSE not supported in this browser?");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    let finalResult: PatreonFetchResponse | undefined;
+    let finalError: string | undefined;
+
+    try {
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            while (true) {
+                const sepIdx = buffer.indexOf("\n\n");
+                if (sepIdx < 0) break;
+                const frame = buffer.slice(0, sepIdx).replace(/\r/g, "");
+                buffer = buffer.slice(sepIdx + 2);
+                for (const line of frame.split("\n")) {
+                    if (!line.startsWith("data:")) continue;
+                    const payload = line.slice(5).trimStart();
+                    let parsed: PatreonFetchEvent;
+                    try {
+                        parsed = JSON.parse(payload) as PatreonFetchEvent;
+                    } catch {
+                        continue; // Malformed frame — ignore rather than crash.
+                    }
+                    onEvent?.(parsed);
+                    if (parsed.state === "done") {
+                        const { state: _state, ...rest } = parsed;
+                        finalResult = rest as PatreonFetchResponse;
+                    } else if (parsed.state === "error") {
+                        finalError = parsed.message;
+                    }
+                }
+            }
+        }
+    } finally {
+        try {
+            reader.releaseLock();
+        } catch {
+            // Already released by abort — no-op.
+        }
+    }
+
+    if (finalError) {
+        throw new Error(finalError);
+    }
+    if (!finalResult) {
+        throw new Error("Patreon fetch ended without a final `done` event");
+    }
+    return finalResult;
 }
 
 // ── Batch move (cut/paste) ───────────────────────────────────────────────────

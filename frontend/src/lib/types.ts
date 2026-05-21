@@ -136,6 +136,38 @@ export interface PatreonFetchResponse {
     log_tail?: string;
 }
 
+/** Streaming progress events from `POST /api/patreon/fetch`. Discriminated
+ * by `state`. The endpoint emits each event as a single `data: <json>\n\n`
+ * SSE frame; `fetchPatreonPostStream` in `lib/api.ts` is the consumer.
+ *
+ * `starting` fires once at the top of every run, `done` exactly once on
+ * success carrying the same shape the synchronous endpoint used to return,
+ * and `error` exactly once on failure. Everything in between is narration
+ * for the long-task UI under the Patreon URL input. */
+export type PatreonFetchEvent =
+    | { state: "starting" }
+    | { state: "cached"; count: number }
+    | {
+          state: "resolving";
+          target_kind: "creator" | "url" | "post";
+          label: string;
+      }
+    | { state: "fetching_posts"; fetched: number; total: number }
+    | { state: "posts_found"; count: number }
+    | { state: "post_progress"; post_id: string; title: string }
+    | {
+          state: "downloading";
+          bytes: number;
+          total: number;
+          percent: number;
+          speed_kbs: number | null;
+      }
+    | { state: "wrote_file"; path: string }
+    | { state: "skipped"; post_id: string; reason: string }
+    | { state: "phase_done" }
+    | ({ state: "done" } & PatreonFetchResponse)
+    | { state: "error"; message: string };
+
 export type PatreonContentType =
     | "audio"
     | "video"

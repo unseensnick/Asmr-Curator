@@ -22,6 +22,7 @@ from backend.patreon_fetch import (
     _post_id_from_url,
     _vanity_from_url,
     _walk_prosemirror_nodes,
+    parse_progress_line,
 )
 
 # ── _post_id_from_url ──────────────────────────────────────────────────────
@@ -771,3 +772,123 @@ class TestFindCachedCreatorPosts:
 
         found = _find_cached_creator_posts(output_dir, "solargirlasmr", None, None)
         assert [p.post_id for p in found] == ["100"]
+
+
+# ── parse_progress_line ────────────────────────────────────────────────────
+
+
+class TestParseProgressLine:
+    """Regression guard around the patreon-dl stdout patterns that drive
+    the `/api/patreon/fetch` SSE narration. Examples here are real log
+    formats produced by patreon-dl 3.x's ConsoleLogger (datetime + level +
+    originator + message); the parser searches the line so the timestamp /
+    originator prefix doesn't matter."""
+
+    def test_returns_none_for_blank_line(self):
+        assert parse_progress_line("") is None
+
+    def test_returns_none_for_unrecognised_chatter(self):
+        assert (
+            parse_progress_line("Jan 20 14:32:11: debug: PostDownloader: Refresh post #x") is None
+        )
+
+    def test_matches_targeting_creator(self):
+        line = "Jan 20 14:32:11: info: PostDownloader: Targeting posts by 'solargirlasmr'"
+        assert parse_progress_line(line) == {
+            "state": "resolving",
+            "target_kind": "creator",
+            "label": "solargirlasmr",
+        }
+
+    def test_matches_targeting_url(self):
+        line = (
+            "Jan 20 14:32:11: info: PostDownloader: Targeting posts at "
+            "'https://patreon.com/posts/some-slug-12345'"
+        )
+        assert parse_progress_line(line) == {
+            "state": "resolving",
+            "target_kind": "url",
+            "label": "https://patreon.com/posts/some-slug-12345",
+        }
+
+    def test_matches_targeting_single_post(self):
+        line = "Jan 20 14:32:11: info: PostDownloader: Targeting post #155300507"
+        assert parse_progress_line(line) == {
+            "state": "resolving",
+            "target_kind": "post",
+            "label": "155300507",
+        }
+
+    def test_matches_fetched_posts_progress(self):
+        line = "Jan 20 14:32:12: info: PostsFetcher: Fetched posts: 25 / 100"
+        assert parse_progress_line(line) == {
+            "state": "fetching_posts",
+            "fetched": 25,
+            "total": 100,
+        }
+
+    def test_matches_posts_found_total(self):
+        line = "Jan 20 14:32:13: info: PostsFetcher: Done. 100 posts fetched"
+        assert parse_progress_line(line) == {"state": "posts_found", "count": 100}
+
+    def test_matches_download_post(self):
+        line = "Jan 20 14:32:14: info: PostDownloader: Download post #155300507 (My ASMR Title)"
+        assert parse_progress_line(line) == {
+            "state": "post_progress",
+            "post_id": "155300507",
+            "title": "My ASMR Title",
+        }
+
+    def test_matches_download_progress_with_speed(self):
+        line = (
+            "Jan 20 14:32:20: info: Downloader: Download progress (#1.1): "
+            "1048576 / 4194304 bytes / 25% (512 kB/s)"
+        )
+        assert parse_progress_line(line) == {
+            "state": "downloading",
+            "bytes": 1048576,
+            "total": 4194304,
+            "percent": 25,
+            "speed_kbs": 512,
+        }
+
+    def test_matches_download_progress_without_speed(self):
+        # Some progress lines omit the (kB/s) suffix.
+        line = "Jan 20 14:32:20: info: Downloader: Download progress (#1.1): 100 / 1000 bytes / 10%"
+        result = parse_progress_line(line)
+        assert result is not None
+        assert result["state"] == "downloading"
+        assert result["percent"] == 10
+        assert result["speed_kbs"] is None
+
+    def test_matches_download_complete(self):
+        line = (
+            "Jan 20 14:32:25: info: Downloader: Download complete (#1.1) -> "
+            '"/data/Patreon/creator/posts/155300507/audio/track.mp3"'
+        )
+        assert parse_progress_line(line) == {
+            "state": "wrote_file",
+            "path": "/data/Patreon/creator/posts/155300507/audio/track.mp3",
+        }
+
+    def test_matches_skipped_post(self):
+        line = (
+            "Jan 20 14:32:30: info: PostDownloader: Skipped downloading post "
+            "#155300508: already downloaded and nothing has changed since last download"
+        )
+        result = parse_progress_line(line)
+        assert result is not None
+        assert result["state"] == "skipped"
+        assert result["post_id"] == "155300508"
+        assert "already downloaded" in result["reason"]
+
+    def test_matches_done_downloading(self):
+        line = "Jan 20 14:32:35: info: PostDownloader: Done downloading posts by 'solargirlasmr'"
+        assert parse_progress_line(line) == {"state": "phase_done"}
+
+    def test_strips_ansi_color_codes(self):
+        # cli-color decorates every segment. If `color = 0` in the config
+        # is bypassed (or the user runs an older patreon-dl), the parser
+        # still has to land on the right keyword.
+        line = "\x1b[32minfo:\x1b[39m \x1b[34mPostsFetcher:\x1b[39m Done. 5 posts fetched"
+        assert parse_progress_line(line) == {"state": "posts_found", "count": 5}
