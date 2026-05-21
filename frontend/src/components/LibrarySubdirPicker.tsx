@@ -37,6 +37,10 @@ export default function LibrarySubdirPicker({
     onError,
 }: LibrarySubdirPickerProps) {
     const [entries, setEntries] = useState<{ name: string; type: "dir" }[] | null>(null);
+    // Files already in the current subdir; surfaced as a small preview so the
+    // user can decide whether this is the right destination without bouncing
+    // into the Browse sheet to verify.
+    const [filesHere, setFilesHere] = useState<string[]>([]);
     const [loading, setLoading] = useState(false);
 
     // Inline "+ New folder" state — creates under the currently-viewed subdir.
@@ -68,9 +72,11 @@ export default function LibrarySubdirPicker({
                         .filter((e) => e.type === "dir")
                         .map((e) => ({ name: e.name, type: "dir" as const })),
                 );
+                setFilesHere(data.entries.filter((e) => e.type === "file").map((e) => e.name));
             } catch (e) {
                 onError("Couldn't load library folders: " + getErrorMessage(e));
                 setEntries([]);
+                setFilesHere([]);
             } finally {
                 setLoading(false);
             }
@@ -217,6 +223,27 @@ export default function LibrarySubdirPicker({
                         <X size={14} aria-hidden />
                     </Button>
                 </div>
+            )}
+
+            {/* "Already in this folder" preview. Calm muted line that hints
+                whether the current path is the right destination without
+                forcing a Browse-sheet trip. Hidden when empty or while a
+                fresh load is in flight. */}
+            {!loading && filesHere.length > 0 && (
+                <p className="text-xs text-muted-foreground/80 leading-relaxed">
+                    <span className="font-medium text-muted-foreground">
+                        {filesHere.length} file{filesHere.length === 1 ? "" : "s"} here:
+                    </span>{" "}
+                    <span className="font-mono break-all">
+                        {filesHere.slice(0, 3).join(", ")}
+                        {filesHere.length > 3 && (
+                            <span className="text-muted-foreground/60">
+                                {" "}
+                                + {filesHere.length - 3} more
+                            </span>
+                        )}
+                    </span>
+                </p>
             )}
 
             {/* Folder list */}
