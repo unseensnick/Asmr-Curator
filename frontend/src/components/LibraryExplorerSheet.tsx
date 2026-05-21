@@ -57,32 +57,21 @@ import { selectAll, selectionFromClick } from "@/lib/explorerSelection";
 import type { FileEntry, ListedDirResponse } from "@/lib/types";
 import { deferToNextMacrotask, getErrorMessage } from "@/lib/utils";
 
-/** Debounce window for the inline filter input. Tighter than the
- *  FileBrowser tab's search because the user expects in-place filter
- *  feel, not a search-box round-trip. */
+/** Tighter than the FileBrowser tab's search debounce because this is
+ *  an in-place filter, not a network round-trip. */
 const LIBRARY_FILTER_DEBOUNCE_MS = 200;
 
 interface LibraryExplorerSheetProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    /** Called when the user clicks a FILE row in the explorer. Parent uses
-     *  this to switch the FileBrowser to the matching tab (library or
-     *  downloads) and select the file so the existing rename / convert /
-     *  move flows take over. */
     onSelectFile: (file: FileEntry, root: FileRoot) => void;
-    /** Shared library-subdir position. Controlled from FileBrowser so
-     *  navigating here updates the Move-to-library picker in
-     *  SelectedFilePanel (and vice versa). Downloads has its own local
-     *  state — only the library side is shared, since the move picker is
-     *  library-only. */
+    /** Shared library subdir; Downloads navigation stays local. */
     librarySubdir: string;
     onLibrarySubdirChange: (subdir: string) => void;
 }
 
-// Path sentinel used by the DeleteCandidate state to route through a
-// bulk-delete code path in confirmDelete (loops /api/delete per item)
-// without inventing a parallel dialog component for what's a small
-// branch on the same prompt.
+/** Sentinel path used by DeleteCandidate to route the bulk path through
+ *  the same AlertDialog without spawning a parallel dialog. */
 const BULK_DELETE_SENTINEL = "__bulk:delete";
 
 function rootLabel(root: FileRoot): string {
@@ -95,10 +84,8 @@ interface Entry {
     ext: string | null;
     path: string;
     needs_conversion?: boolean;
-    /** Search-mode only: relative-to-current-subdir folder hint rendered
-     *  as a small caption under the filename so the user can disambiguate
-     *  results that live deeper in the tree. Folder-listing rows leave
-     *  this undefined. */
+    /** Search-mode caption shown under the filename for results that
+     *  live deeper in the tree. Undefined for folder-listing rows. */
     folderHint?: string;
 }
 
@@ -111,40 +98,21 @@ interface SearchResponse {
 
 interface DeleteCandidate {
     entry: Entry;
-    /** Number of items inside a folder. -1 = couldn't enumerate, 0 = empty,
-     *  >0 = has contents (drives recursive delete + the "N items inside"
-     *  copy in the AlertDialog). Always 0 for file candidates. */
+    /** Folder content count: -1 couldn't enumerate, 0 empty, >0 has contents
+     *  (drives the recursive-delete branch + the "N items inside" copy).
+     *  Always 0 for file candidates. */
     contentsCount: number;
-    /** Bulk-delete only: the first few selected entry names + the total
-     *  selection size. Surfaced in the AlertDialog so the user can
-     *  sanity-check what's about to be removed before confirming —
-     *  drag-select can grab one extra row by accident otherwise. */
+    /** Bulk-delete preview: first few selected names + total. Lets the
+     *  user sanity-check before confirm — drag-select grabs accidents. */
     bulkPreview?: { names: string[]; total: number };
 }
 
 /**
- * Right-side Sheet that lets the user navigate both filesystem roots
- * (LIBRARY_PATH and DOWNLOAD_PATH) folder-by-folder. A persistent left
- * rail shows Library + Downloads as two root buttons, so switching
- * roots is always one click away — no top-level "walk in / walk out"
- * indirection. Per-root affordances:
- *
- *   • Library — full CRUD: rename, delete, new folder, recursive search,
- *     OS-style multi-select with cut/paste.
- *   • Downloads — read + rename + delete + recursive search. No new
- *     folder (the backend's `/api/mkdir` is library-only by design;
- *     downloads is transient ingest staging, not a curated tree).
- *
- * Files and folders both support right-click → Delete with confirmation.
- * Folder deletes preflight `/api/files?subdir=<folder>` to count contents,
- * so the AlertDialog can show "Delete empty folder?" vs "Delete folder
- * AND N items inside?". The backend's /api/delete endpoint enforces the
- * same semantics (rmdir for empty, shutil.rmtree only when recursive=true).
- *
- * Future enhancements:
- *   • Per-row Move from Downloads into a chosen Library subfolder
- *     (would subsume the inline move picker in SelectedFilePanel).
- *   • Drag-and-drop reorganise.
+ * Right-side Sheet for browsing both filesystem roots folder-by-folder
+ * with a persistent left rail switcher. Library gets full CRUD (rename,
+ * delete, new folder, search, multi-select with cut/paste). Downloads is
+ * read + rename + delete + search; no new folder because /api/mkdir is
+ * library-only (Downloads is transient ingest staging).
  */
 export default function LibraryExplorerSheet({
     open,
@@ -355,37 +323,18 @@ export default function LibraryExplorerSheet({
     }, []);
 
     // Lazy first load + reload on subdir/root change while open.
-    //
-    // NOTE(unseensnick): `loadSubdir` does a synchronous setLoading(true)
-    // before kicking off the fetch — the rule flags this as
-    // set-state-in-effect, but it's the standard data-fetching pattern
-    // recommended in the React docs. The synchronous flag is what shows
-    // the spinner before the network response arrives; moving it into
-    // `.then` (the only fix the rule would accept) would lose the
-    // pre-fetch spinner. Re-evaluate if React lands a stable
-    // `useEvent` / data-loader story.
-
     useEffect(() => {
         if (!open) return;
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- see NOTE above
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- pre-fetch spinner
         loadSubdir(subdir, root);
     }, [open, root, subdir, loadSubdir]);
 
-    // Recursive search effect. Empty filter → folder-listing mode
-    // (searchResults stays null). Non-empty filter → debounce 200ms,
-    // then GET /api/files/search scoped to the current subdir so the
-    // user finds matches buried deeper without losing their place. The
-    // `stale` token discards results from a superseded request.
-    //
-    // NOTE(unseensnick): the early-clear branches set searchResults +
-    // searchBusy synchronously when filter goes empty or sheet closes.
-    // `react-hooks/set-state-in-effect` flags it, but the alternative
-    // (carrying the previous results forward visually until the next
-    // user action) is worse UX. Standard debounced-search pattern.
-
+    // Recursive search: empty filter shows the folder listing,
+    // non-empty debounces 200ms then GETs /api/files/search scoped to
+    // the current subdir. `stale` discards superseded requests.
     useEffect(() => {
         if (!open) {
-            // eslint-disable-next-line react-hooks/set-state-in-effect -- see NOTE above
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- close-time cleanup
             setSearchResults(null);
             setSearchBusy(false);
             return;
@@ -494,22 +443,11 @@ export default function LibraryExplorerSheet({
         });
     }, [open, menuTarget, cutPaths, moveNotice, deleteCandidate, moveBusy]);
 
-    // File-explorer hotkeys: N / F2 / Del.
-    //
-    // Why not Ctrl/Cmd+N? Every major browser reserves it for "new
-    // window" at the chrome level — preventDefault on the page can't
-    // beat that (Firefox in particular doesn't even hand the keystroke
-    // to JS). Single-letter `n` is reliably preventable, matches the
-    // app-shortcut convention used by Gmail/Linear/Notion, and stays
-    // out of the way while the user is typing because we gate on the
-    // event target not being an editable element. F2 and Del are the
-    // OS file-explorer conventions and have no browser conflict.
-    //
-    // F2 / Del act on whatever the cursor is hovering, falling back to
-    // the last right-clicked row. There's no "selected without
-    // activated" state in this explorer (single-click drills), so hover
-    // is the natural anchor for keyboard actions — pointing at a row is
-    // the user's signal "I mean this one."
+    // N / F2 / Del. Plain `n` (not Ctrl/Cmd+N) because every major
+    // browser reserves Ctrl/Cmd+N for "new window" at chrome level —
+    // preventDefault can't reclaim it. F2 / Del act on the hovered row
+    // (or last right-clicked); single-click drills here, so there's no
+    // selected-without-activated state to anchor on instead.
     useEffect(() => {
         if (!open) return;
         const handler = (e: KeyboardEvent) => {
