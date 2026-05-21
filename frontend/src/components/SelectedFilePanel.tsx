@@ -259,7 +259,6 @@ export default function SelectedFilePanel({
                     type="button"
                     onClick={onDeselect}
                     className="text-muted-foreground hover:text-foreground transition-colors shrink-0 p-1 -m-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                    title="Deselect"
                     aria-label="Deselect file"
                 >
                     <X size={16} aria-hidden />

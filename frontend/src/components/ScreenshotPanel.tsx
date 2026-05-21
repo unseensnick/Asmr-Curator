@@ -311,7 +311,6 @@ function Preview({ previewUrl, onOpenLightbox, onReplace, onRemove }: PreviewPro
                     type="button"
                     onClick={onReplace}
                     className="size-8 rounded-md border border-border bg-card text-muted-foreground flex items-center justify-center hover:text-foreground hover:border-muted-foreground/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                    title="Replace image"
                     aria-label="Replace image"
                 >
                     <Replace size={14} aria-hidden />
@@ -320,7 +319,6 @@ function Preview({ previewUrl, onOpenLightbox, onReplace, onRemove }: PreviewPro
                     type="button"
                     onClick={onRemove}
                     className="size-8 rounded-md border border-border bg-card text-muted-foreground flex items-center justify-center hover:text-destructive hover:border-destructive/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                    title="Remove image"
                     aria-label="Remove image"
                 >
                     <X size={14} aria-hidden />
@@ -374,7 +372,6 @@ function DebugDisclosure({ rawText }: DebugDisclosureProps) {
                     type="button"
                     onClick={() => copy(rawText)}
                     className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                    title="Copy raw LLM output"
                     aria-label={copied ? "Copied to clipboard" : "Copy raw LLM output"}
                 >
                     {copied ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />}

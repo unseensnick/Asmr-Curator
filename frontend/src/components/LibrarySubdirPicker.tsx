@@ -162,7 +162,6 @@ export default function LibrarySubdirPicker({
                             setNewFolderName("");
                         }}
                         className="gap-1.5"
-                        title="Create a new folder here"
                         aria-pressed={newFolderOpen}
                     >
                         <FolderPlus size={12} aria-hidden />

@@ -48,6 +48,7 @@ import {
 } from "@/components/ui/context-menu";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDragSelect } from "@/hooks/useDragSelect";
 import { API, apiGet, apiPost, buildQueryString, type FileRoot, moveBatchStream } from "@/lib/api";
 import { METADATA_COMPATIBLE_EXTS, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
@@ -1105,11 +1106,6 @@ export default function LibraryExplorerSheet({
                                 // mode surface — the audit flagged /70 as
                                 // borderline at this size.
                                 className="font-mono text-xs tabular-nums text-muted-foreground/80"
-                                title={
-                                    selectedPaths.size > 1
-                                        ? `${selectedPaths.size} selected`
-                                        : `${visible.length} ${visible.length === 1 ? "item" : "items"}`
-                                }
                             >
                                 {selectedPaths.size > 1
                                     ? `${selectedPaths.size} selected`
@@ -1124,7 +1120,6 @@ export default function LibraryExplorerSheet({
                             onClick={() => handleOpenChange(false)}
                             className="ml-auto text-muted-foreground hover:text-foreground transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                             aria-label="Close library browser"
-                            title="Close"
                         >
                             <X size={18} aria-hidden />
                         </button>
@@ -1206,28 +1201,32 @@ export default function LibraryExplorerSheet({
                                                     setNewFolderName("");
                                                 }}
                                                 className="gap-1.5 shrink-0"
-                                                title="Create a new folder here (N)"
                                                 aria-pressed={newFolderOpen}
+                                                aria-label="Create a new folder here (keyboard: N)"
                                             >
                                                 <FolderPlus size={12} aria-hidden />
                                                 <span className="hidden sm:inline">New folder</span>
                                             </Button>
                                         )}
-                                        <Button
-                                            size="sm"
-                                            variant="ghost"
-                                            onClick={() => loadSubdir(subdir, root)}
-                                            disabled={loading}
-                                            className="shrink-0"
-                                            title="Refresh this folder"
-                                            aria-label="Refresh"
-                                        >
-                                            <RefreshCw
-                                                size={12}
-                                                aria-hidden
-                                                className={loading ? "animate-spin" : ""}
-                                            />
-                                        </Button>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    onClick={() => loadSubdir(subdir, root)}
+                                                    disabled={loading}
+                                                    className="shrink-0"
+                                                    aria-label="Refresh this folder"
+                                                >
+                                                    <RefreshCw
+                                                        size={12}
+                                                        aria-hidden
+                                                        className={loading ? "animate-spin" : ""}
+                                                    />
+                                                </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="bottom">Refresh</TooltipContent>
+                                        </Tooltip>
                                     </div>
 
                                     {/* Breadcrumb row: leads with the active root (Library

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { applyTheme, getInitialTheme, setStoredTheme, type ThemeMode } from "@/lib/theme";
 
 /**
@@ -29,24 +30,28 @@ export default function ThemeToggle() {
     const nextLabel = mode === "dark" ? "light" : "dark";
 
     return (
-        <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggle}
-            aria-label={`Switch to ${nextLabel} mode`}
-            title={`Switch to ${nextLabel} mode`}
-            className="relative"
-        >
-            <Sun
-                className={`size-4 transition-all duration-300 ${
-                    mode === "dark" ? "scale-0 -rotate-90" : "scale-100 rotate-0"
-                }`}
-            />
-            <Moon
-                className={`absolute size-4 transition-all duration-300 ${
-                    mode === "dark" ? "scale-100 rotate-0" : "scale-0 rotate-90"
-                }`}
-            />
-        </Button>
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={toggle}
+                    aria-label={`Switch to ${nextLabel} mode`}
+                    className="relative"
+                >
+                    <Sun
+                        className={`size-4 transition-all duration-300 ${
+                            mode === "dark" ? "scale-0 -rotate-90" : "scale-100 rotate-0"
+                        }`}
+                    />
+                    <Moon
+                        className={`absolute size-4 transition-all duration-300 ${
+                            mode === "dark" ? "scale-100 rotate-0" : "scale-0 rotate-90"
+                        }`}
+                    />
+                </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Switch to {nextLabel} mode</TooltipContent>
+        </Tooltip>
     );
 }

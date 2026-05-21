@@ -3,7 +3,7 @@ import { AlertTriangle, File, Music2 } from "lucide-react";
 
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { METADATA_COMPATIBLE_EXTS, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
 import type { FileEntry } from "@/lib/types";
 
@@ -119,68 +119,66 @@ export default function FileBrowserItem({
     }
 
     return (
-        <TooltipProvider delayDuration={500}>
-            <Tooltip>
-                <TooltipTrigger asChild>
-                    <div
-                        role="button"
-                        tabIndex={0}
-                        // data-entry-path is the hit-test contract for
-                        // `useDragSelect` — the rubber-band hook walks
-                        // these to figure out which rows fall inside the
-                        // dragged rectangle.
-                        data-entry-path={file.path}
-                        onClick={(e) =>
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <div
+                    role="button"
+                    tabIndex={0}
+                    // data-entry-path is the hit-test contract for
+                    // `useDragSelect` — the rubber-band hook walks
+                    // these to figure out which rows fall inside the
+                    // dragged rectangle.
+                    data-entry-path={file.path}
+                    onClick={(e) =>
+                        onClick({
+                            shift: e.shiftKey,
+                            toggle: e.ctrlKey || e.metaKey,
+                        })
+                    }
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
                             onClick({
                                 shift: e.shiftKey,
                                 toggle: e.ctrlKey || e.metaKey,
-                            })
+                            });
                         }
-                        onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                onClick({
-                                    shift: e.shiftKey,
-                                    toggle: e.ctrlKey || e.metaKey,
-                                });
-                            }
-                        }}
-                        className={rowClass}
-                    >
-                        {batchMode && (
-                            <Checkbox
-                                checked={isBatchSelected}
-                                onCheckedChange={onBatchToggle}
-                                onClick={(e) => e.stopPropagation()}
-                                className="shrink-0"
-                            />
-                        )}
-                        <FileIcon ext={file.ext} />
-                        <div className="flex-1 min-w-0">
-                            <div className="font-mono text-sm text-foreground truncate">
-                                {file.name}
-                            </div>
-                            {file.folder && (
-                                <div className="font-mono text-xs text-muted-foreground truncate">
-                                    {file.folder}
-                                </div>
-                            )}
+                    }}
+                    className={rowClass}
+                >
+                    {batchMode && (
+                        <Checkbox
+                            checked={isBatchSelected}
+                            onCheckedChange={onBatchToggle}
+                            onClick={(e) => e.stopPropagation()}
+                            className="shrink-0"
+                        />
+                    )}
+                    <FileIcon ext={file.ext} />
+                    <div className="flex-1 min-w-0">
+                        <div className="font-mono text-sm text-foreground truncate">
+                            {file.name}
                         </div>
-                        {fileNeedsConversion && (
-                            <span className="text-xs text-warning shrink-0">Convert</span>
-                        )}
-                    </div>
-                </TooltipTrigger>
-                <TooltipContent side="right" className="max-w-md">
-                    <div className="flex flex-col gap-0.5 font-mono text-left">
-                        <span className="break-all">{file.name}</span>
                         {file.folder && (
-                            <span className="text-background/70 break-all">{file.folder}/</span>
+                            <div className="font-mono text-xs text-muted-foreground truncate">
+                                {file.folder}
+                            </div>
                         )}
                     </div>
-                </TooltipContent>
-            </Tooltip>
-        </TooltipProvider>
+                    {fileNeedsConversion && (
+                        <span className="text-xs text-warning shrink-0">Convert</span>
+                    )}
+                </div>
+            </TooltipTrigger>
+            <TooltipContent side="right" className="max-w-md">
+                <div className="flex flex-col gap-0.5 font-mono text-left">
+                    <span className="break-all">{file.name}</span>
+                    {file.folder && (
+                        <span className="text-background/70 break-all">{file.folder}/</span>
+                    )}
+                </div>
+            </TooltipContent>
+        </Tooltip>
     );
 }
 

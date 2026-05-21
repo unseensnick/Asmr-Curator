@@ -113,7 +113,6 @@ export default function SuppressedPane({
                                 type="button"
                                 onClick={() => handleDelete(s)}
                                 className="text-muted-foreground/60 hover:text-destructive transition-colors leading-none p-0.5 -m-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                                title="Remove"
                                 aria-label={`Remove ${s.term}`}
                             >
                                 <X size={12} aria-hidden />

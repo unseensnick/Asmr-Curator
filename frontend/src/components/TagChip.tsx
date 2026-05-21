@@ -175,9 +175,7 @@ export default function TagChip({
             }}
             onKeyDown={handleKeyDown}
             title={
-                novel
-                    ? "Not in your dictionary yet. Click to edit, right-click to add."
-                    : "Click to edit"
+                novel ? "Not in your dictionary yet. Click to edit, right-click to add." : undefined
             }
             aria-label={`Edit tag ${label}`}
             className={`${baseClasses} ${chromeClasses}`}
@@ -195,7 +193,6 @@ export default function TagChip({
                     onRemove();
                 }}
                 className="text-muted-foreground/60 hover:text-destructive transition-colors leading-none shrink-0 p-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                title="Remove tag"
                 aria-label={`Remove tag ${label}`}
             >
                 <X size={14} aria-hidden />
@@ -338,7 +335,6 @@ function EditingChip({
                 type="button"
                 onClick={onSaveEdit}
                 className="text-success hover:text-success/80 transition-colors leading-none shrink-0 p-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                title="Save"
                 aria-label="Save edit"
             >
                 <Check size={14} aria-hidden />
@@ -347,7 +343,6 @@ function EditingChip({
                 type="button"
                 onClick={onCancelEdit}
                 className="text-muted-foreground hover:text-foreground transition-colors leading-none shrink-0 p-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                title="Cancel"
                 aria-label="Cancel edit"
             >
                 <X size={14} aria-hidden />

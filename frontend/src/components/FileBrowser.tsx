@@ -34,6 +34,8 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
     ContextMenu,
     ContextMenuContent,
@@ -41,23 +43,22 @@ import {
     ContextMenuSeparator,
     ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-
-// LibraryExplorerSheet is the 2100-line Browse Sheet (drag-select grid +
-// keyboard nav + Cut/Paste + rename + delete). Only renders when the user
-// clicks Browse. React.lazy keeps it out of the initial chunk; the
-// fallback is null because the Sheet's own open animation covers load.
-const LibraryExplorerSheet = lazy(() => import("@/components/LibraryExplorerSheet"));
-import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type DragRect, useDragSelect } from "@/hooks/useDragSelect";
 import { API, apiGet, apiPost, buildQueryString, type FileRoot } from "@/lib/api";
 import { FORMAT_EXT, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
 import { selectAll, selectionFromClick } from "@/lib/explorerSelection";
 import type { ConvertFormat, ConvertQuality, FileEntry, SearchMode } from "@/lib/types";
 import { getErrorMessage } from "@/lib/utils";
+
+// LibraryExplorerSheet is the 2100-line Browse Sheet (drag-select grid +
+// keyboard nav + Cut/Paste + rename + delete). Only renders when the user
+// clicks Browse. React.lazy keeps it out of the initial chunk; the
+// fallback is null because the Sheet's own open animation covers load.
+const LibraryExplorerSheet = lazy(() => import("@/components/LibraryExplorerSheet"));
 
 /** Debounce window for the tab's search input. Longer than the Library
  *  Sheet's inline filter because this hits the network. */
@@ -707,12 +708,17 @@ export default function FileBrowser({
                                 </span>
                             )}
                             {downloadsCount !== null && downloadsCount > 0 && (
-                                <span
-                                    className="ml-auto font-mono text-xs tabular-nums text-muted-foreground/80"
-                                    title={`${downloadsCount} file${downloadsCount === 1 ? "" : "s"} waiting in Downloads`}
-                                >
-                                    {downloadsCount} pending
-                                </span>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <span className="ml-auto font-mono text-xs tabular-nums text-muted-foreground/80">
+                                            {downloadsCount} pending
+                                        </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="bottom">
+                                        {downloadsCount} file
+                                        {downloadsCount === 1 ? "" : "s"} waiting in Downloads
+                                    </TooltipContent>
+                                </Tooltip>
                             )}
                         </button>
                     </CollapsibleTrigger>
@@ -1097,13 +1103,6 @@ function SearchRow({
                     <ToggleGroupItem
                         key={mode}
                         value={mode}
-                        title={
-                            mode === "filename"
-                                ? "Search filenames"
-                                : mode === "folder"
-                                  ? "Search folder names"
-                                  : "Search both"
-                        }
                         className="text-sm px-3 py-1.5 h-auto rounded-none! border-r border-border last:border-r-0 bg-background text-muted-foreground hover:text-foreground data-[state=on]:bg-accent data-[state=on]:text-accent-foreground data-[state=on]:border-accent capitalize"
                     >
                         {mode === "filename" ? "Filename" : mode}
@@ -1111,39 +1110,57 @@ function SearchRow({
                 ))}
             </ToggleGroup>
 
-            <Button
-                size="sm"
-                variant="outline"
-                onClick={onOpenExplorer}
-                className="shrink-0 gap-1.5"
-                title="Browse the library folder tree, create folders, delete entries"
-                aria-label="Browse library"
-            >
-                <FolderOpen size={14} aria-hidden />
-                <span className="hidden sm:inline">Browse</span>
-            </Button>
-            <Button
-                size="sm"
-                variant={batchMode ? "default" : "outline"}
-                onClick={onToggleBatchMode}
-                className="shrink-0"
-                title="Batch convert mode"
-                aria-label="Toggle batch convert mode"
-                aria-pressed={batchMode}
-            >
-                <ListChecks size={14} aria-hidden />
-            </Button>
-            <Button
-                size="sm"
-                variant="outline"
-                onClick={onRefresh}
-                disabled={loading}
-                className="shrink-0"
-                title="Refresh the list"
-                aria-label="Refresh the file list"
-            >
-                <RefreshCw size={14} aria-hidden className={loading ? "animate-spin" : ""} />
-            </Button>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={onOpenExplorer}
+                        className="shrink-0 gap-1.5"
+                        aria-label="Browse library"
+                    >
+                        <FolderOpen size={14} aria-hidden />
+                        <span className="hidden sm:inline">Browse</span>
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-xs">
+                    Browse the library folder tree, create folders, delete entries
+                </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                        size="sm"
+                        variant={batchMode ? "default" : "outline"}
+                        onClick={onToggleBatchMode}
+                        className="shrink-0"
+                        aria-label="Toggle batch convert mode"
+                        aria-pressed={batchMode}
+                    >
+                        <ListChecks size={14} aria-hidden />
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Batch mode</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={onRefresh}
+                        disabled={loading}
+                        className="shrink-0"
+                        aria-label="Refresh the file list"
+                    >
+                        <RefreshCw
+                            size={14}
+                            aria-hidden
+                            className={loading ? "animate-spin" : ""}
+                        />
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Refresh</TooltipContent>
+            </Tooltip>
         </div>
     );
 }

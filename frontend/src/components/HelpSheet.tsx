@@ -45,7 +45,6 @@ export default function HelpSheet({ open, onClose }: HelpSheetProps) {
                         onClick={onClose}
                         className="ml-auto text-muted-foreground hover:text-foreground transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                         aria-label="Close help"
-                        title="Close"
                     >
                         <X size={18} aria-hidden />
                     </button>

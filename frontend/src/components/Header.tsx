@@ -11,6 +11,7 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { API, apiGet } from "@/lib/api";
 import { applyTheme, getInitialTheme, setStoredTheme, type ThemeMode } from "@/lib/theme";
 
@@ -113,30 +114,34 @@ export default function Header({
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={handleOpenHelp}
-                    aria-label="Help and reference"
-                    title="Help &amp; reference"
-                    className="relative"
-                >
-                    <CircleHelp size={16} aria-hidden />
-                    {!helpSeen && (
-                        // First-run discovery dot. Clears on first open and
-                        // does not return; we trust the user to remember the
-                        // button is here.
-                        <span
-                            aria-hidden
-                            className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-primary"
-                        />
-                    )}
-                </Button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={handleOpenHelp}
+                            aria-label="Help and reference"
+                            className="relative"
+                        >
+                            <CircleHelp size={16} aria-hidden />
+                            {!helpSeen && (
+                                // First-run discovery dot. Clears on first open and
+                                // does not return; we trust the user to remember the
+                                // button is here.
+                                <span
+                                    aria-hidden
+                                    className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-primary"
+                                />
+                            )}
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Help and reference</TooltipContent>
+                </Tooltip>
                 <Button
                     variant="outline"
                     onClick={onOpenLibrarySettings}
-                    title="Open dictionary"
                     className="gap-2"
+                    aria-label="Open dictionary"
                 >
                     <BookOpen size={14} aria-hidden />
                     <span>Dictionary</span>
