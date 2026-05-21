@@ -63,25 +63,17 @@ export default function App() {
     const [libraryOpen, setLibraryOpen] = useState(false);
     const [cookiesOpen, setCookiesOpen] = useState(false);
     const [helpOpen, setHelpOpen] = useState(false);
-    // BulkEditSheet state. Files + root are populated by the FileBrowser's
-    // "Bulk edit" toolbar button at the moment of open, so the sheet always
-    // mounts with the current selection snapshot — later edits to the
-    // selection in the FileBrowser don't trail into an already-open sheet.
     const [bulkEditOpen, setBulkEditOpen] = useState(false);
     const [bulkEditFiles, setBulkEditFiles] = useState<FileEntry[]>([]);
     const [bulkEditRoot, setBulkEditRoot] = useState<BulkEditRoot>("library");
-    // App-wide position within LIBRARY_PATH. Lifted out of FileBrowser so
-    // the BulkEditSheet's Move-to-library picker, the single-file Move
-    // section, and the LibraryExplorerSheet all share one navigation
-    // state — pick /A/B in any of them, the next surface opens there.
+    // Library subdir shared across the BulkEditSheet move picker, the
+    // single-file Move section, and the LibraryExplorerSheet rail so a
+    // navigation in one surface lands the next at the same spot.
     const [librarySubdir, setLibrarySubdir] = useState("");
 
     function openBulkEdit(selectionRoot: BulkEditRoot) {
-        // The selection itself already lives in `bulkEditFiles` (the
-        // FileBrowser updates it live as the user shift-clicks /
-        // drag-selects / ctrl+A's). Opening the sheet just flips the
-        // visibility + closes the other right-side sheets so Radix focus
-        // scopes don't fight each other.
+        // Right-side sheets are mutually exclusive — open ours, close the rest
+        // so Radix focus scopes don't fight.
         setLibraryOpen(false);
         setCookiesOpen(false);
         setHelpOpen(false);
@@ -89,28 +81,15 @@ export default function App() {
         setBulkEditOpen(true);
     }
 
-    /**
-     * Drop a path from the working selection without closing the sheet.
-     * `bulkEditFiles` is the controlled selection for both surfaces —
-     * removing here also unchecks the row's box in the FileBrowser
-     * because the FileBrowser derives its batch-selection set from this
-     * exact array.
-     */
     function removeBulkEditFile(path: string) {
         setBulkEditFiles((prev) => prev.filter((f) => f.path !== path));
     }
     const [extractedArtist, setExtractedArtist] = useState("");
     const [sourceMode, setSourceMode] = useState<SourceMode>("patreon");
     const [powerMode, setPowerMode] = useState<boolean>(() => loadPowerMode());
-    // Surfaced when the cold-load dictionary fetch fails. Without it the
-    // app would silently come up with an empty vocabulary and the user
-    // would assume the whole thing is broken — the librarian-voice
-    // banner says the backend isn't responding and offers a retry.
+    // Cold-load dictionary error: surfaced (with a Retry) instead of letting
+    // the app silently come up with an empty vocabulary that reads as broken.
     const [dictLoadError, setDictLoadError] = useState<string | null>(null);
-    // After a Patreon Apply the user can click "Rename and move <file>" to
-    // jump straight to the FileBrowser Downloads tab with the downloaded
-    // file pre-selected. Lifted state because PatreonPanel and FileBrowser
-    // live in different columns and need to coordinate.
     const [bridgeRequest, setBridgeRequest] = useState<{ path: string; filename: string } | null>(
         null,
     );

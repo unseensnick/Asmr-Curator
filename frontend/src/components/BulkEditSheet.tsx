@@ -29,14 +29,9 @@ import { byteLength, MAX_BYTES } from "./selectedFile/utils";
 
 export type BulkEditRoot = "library" | "downloads";
 
-/**
- * Per-file local edits. Both fields start empty; the backend treats an
- * empty title as 'leave existing alone' (skip-on-empty), and an empty
- * tags list means 'no tags in the new filename' when rename is on.
- * Load-from-cache fills these from `post-api.json` sidecars; the user
- * refines via the per-row TagsField (drag to reorder, click to edit,
- * right-click novel chips to promote into the dictionary).
- */
+/** Per-file local edits. Empty title means "leave existing alone"
+ *  (backend skip-on-empty); empty tags means "no tags in the new
+ *  filename" when rename is on. */
 interface PerFileEdit {
     title: string;
     tags: string[];
@@ -44,13 +39,9 @@ interface PerFileEdit {
 
 const EMPTY_EDIT: PerFileEdit = { title: "", tags: [] };
 
-/**
- * Shared values written to every selected file in one stroke. The three
- * ID3-backed fields (artist, album_artist, album) flow into the backend's
- * `shared` block on `PATCH /api/files/bulk-write`; the suffix is
- * filename-composition only and stays client-side (phase 7 will splice it
- * into the canonical `new_name`).
- */
+/** Shared metadata fields applied to every selected file. Suffix is
+ *  filename-composition only — it doesn't write to ID3, only joins the
+ *  canonical rename string. */
 type SharedIdField = "artist" | "album_artist" | "album";
 
 const SHARED_ID_FIELDS = [
@@ -79,17 +70,10 @@ const EMPTY_SHARED: SharedMetadata = { artist: "", album_artist: "", album: "", 
  *  re-apply with the same `shared.suffix` doesn't double it. */
 const SUFFIX_PATTERN = /^[A-Z0-9]{2,6}$/;
 
-/** Undo the pipe-encoding the app writes to ID3 TIT2.
- *
- * Single-file Generate composes `<title> | <tag1> | <tag2> | <suffix>`
- * and writes the whole thing to TIT2. When the bulk-edit auto-load
- * reads it back, we want the inputs split: the Title field gets the
- * clean title, the Tags field gets the tag list, and the trailing
- * suffix segment drops (the shared Suffix input handles that lane).
- *
- * Non-pipe titles pass through verbatim — third-party tagged files
- * that don't follow the convention still load cleanly into the Title
- * input as plain text. */
+/** Undo the pipe-encoding the single-file Generate writes to ID3 TIT2
+ *  (`<title> | tag1 | tag2 | <suffix>`). Drops the trailing all-caps
+ *  suffix so re-applying with the same `shared.suffix` doesn't double
+ *  it. Non-pipe titles pass through unchanged. */
 function splitPipeTitle(raw: string): { title: string; tags: string[] } {
     if (!raw.includes(" | ")) return { title: raw, tags: [] };
     const parts = raw.split(" | ");
@@ -107,80 +91,31 @@ function splitPipeTitle(raw: string): { title: string; tags: string[] } {
 interface BulkEditSheetProps {
     open: boolean;
     onClose: () => void;
-    /**
-     * Files the user picked in the FileBrowser. The button that opens this
-     * surface only appears for 2+, but the component handles 0/1 gracefully
-     * so a stale-state open at the wrong moment doesn't surface as a crash.
-     */
     files: FileEntry[];
-    /**
-     * Root the selection lives under. Passed through to
-     * `/api/files/load-cached-metadata` and `/api/files/bulk-write` so the
-     * backend resolves paths against the right side of the bind-mount.
-     */
+    /** Which side of the bind-mount the backend resolves paths against. */
     root: BulkEditRoot;
-    /**
-     * Tag dictionary, passed through so the Load-from-cache step can
-     * normalise sidecar tags through the same `parseTitleLine` +
-     * `normaliseAndDedupeTags` pipeline the Patreon URL workflow uses.
-     * Without this the bulk path would write raw sidecar tags that
-     * bypass the user's alias / suppression rules.
-     */
     dict: AppDict;
-    /**
-     * Drop a file from the working selection without closing the sheet.
-     * Per-row X button on each entry; the parent (App.tsx) edits
-     * `bulkEditFiles` so the row + its edits stay paired. Optional —
-     * surfaces tabbed-off callers can skip the remove UI by omitting.
-     */
+    /** Drop a file from the working selection without closing the sheet.
+     *  Omit to hide the per-row X. */
     onRemoveFile?: (path: string) => void;
-    /**
-     * Dictionary promotions for novel tags surfaced via the per-row
-     * TagsField's right-click menu. Routes through App.tsx's single
-     * vocabulary mutation path so a promotion here updates every
-     * surface (TagsEditor, LibrarySettingsSheet) that reads from the
-     * dictionary.
-     */
     onPromoteToCanonical: (text: string) => Promise<void>;
     onPromoteToAlias: (text: string, canonical: VocabEntry) => Promise<void>;
-    /** App-wide library-subdir position (shared with the FileBrowser's
-     *  LibraryExplorerSheet rail + the single-file MoveToLibrarySection
-     *  picker). Doubles as the Move section's destination — when the
-     *  Move toggle is on, this is what flows into the bulk-write's
-     *  `to_subdir`. */
+    /** Library subfolder; doubles as the Move section's destination when
+     *  the Move toggle is on. */
     librarySubdir: string;
     onLibrarySubdirChange: (subdir: string) => void;
-    /**
-     * Open the Dictionary sheet on top of this one. Lets the user
-     * inspect / promote / alias canonical tags while mid-bulk-edit
-     * without losing their in-flight per-row edits. The Dictionary
-     * sheet is its own right-side Sheet that stacks above this one
-     * — closing it returns the user here, with all state intact.
-     */
     onOpenDictionary: () => void;
-    /** Optional pre-warm. Called on hover / focus of the Dictionary
-     *  button so the lazy LibrarySettingsSheet chunk fetches before the
-     *  click, and the slide-in animation runs without a chunk-load gap
-     *  on first open. */
+    /** Pre-warm the Dictionary chunk on hover/focus so the slide-in
+     *  animation runs without a chunk-load gap. */
     onPrefetchDictionary?: () => void;
 }
 
 /**
  * Bulk metadata + optional canonical rename across a selection of audio
- * files. Right-side slide-over matching `CookiesSheet`, `HelpSheet`, and
- * `LibrarySettingsSheet` — calm chrome, three vertical sections (per-file
- * details, apply-to-all, rename), sticky footer with a Cancel + the gated
- * Preview-changes commit.
- *
- * This commit fills in the per-file table (phase 4). The apply-to-all
- * form (phase 5), the load-from-cache wiring (phase 6), and the dry-run
- * rename preview (phase 7) fill the remaining sections. Phase 8 lands
- * the toolbar button that actually opens this; until then the sheet is
- * wired but unreachable from the UI.
- *
- * State resets on unmount — App.tsx conditionally renders this only
- * while `bulkEditOpen` is true, so re-opening always starts fresh
- * without a manual cleanup effect.
+ * files. Three sections (per-file details, apply-to-all, rename),
+ * sticky footer with Cancel + a gated commit. State is mounted-on-open
+ * (re-opening starts fresh) except per-file edits, which are path-keyed
+ * so adding/removing files mid-batch preserves their inputs.
  */
 type LoadFeedback =
     | { kind: "none" }
@@ -630,13 +565,9 @@ export default function BulkEditSheet({
                 root,
                 to_subdir: effectiveMoveSubdir,
             });
-            // Success — close the sheet. The FileBrowser will refresh on
-            // its next render (phase 8 will plumb a refresh callback so
-            // the new names appear without the user having to navigate
-            // away and back).
-            // Wipe the edit state before closing so reopening this
-            // selection starts fresh — the submitted values are now on
-            // disk, so showing them again as pending inputs would just
+            // Wipe edit state before closing so re-opening the same selection
+            // starts fresh — the submitted values are now on disk, so showing
+            // them again as pending inputs would just
             // confuse the user into re-applying a no-op.
             setEdits({});
             setShared(EMPTY_SHARED);
