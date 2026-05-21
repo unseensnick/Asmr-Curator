@@ -739,54 +739,71 @@ export default function BulkEditSheet({
                     canonical format.
                 </SheetDescription>
 
-                {/* Header */}
-                <div className="flex items-center gap-3 px-5 py-4 border-b border-border shrink-0">
-                    <span className="text-sm font-medium tracking-wide text-foreground">
-                        Bulk edit
-                    </span>
-                    <span className="text-sm text-muted-foreground" aria-live="polite">
-                        {count} {fileWord}
-                    </span>
-                    {/* Dictionary shortcut. Opens the LibrarySettingsSheet on
+                {/* Sheet-wide TooltipProvider so the header + toolbar + per-row
+                    buttons all share the same delay-and-fade hover affordance
+                    as the per-file filename tooltip. Native title="" attributes
+                    were inconsistent (timing varied across browsers, no styling
+                    control, no break-all on long copy). One provider per sheet
+                    keeps tooltip behaviour homogenous everywhere inside. */}
+                <TooltipProvider delayDuration={500}>
+                    {/* Header */}
+                    <div className="flex items-center gap-3 px-5 py-4 border-b border-border shrink-0">
+                        <span className="text-sm font-medium tracking-wide text-foreground">
+                            Bulk edit
+                        </span>
+                        <span className="text-sm text-muted-foreground" aria-live="polite">
+                            {count} {fileWord}
+                        </span>
+                        {/* Dictionary shortcut. Opens the LibrarySettingsSheet on
                         top of this one — Radix stacks the two right-side
                         sheets, so the user can promote / alias / inspect
                         canonical tags without losing in-flight bulk-edit
                         state. Closing the Dictionary returns focus + view
                         to this sheet (App.tsx's libraryOpen and bulkEditOpen
                         are independent). */}
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={onOpenDictionary}
-                        className="ml-auto gap-1.5"
-                        aria-label="Open dictionary"
-                        title="Open dictionary (stays on top — close to return here)"
-                    >
-                        <BookOpen size={14} aria-hidden />
-                        Dictionary
-                    </Button>
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        className="text-muted-foreground hover:text-foreground transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                        aria-label="Close bulk edit"
-                        title="Close"
-                    >
-                        <X size={18} aria-hidden />
-                    </button>
-                </div>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={onOpenDictionary}
+                                    className="ml-auto gap-1.5"
+                                    aria-label="Open dictionary"
+                                >
+                                    <BookOpen size={14} aria-hidden />
+                                    Dictionary
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" className="max-w-xs">
+                                Opens on top of this sheet. Close it to return here.
+                            </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <button
+                                    type="button"
+                                    onClick={onClose}
+                                    className="text-muted-foreground hover:text-foreground transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                                    aria-label="Close bulk edit"
+                                >
+                                    <X size={18} aria-hidden />
+                                </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom">Close</TooltipContent>
+                        </Tooltip>
+                    </div>
 
-                {/* Body (scrollable) */}
-                <div className="flex-1 overflow-y-auto px-5 py-5 flex flex-col gap-7">
-                    <section aria-label="Per-file details" className="flex flex-col gap-3">
-                        <SectionLabel>Per-file details</SectionLabel>
-                        {count === 0 ? (
-                            <p className="text-sm text-muted-foreground italic">
-                                No files selected.
-                            </p>
-                        ) : (
-                            <>
-                                {/* Load-from-cache row. Lives above the table
+                    {/* Body (scrollable) */}
+                    <div className="flex-1 overflow-y-auto px-5 py-5 flex flex-col gap-7">
+                        <section aria-label="Per-file details" className="flex flex-col gap-3">
+                            <SectionLabel>Per-file details</SectionLabel>
+                            {count === 0 ? (
+                                <p className="text-sm text-muted-foreground italic">
+                                    No files selected.
+                                </p>
+                            ) : (
+                                <>
+                                    {/* Load-from-cache row. Lives above the table
                                     because users scan top-down — seeing the
                                     button first signals "you can pre-fill"
                                     before they reach for the keyboard. The
@@ -794,90 +811,110 @@ export default function BulkEditSheet({
                                     it never causes a layout shift even when
                                     cycling through empty / success / error
                                     states. */}
-                                <div className="flex items-center gap-2 flex-wrap">
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={handleLoadCurrentMetadata}
-                                        disabled={isLoading}
-                                        title="Re-read the ID3 / FLAC / MP4 tags currently on disk"
-                                    >
-                                        {isLoading ? (
-                                            <Loader2
-                                                size={14}
-                                                aria-hidden
-                                                className="animate-spin"
-                                            />
-                                        ) : (
-                                            <RefreshCw size={14} aria-hidden />
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={handleLoadCurrentMetadata}
+                                                    disabled={isLoading}
+                                                >
+                                                    {isLoading ? (
+                                                        <Loader2
+                                                            size={14}
+                                                            aria-hidden
+                                                            className="animate-spin"
+                                                        />
+                                                    ) : (
+                                                        <RefreshCw size={14} aria-hidden />
+                                                    )}
+                                                    Load from file
+                                                </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="bottom" className="max-w-xs">
+                                                Re-read the tags already saved on disk into the
+                                                inputs below.
+                                            </TooltipContent>
+                                        </Tooltip>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={handleLoadFromCache}
+                                                    disabled={isLoading}
+                                                >
+                                                    {isLoading ? (
+                                                        <Loader2
+                                                            size={14}
+                                                            aria-hidden
+                                                            className="animate-spin"
+                                                        />
+                                                    ) : (
+                                                        <RefreshCw size={14} aria-hidden />
+                                                    )}
+                                                    Load from cached post info
+                                                </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="bottom" className="max-w-xs">
+                                                Pull title and tags from the Patreon post info saved
+                                                alongside each file.
+                                            </TooltipContent>
+                                        </Tooltip>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={handleClearAll}
+                                                    disabled={isLoading}
+                                                >
+                                                    <Eraser size={14} aria-hidden />
+                                                    Clear
+                                                </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="bottom" className="max-w-xs">
+                                                Wipe every input back to empty so you can start
+                                                fresh.
+                                            </TooltipContent>
+                                        </Tooltip>
+                                        {loadFeedback.kind === "success" && (
+                                            <span
+                                                className="text-xs text-muted-foreground"
+                                                aria-live="polite"
+                                            >
+                                                Loaded {loadFeedback.loaded} of {loadFeedback.total}{" "}
+                                                {loadFeedback.total === 1 ? "file" : "files"}.
+                                            </span>
                                         )}
-                                        Load from file
-                                    </Button>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={handleLoadFromCache}
-                                        disabled={isLoading}
-                                        title="Pull title + tags from the matching Patreon post-api.json sidecar"
-                                    >
-                                        {isLoading ? (
-                                            <Loader2
-                                                size={14}
-                                                aria-hidden
-                                                className="animate-spin"
-                                            />
-                                        ) : (
-                                            <RefreshCw size={14} aria-hidden />
+                                        {loadFeedback.kind === "empty" && (
+                                            <span
+                                                className="text-xs text-muted-foreground"
+                                                aria-live="polite"
+                                            >
+                                                No cached info for these files.
+                                            </span>
                                         )}
-                                        Load from cached post info
-                                    </Button>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={handleClearAll}
-                                        disabled={isLoading}
-                                        title="Wipe every input back to a clean slate"
-                                    >
-                                        <Eraser size={14} aria-hidden />
-                                        Clear
-                                    </Button>
-                                    {loadFeedback.kind === "success" && (
-                                        <span
-                                            className="text-xs text-muted-foreground"
-                                            aria-live="polite"
-                                        >
-                                            Loaded {loadFeedback.loaded} of {loadFeedback.total}{" "}
-                                            {loadFeedback.total === 1 ? "file" : "files"}.
-                                        </span>
-                                    )}
-                                    {loadFeedback.kind === "empty" && (
-                                        <span
-                                            className="text-xs text-muted-foreground"
-                                            aria-live="polite"
-                                        >
-                                            No cached info for these files.
-                                        </span>
-                                    )}
-                                    {loadFeedback.kind === "error" && (
-                                        <span
-                                            className="text-xs text-destructive"
-                                            aria-live="polite"
-                                        >
-                                            {loadFeedback.message}
-                                        </span>
-                                    )}
-                                </div>
-                                {/* Stacked per-file blocks. The original 3-column
+                                        {loadFeedback.kind === "error" && (
+                                            <span
+                                                className="text-xs text-destructive"
+                                                aria-live="polite"
+                                            >
+                                                {loadFeedback.message}
+                                            </span>
+                                        )}
+                                    </div>
+                                    {/* Stacked per-file blocks. The original 3-column
                                     table cratered the moment real Patreon ASMR
                                     filenames hit it — long `[EXCLUSIVE] [27_23] …`
                                     names ate the row, leaving the Title and Tags
                                     inputs at ~30px wide. Stacking the filename
                                     header above full-width inputs gives every
                                     field room without horizontal scroll. */}
-                                <TooltipProvider delayDuration={500}>
                                     <div className="flex flex-col gap-3">
                                         {files.map((file, idx) => {
                                             const edit = editFor(file.path);
@@ -906,15 +943,15 @@ export default function BulkEditSheet({
                                                     <div className="flex items-center gap-2 min-w-0">
                                                         <Tooltip>
                                                             <TooltipTrigger asChild>
-                                                                {/* cursor-default overrides the
-                                                                    browser's text-cursor default
-                                                                    on selectable text — the
-                                                                    filename is read-only context
-                                                                    here, not an editable input
-                                                                    (the actual editable lives in
-                                                                    the Title row below). Keep
-                                                                    text selectable for copy. */}
-                                                                <span className="flex-1 min-w-0 block font-mono text-xs text-foreground truncate cursor-default">
+                                                                {/* cursor-pointer matches the
+                                                                    FileBrowser's row hover —
+                                                                    the row is the affordance for
+                                                                    the tooltip-revealed full
+                                                                    filename + folder, same
+                                                                    interaction shape as the file
+                                                                    list. Text stays selectable
+                                                                    for copy. */}
+                                                                <span className="flex-1 min-w-0 block font-mono text-xs text-foreground truncate cursor-pointer">
                                                                     {file.name}
                                                                 </span>
                                                             </TooltipTrigger>
@@ -935,17 +972,23 @@ export default function BulkEditSheet({
                                                             </TooltipContent>
                                                         </Tooltip>
                                                         {onRemoveFile && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() =>
-                                                                    onRemoveFile(file.path)
-                                                                }
-                                                                className="shrink-0 text-muted-foreground hover:text-destructive transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                                                                aria-label={`Remove ${file.name} from this batch`}
-                                                                title="Remove from this batch"
-                                                            >
-                                                                <X size={14} aria-hidden />
-                                                            </button>
+                                                            <Tooltip>
+                                                                <TooltipTrigger asChild>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() =>
+                                                                            onRemoveFile(file.path)
+                                                                        }
+                                                                        className="shrink-0 text-muted-foreground hover:text-destructive transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                                                                        aria-label={`Remove ${file.name} from this batch`}
+                                                                    >
+                                                                        <X size={14} aria-hidden />
+                                                                    </button>
+                                                                </TooltipTrigger>
+                                                                <TooltipContent side="left">
+                                                                    Remove from this batch
+                                                                </TooltipContent>
+                                                            </Tooltip>
                                                         )}
                                                     </div>
                                                     <div className="flex items-center gap-2">
@@ -1014,282 +1057,295 @@ export default function BulkEditSheet({
                                             );
                                         })}
                                     </div>
-                                </TooltipProvider>
-                            </>
-                        )}
-                    </section>
+                                </>
+                            )}
+                        </section>
 
-                    <section aria-label="Apply to all" className="flex flex-col gap-3">
-                        <SectionLabel>Apply to all</SectionLabel>
-                        <p className="text-xs text-muted-foreground/80 leading-relaxed -mt-1">
-                            Empty leaves the field as-is on each file. Use Clear to blank it across
-                            the selection.
-                        </p>
-                        <div className="flex flex-col gap-2.5">
-                            {SHARED_ID_FIELDS.map((field) => {
-                                // Album artist mirrors Artist when linkArtists
-                                // is on — disabled input that displays the
-                                // live shared.artist; commit step writes
-                                // shared.artist into both fields. Matches
-                                // RenameSection's existing link pattern.
-                                const isLinked = field === "album_artist" && linkArtists;
-                                const isCleared = clearFields.has(field) && !isLinked;
-                                const inputId = `bulk-shared-${field}`;
-                                const displayValue = isLinked ? shared.artist : shared[field];
-                                return (
-                                    <div key={field} className="flex flex-col gap-1.5">
-                                        <div className="flex items-center gap-2">
-                                            <label
-                                                htmlFor={inputId}
-                                                className="w-28 shrink-0 text-sm text-muted-foreground"
-                                            >
-                                                {SHARED_FIELD_LABELS[field]}
-                                            </label>
-                                            <Input
-                                                id={inputId}
-                                                value={displayValue}
-                                                onChange={(e) => patchShared(field, e.target.value)}
-                                                disabled={isCleared || isLinked}
-                                                placeholder={placeholderForShared(field)}
-                                                className="flex-1 font-mono text-sm"
-                                            />
-                                            <Button
-                                                type="button"
-                                                variant={isCleared ? "secondary" : "ghost"}
-                                                size="sm"
-                                                onClick={() => toggleClear(field)}
-                                                disabled={isLinked}
-                                                aria-pressed={isCleared}
-                                                aria-label={
-                                                    isCleared
-                                                        ? `Cancel clearing ${SHARED_FIELD_LABELS[field]}`
-                                                        : `Clear ${SHARED_FIELD_LABELS[field]} on all files`
-                                                }
-                                                className="shrink-0"
-                                            >
-                                                {isCleared ? "Clearing" : "Clear"}
-                                            </Button>
-                                        </div>
-                                        {field === "album_artist" && (
-                                            <label
-                                                htmlFor="bulk-link-artists"
-                                                className="flex items-center gap-2 cursor-pointer select-none w-fit pl-[7.5rem]"
-                                            >
-                                                <Checkbox
-                                                    id="bulk-link-artists"
-                                                    checked={linkArtists}
-                                                    onCheckedChange={(v) =>
-                                                        setLinkArtists(v === true)
+                        <section aria-label="Apply to all" className="flex flex-col gap-3">
+                            <SectionLabel>Apply to all</SectionLabel>
+                            <p className="text-xs text-muted-foreground/80 leading-relaxed -mt-1">
+                                Empty leaves the field as-is on each file. Use Clear to blank it
+                                across the selection.
+                            </p>
+                            <div className="flex flex-col gap-2.5">
+                                {SHARED_ID_FIELDS.map((field) => {
+                                    // Album artist mirrors Artist when linkArtists
+                                    // is on — disabled input that displays the
+                                    // live shared.artist; commit step writes
+                                    // shared.artist into both fields. Matches
+                                    // RenameSection's existing link pattern.
+                                    const isLinked = field === "album_artist" && linkArtists;
+                                    const isCleared = clearFields.has(field) && !isLinked;
+                                    const inputId = `bulk-shared-${field}`;
+                                    const displayValue = isLinked ? shared.artist : shared[field];
+                                    return (
+                                        <div key={field} className="flex flex-col gap-1.5">
+                                            <div className="flex items-center gap-2">
+                                                <label
+                                                    htmlFor={inputId}
+                                                    className="w-28 shrink-0 text-sm text-muted-foreground"
+                                                >
+                                                    {SHARED_FIELD_LABELS[field]}
+                                                </label>
+                                                <Input
+                                                    id={inputId}
+                                                    value={displayValue}
+                                                    onChange={(e) =>
+                                                        patchShared(field, e.target.value)
                                                     }
+                                                    disabled={isCleared || isLinked}
+                                                    placeholder={placeholderForShared(field)}
+                                                    className="flex-1 font-mono text-sm"
                                                 />
-                                                <span className="text-sm text-muted-foreground">
-                                                    Same as artist
-                                                </span>
-                                            </label>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                            {/* Suffix is filename-composition only — no ID3 write,
+                                                <Button
+                                                    type="button"
+                                                    variant={isCleared ? "secondary" : "ghost"}
+                                                    size="sm"
+                                                    onClick={() => toggleClear(field)}
+                                                    disabled={isLinked}
+                                                    aria-pressed={isCleared}
+                                                    aria-label={
+                                                        isCleared
+                                                            ? `Cancel clearing ${SHARED_FIELD_LABELS[field]}`
+                                                            : `Clear ${SHARED_FIELD_LABELS[field]} on all files`
+                                                    }
+                                                    className="shrink-0"
+                                                >
+                                                    {isCleared ? "Clearing" : "Clear"}
+                                                </Button>
+                                            </div>
+                                            {field === "album_artist" && (
+                                                <label
+                                                    htmlFor="bulk-link-artists"
+                                                    className="flex items-center gap-2 cursor-pointer select-none w-fit pl-[7.5rem]"
+                                                >
+                                                    <Checkbox
+                                                        id="bulk-link-artists"
+                                                        checked={linkArtists}
+                                                        onCheckedChange={(v) =>
+                                                            setLinkArtists(v === true)
+                                                        }
+                                                    />
+                                                    <span className="text-sm text-muted-foreground">
+                                                        Same as artist
+                                                    </span>
+                                                </label>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                                {/* Suffix is filename-composition only — no ID3 write,
                                 so no Clear toggle. Sits below the three ID3 rows
                                 with extra top padding to mark the grouping
                                 without a horizontal rule. */}
-                            <div className="flex items-center gap-2 pt-2">
-                                <label
-                                    htmlFor="bulk-shared-suffix"
-                                    className="w-28 shrink-0 text-sm text-muted-foreground"
-                                >
-                                    Suffix
-                                </label>
-                                <Input
-                                    id="bulk-shared-suffix"
-                                    value={shared.suffix}
-                                    onChange={(e) => patchShared("suffix", e.target.value)}
-                                    placeholder="F4A"
-                                    className="flex-1 font-mono text-sm"
-                                />
+                                <div className="flex items-center gap-2 pt-2">
+                                    <label
+                                        htmlFor="bulk-shared-suffix"
+                                        className="w-28 shrink-0 text-sm text-muted-foreground"
+                                    >
+                                        Suffix
+                                    </label>
+                                    <Input
+                                        id="bulk-shared-suffix"
+                                        value={shared.suffix}
+                                        onChange={(e) => patchShared("suffix", e.target.value)}
+                                        placeholder="F4A"
+                                        className="flex-1 font-mono text-sm"
+                                    />
+                                </div>
                             </div>
-                        </div>
-                    </section>
+                        </section>
 
-                    {moveAvailable && (
-                        <section aria-label="Move to library" className="flex flex-col gap-3">
-                            <SectionLabel>Move to library</SectionLabel>
+                        {moveAvailable && (
+                            <section aria-label="Move to library" className="flex flex-col gap-3">
+                                <SectionLabel>Move to library</SectionLabel>
+                                <label
+                                    htmlFor="bulk-move-toggle"
+                                    className="flex items-start gap-3 cursor-pointer"
+                                >
+                                    <Checkbox
+                                        id="bulk-move-toggle"
+                                        checked={moveEnabled}
+                                        onCheckedChange={(v) => setMoveEnabled(v === true)}
+                                        className="mt-0.5"
+                                    />
+                                    <span className="flex flex-col gap-1 min-w-0">
+                                        <span className="text-sm text-foreground">
+                                            Move into a library subfolder
+                                        </span>
+                                        <span className="text-xs text-muted-foreground leading-relaxed">
+                                            Each file moves into
+                                            <code className="font-mono text-foreground/80 mx-1">
+                                                LIBRARY_PATH/&lt;subfolder&gt;/
+                                            </code>
+                                            after metadata + rename apply. Browse to the destination
+                                            below — or create a new folder there with the same
+                                            affordance the single-file Move flow uses.
+                                        </span>
+                                    </span>
+                                </label>
+                                {moveEnabled && (
+                                    <div className="flex flex-col gap-2">
+                                        <LibrarySubdirPicker
+                                            subdir={librarySubdir}
+                                            onSubdirChange={onLibrarySubdirChange}
+                                            onError={(msg) =>
+                                                // Reuse the existing submit-error
+                                                // surface in the footer so picker
+                                                // failures don't need a parallel
+                                                // banner. Empty string clears.
+                                                setSubmitError(msg || null)
+                                            }
+                                        />
+                                        <span className="text-xs text-muted-foreground">
+                                            Moving to:{" "}
+                                            <span className="font-mono text-foreground break-all">
+                                                {librarySubdir
+                                                    ? `Library / ${librarySubdir}`
+                                                    : "Library"}
+                                            </span>
+                                        </span>
+                                    </div>
+                                )}
+                            </section>
+                        )}
+
+                        <section aria-label="Rename" className="flex flex-col gap-3">
+                            <SectionLabel>Rename</SectionLabel>
                             <label
-                                htmlFor="bulk-move-toggle"
+                                htmlFor="bulk-rename-toggle"
                                 className="flex items-start gap-3 cursor-pointer"
                             >
                                 <Checkbox
-                                    id="bulk-move-toggle"
-                                    checked={moveEnabled}
-                                    onCheckedChange={(v) => setMoveEnabled(v === true)}
+                                    id="bulk-rename-toggle"
+                                    checked={rename}
+                                    onCheckedChange={(v) => setRename(v === true)}
                                     className="mt-0.5"
                                 />
                                 <span className="flex flex-col gap-1 min-w-0">
                                     <span className="text-sm text-foreground">
-                                        Move into a library subfolder
+                                        Rename files to the canonical format
                                     </span>
                                     <span className="text-xs text-muted-foreground leading-relaxed">
-                                        Each file moves into
-                                        <code className="font-mono text-foreground/80 mx-1">
-                                            LIBRARY_PATH/&lt;subfolder&gt;/
+                                        {`Each file gets renamed to `}
+                                        <code className="font-mono text-foreground/80">
+                                            {`<title> - <tag> - … - <suffix>.<ext>`}
                                         </code>
-                                        after metadata + rename apply. Browse to the destination
-                                        below — or create a new folder there with the same
-                                        affordance the single-file Move flow uses.
+                                        . Brackets in the title are kept in the filename and
+                                        stripped from the ID3 title — same rule as the single-file
+                                        Generate flow. Rows with no per-file title stay as-is.
                                     </span>
                                 </span>
                             </label>
-                            {moveEnabled && (
-                                <div className="flex flex-col gap-2">
-                                    <LibrarySubdirPicker
-                                        subdir={librarySubdir}
-                                        onSubdirChange={onLibrarySubdirChange}
-                                        onError={(msg) =>
-                                            // Reuse the existing submit-error
-                                            // surface in the footer so picker
-                                            // failures don't need a parallel
-                                            // banner. Empty string clears.
-                                            setSubmitError(msg || null)
-                                        }
-                                    />
-                                    <span className="text-xs text-muted-foreground">
-                                        Moving to:{" "}
-                                        <span className="font-mono text-foreground break-all">
-                                            {librarySubdir
-                                                ? `Library / ${librarySubdir}`
-                                                : "Library"}
-                                        </span>
-                                    </span>
-                                </div>
-                            )}
-                        </section>
-                    )}
 
-                    <section aria-label="Rename" className="flex flex-col gap-3">
-                        <SectionLabel>Rename</SectionLabel>
-                        <label
-                            htmlFor="bulk-rename-toggle"
-                            className="flex items-start gap-3 cursor-pointer"
-                        >
-                            <Checkbox
-                                id="bulk-rename-toggle"
-                                checked={rename}
-                                onCheckedChange={(v) => setRename(v === true)}
-                                className="mt-0.5"
-                            />
-                            <span className="flex flex-col gap-1 min-w-0">
-                                <span className="text-sm text-foreground">
-                                    Rename files to the canonical format
-                                </span>
-                                <span className="text-xs text-muted-foreground leading-relaxed">
-                                    {`Each file gets renamed to `}
-                                    <code className="font-mono text-foreground/80">
-                                        {`<title> - <tag> - … - <suffix>.<ext>`}
-                                    </code>
-                                    . Brackets in the title are kept in the filename and stripped
-                                    from the ID3 title — same rule as the single-file Generate flow.
-                                    Rows with no per-file title stay as-is.
-                                </span>
-                            </span>
-                        </label>
-
-                        {rename && count > 0 && (
-                            <div className="rounded-md border border-border overflow-hidden mt-1">
-                                <div className="px-3 py-2 text-[10px] font-medium tracking-[0.08em] uppercase text-muted-foreground/80 bg-muted/30 border-b border-border">
-                                    Preview (
-                                    {previewRows.filter((r) => r.proposed && !r.unchanged).length}{" "}
-                                    of {count} will rename)
-                                </div>
-                                {/* Stacked rows. Side-by-side current → proposed
+                            {rename && count > 0 && (
+                                <div className="rounded-md border border-border overflow-hidden mt-1">
+                                    <div className="px-3 py-2 text-[10px] font-medium tracking-[0.08em] uppercase text-muted-foreground/80 bg-muted/30 border-b border-border">
+                                        Preview (
+                                        {
+                                            previewRows.filter((r) => r.proposed && !r.unchanged)
+                                                .length
+                                        }{" "}
+                                        of {count} will rename)
+                                    </div>
+                                    {/* Stacked rows. Side-by-side current → proposed
                                     truncated both names down to ~30 chars on a
                                     sheet of this width with real-world Patreon
                                     ASMR filenames in the mix. Stacking gives
                                     each name its own line so the user can
                                     read what they're about to commit. */}
-                                <ul className="divide-y divide-border">
-                                    {previewRows.map((row) => (
-                                        <li
-                                            key={row.file.path}
-                                            className="flex flex-col gap-1 px-3 py-2 font-mono text-xs"
-                                        >
-                                            <span className="text-muted-foreground break-all">
-                                                {row.file.name}
-                                            </span>
-                                            <span className="flex items-start gap-1.5 break-all">
-                                                <span
-                                                    aria-hidden
-                                                    className="text-muted-foreground/60 shrink-0"
-                                                >
-                                                    →
+                                    <ul className="divide-y divide-border">
+                                        {previewRows.map((row) => (
+                                            <li
+                                                key={row.file.path}
+                                                className="flex flex-col gap-1 px-3 py-2 font-mono text-xs"
+                                            >
+                                                <span className="text-muted-foreground break-all">
+                                                    {row.file.name}
                                                 </span>
-                                                {row.tooLong ? (
-                                                    <span className="inline-flex items-start gap-1 text-destructive">
-                                                        <AlertCircle
-                                                            size={12}
-                                                            aria-hidden
-                                                            className="shrink-0 mt-0.5"
-                                                        />
-                                                        <span>Name too long (max 255 bytes)</span>
+                                                <span className="flex items-start gap-1.5 break-all">
+                                                    <span
+                                                        aria-hidden
+                                                        className="text-muted-foreground/60 shrink-0"
+                                                    >
+                                                        →
                                                     </span>
-                                                ) : row.proposed === null || row.unchanged ? (
-                                                    <span className="text-muted-foreground/70 italic">
-                                                        no change
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-foreground">
-                                                        {row.proposed}
-                                                    </span>
-                                                )}
-                                            </span>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        )}
-                    </section>
-                </div>
+                                                    {row.tooLong ? (
+                                                        <span className="inline-flex items-start gap-1 text-destructive">
+                                                            <AlertCircle
+                                                                size={12}
+                                                                aria-hidden
+                                                                className="shrink-0 mt-0.5"
+                                                            />
+                                                            <span>
+                                                                Name too long (max 255 bytes)
+                                                            </span>
+                                                        </span>
+                                                    ) : row.proposed === null || row.unchanged ? (
+                                                        <span className="text-muted-foreground/70 italic">
+                                                            no change
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-foreground">
+                                                            {row.proposed}
+                                                        </span>
+                                                    )}
+                                                </span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                        </section>
+                    </div>
 
-                {/* Footer — Cancel + the gated commit. Button is enabled only
+                    {/* Footer — Cancel + the gated commit. Button is enabled only
                     when there's actual work to do (per-file edit, shared
                     value, clear toggle, or proposed rename). The commit
                     fires PATCH /api/files/bulk-write directly; the preview
                     pane above is the dry-run safety net. Validation errors
                     surface inline next to Cancel. */}
-                <div className="flex items-center justify-end gap-3 px-5 py-3 border-t border-border shrink-0">
-                    {submitError && (
-                        <span
-                            className="text-xs text-destructive flex-1 min-w-0 truncate"
-                            aria-live="polite"
-                            title={submitError}
+                    <div className="flex items-center justify-end gap-3 px-5 py-3 border-t border-border shrink-0">
+                        {submitError && (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <span
+                                        className="text-xs text-destructive flex-1 min-w-0 truncate cursor-help"
+                                        aria-live="polite"
+                                    >
+                                        {submitError}
+                                    </span>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="max-w-md">
+                                    <span className="break-all">{submitError}</span>
+                                </TooltipContent>
+                            </Tooltip>
+                        )}
+                        <Button variant="ghost" size="sm" onClick={onClose} disabled={isSubmitting}>
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="default"
+                            size="sm"
+                            onClick={handleSubmit}
+                            disabled={!canCommit || isSubmitting || anyTooLong}
+                            aria-label={
+                                !canCommit
+                                    ? "No edits to apply yet"
+                                    : anyTooLong
+                                      ? "One or more proposed names exceed the filesystem limit"
+                                      : rename
+                                        ? "Apply metadata and rename"
+                                        : "Apply metadata"
+                            }
                         >
-                            {submitError}
-                        </span>
-                    )}
-                    <Button variant="ghost" size="sm" onClick={onClose} disabled={isSubmitting}>
-                        Cancel
-                    </Button>
-                    <Button
-                        variant="default"
-                        size="sm"
-                        onClick={handleSubmit}
-                        disabled={!canCommit || isSubmitting || anyTooLong}
-                        aria-label={
-                            !canCommit
-                                ? "No edits to apply yet"
-                                : anyTooLong
-                                  ? "One or more proposed names exceed the filesystem limit"
-                                  : rename
-                                    ? "Apply metadata and rename"
-                                    : "Apply metadata"
-                        }
-                    >
-                        {isSubmitting ? (
-                            <Loader2 size={14} aria-hidden className="animate-spin" />
-                        ) : null}
-                        {isSubmitting ? "Applying…" : "Apply changes"}
-                    </Button>
-                </div>
+                            {isSubmitting ? (
+                                <Loader2 size={14} aria-hidden className="animate-spin" />
+                            ) : null}
+                            {isSubmitting ? "Applying…" : "Apply changes"}
+                        </Button>
+                    </div>
+                </TooltipProvider>
             </SheetContent>
         </Sheet>
     );
