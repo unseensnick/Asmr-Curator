@@ -54,14 +54,10 @@ import { selectAll, selectionFromClick } from "@/lib/explorerSelection";
 import type { ConvertFormat, ConvertQuality, FileEntry, SearchMode } from "@/lib/types";
 import { getErrorMessage } from "@/lib/utils";
 
-// LibraryExplorerSheet is the 2100-line Browse Sheet (drag-select grid +
-// keyboard nav + Cut/Paste + rename + delete). Only renders when the user
-// clicks Browse. React.lazy keeps it out of the initial chunk; the
-// fallback is null because the Sheet's own open animation covers load.
+// Lazy-loaded heavy Browse sheet. Mounts only on first Browse click.
 const LibraryExplorerSheet = lazy(() => import("@/components/LibraryExplorerSheet"));
 
-/** Debounce window for the tab's search input. Longer than the Library
- *  Sheet's inline filter because this hits the network. */
+/** Longer than the Browse sheet's inline filter — this hits the network. */
 const FILEBROWSER_SEARCH_DEBOUNCE_MS = 300;
 
 interface FileBrowserProps {
@@ -69,28 +65,16 @@ interface FileBrowserProps {
     outputPipe: string;
     extractedArtist: string;
     defaultOpen?: boolean;
-    /** Patreon panel's post-Apply bridge: open + switch to Downloads + select
-     *  the named file + scroll into view. Parent clears via onBridgeConsumed. */
+    /** Post-Apply bridge: open + switch to Downloads + select + scroll. */
     bridgeRequest?: { path: string; filename: string } | null;
     onBridgeConsumed?: () => void;
-    /** Controlled multi-selection shared with the BulkEditSheet. The
-     *  FileBrowser derives its `batchSelected` set from this list for
-     *  rendering; gestures (shift / Ctrl / Ctrl+A / drag) compute the
-     *  new selection and call `onBulkSelectedChange` with the matching
-     *  FileEntry[]. Lifted out of internal state so the X button in the
-     *  BulkEditSheet can remove a file and have the FileBrowser
-     *  immediately reflect it. */
+    /** Controlled multi-selection. Lifted to App so the BulkEditSheet's
+     *  X button can deselect a row here by trimming the array. */
     bulkSelected: FileEntry[];
     onBulkSelectedChange: (next: FileEntry[]) => void;
-    /** Open the BulkEditSheet with the current bulkSelected snapshot.
-     *  The parent already has the files (from `bulkSelected`), so this
-     *  only carries the source root. */
     onOpenBulkEdit?: (root: FileRoot) => void;
-    /** App-wide library-subdir position. Shared with the LibraryExplorer
-     *  Sheet (rail navigation) + the single-file MoveToLibrarySection
-     *  + the BulkEditSheet's Move picker, so navigating one updates all
-     *  three. Lifted from internal state so the bulk move surface lands
-     *  at the same spot the rest of the app is already pointing at. */
+    /** Shared library subdir; navigating here updates the LibraryExplorer
+     *  rail + the single-file Move picker + the BulkEditSheet move picker. */
     librarySubdir: string;
     onLibrarySubdirChange: (subdir: string) => void;
 }
