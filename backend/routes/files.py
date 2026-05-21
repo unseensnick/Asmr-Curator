@@ -430,6 +430,13 @@ def bulk_write(body: BulkWriteIn):
     """
     root_path = root_for(body.root)
 
+    # Cap items so a runaway client can't make the two-phase commit walk an
+    # unbounded list. 500 is well above realistic UI selections (the Bulk edit
+    # toolbar button hides until ≥2 are selected; the FileBrowser itself caps
+    # responses at the same order of magnitude).
+    if len(body.items) > 500:
+        raise HTTPException(413, "Too many items in one batch (max 500).")
+
     invalid_clear = [f for f in body.shared.clear if f not in _BULK_SHARED_FIELDS]
     if invalid_clear:
         raise HTTPException(
