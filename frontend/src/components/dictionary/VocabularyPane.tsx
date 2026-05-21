@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Check, GripVertical, Info, Plus, Trash2, X } from "lucide-react";
+import { AlertCircle, BookOpen, Check, GripVertical, Info, Plus, Trash2, X } from "lucide-react";
 
+import EmptyState from "@/components/EmptyState";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -189,11 +190,18 @@ export default function VocabularyPane({
                 {/* Scrollable list */}
                 <div className="flex-1 min-h-0 overflow-y-auto px-6">
                     <div className="flex flex-col gap-1.5 pb-3">
-                        {filtered.length === 0 && (
-                            <p className="text-sm text-muted-foreground italic py-2">
-                                {search ? "No matches." : "No vocabulary entries yet."}
-                            </p>
-                        )}
+                        {filtered.length === 0 &&
+                            (search ? (
+                                <p className="text-sm text-muted-foreground italic py-2">
+                                    No matches.
+                                </p>
+                            ) : (
+                                <EmptyState
+                                    icon={BookOpen}
+                                    title="Your tag dictionary is empty."
+                                    hint="Add a canonical tag with the input above, or use Import / Reset to defaults in the footer to seed a starter set."
+                                />
+                            ))}
                         {filtered.map((entry) =>
                             editingId === entry.id ? (
                                 <VocabEntryEditor

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Info, ShieldOff, X } from "lucide-react";
 
+import EmptyState from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { API, apiDelete, apiPost } from "@/lib/api";
@@ -98,11 +99,20 @@ export default function SuppressedPane({
             {/* Scrollable chip grid */}
             <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-3">
                 <div className="flex flex-wrap gap-1.5 pt-1">
-                    {filtered.length === 0 && (
-                        <p className="text-sm text-muted-foreground italic py-2 w-full">
-                            {search ? "No matches." : "No suppressed terms yet."}
-                        </p>
-                    )}
+                    {filtered.length === 0 &&
+                        (search ? (
+                            <p className="text-sm text-muted-foreground italic py-2 w-full">
+                                No matches.
+                            </p>
+                        ) : (
+                            <div className="w-full">
+                                <EmptyState
+                                    icon={ShieldOff}
+                                    title="No suppressed terms yet."
+                                    hint="Add words the extractor should always drop with the input above. Useful for marketing fluff that keeps showing up in post titles."
+                                />
+                            </div>
+                        ))}
                     {filtered.map((s) => (
                         <span
                             key={s.id}
