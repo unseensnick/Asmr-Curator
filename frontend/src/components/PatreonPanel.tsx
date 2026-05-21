@@ -103,12 +103,8 @@ export default function PatreonPanel({
         };
     }, []);
 
-    // Power mode controls the "More options" disclosure: on means open, off
-    // means closed. We let the Collapsible own its own open state via
-    // `defaultOpen={powerMode}` and force a remount with `key={String(powerMode)}`
-    // so flipping power mode reseeds the disclosure. The user can still flip
-    // the disclosure manually within a session; the next power-mode change
-    // remounts and resets it.
+    // key={String(powerMode)} on the Collapsible forces a remount so
+    // flipping power-mode reseeds the disclosure's defaultOpen.
 
     useEffect(() => {
         try {

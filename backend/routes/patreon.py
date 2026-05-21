@@ -137,29 +137,9 @@ def _serialise_post(post, download_path: Path) -> dict:
 @router.post("/api/patreon/fetch")
 async def patreon_fetch_endpoint(body: PatreonFetchIn):
     """Stream patreon-dl progress as SSE while the subprocess runs.
-
-    Frame shapes (one `data: <json>\\n\\n` per event):
-      - `{"state": "starting"}` — subprocess just spawned (or fast-path hit).
-      - `{"state": "cached", "count": N}` — metadata-only fast-path served
-        from cached sidecars; no subprocess ran.
-      - `{"state": "resolving", "target_kind": "creator"|"url"|"post",
-         "label": str}` — patreon-dl logged its target.
-      - `{"state": "fetching_posts", "fetched": N, "total": M}` — post-list
-        pagination progress (creator URLs).
-      - `{"state": "posts_found", "count": N}` — final tally before
-        downloads begin.
-      - `{"state": "post_progress", "post_id": str, "title": str}` —
-        per-post start.
-      - `{"state": "downloading", "bytes": N, "total": M, "percent": N,
-         "speed_kbs": N|null}` — throttled per-file bytes.
-      - `{"state": "wrote_file", "path": str}` — one media file saved.
-      - `{"state": "skipped", "post_id": str, "reason": str}` — patreon-dl
-        skipped this post (already-downloaded cache hit, tier mismatch, …).
-      - `{"state": "phase_done"}` — patreon-dl emitted its terminal info
-        line; the wrapper still has post-processing (flatten / cleanup) to
-        run before `done`.
-      - `{"state": "done", ...PatreonFetchResponse}` — final aggregate.
-      - `{"state": "error", "message": str}` — terminal failure.
+    Event shapes are the `PatreonFetchEvent` discriminated union in the
+    frontend (`lib/types.ts`), emitted by `parse_progress_line` plus the
+    `starting` / `cached` / `done` / `error` frames built below.
     """
     url = require_non_empty(body.url, "url")
     cookie = database.get_setting(PATREON_COOKIE_KEY) or ""
@@ -350,10 +330,6 @@ async def ingest_external_audio(body: IngestExternalAudioIn):
 
     cleaned_url = audio_utils.strip_query_params(source_url)
 
-    # _ingest_dest_dir chooses the flattened `<creator>/<post_id> - <title>/`
-    # layout when artist or title is supplied (matches patreon-dl), and
-    # falls back to legacy `<post_id>/` otherwise. validate_under_download
-    # enforces the DOWNLOAD_PATH boundary against any traversal.
     dest_dir = _ingest_dest_dir(post_id, body.artist, body.title)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
@@ -499,9 +475,6 @@ async def ingest_drive_link(body: IngestDriveLinkIn):
     dest_dir = _ingest_dest_dir(post_id, body.artist, body.title)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    # SSE generator: spawn fetch_drive_audio as a background task feeding an
-    # asyncio.Queue via its on_progress callback. Generator drains the
-    # queue, terminal `done` or `error` closes the loop.
     queue: asyncio.Queue = asyncio.Queue()
     DONE_SENTINEL = object()
 

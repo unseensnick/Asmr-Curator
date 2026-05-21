@@ -25,11 +25,8 @@ from backend.audio_utils import AUDIO_FORMATS_CONFIG, flatten_dest_parts, unique
 
 log = logging.getLogger(__name__)
 
-# Sync progress-callback shape — `fetch()` invokes it once per parsed phase
-# event from patreon-dl's stdout, plus an opening `starting` event. The
-# `/api/patreon/fetch` SSE route bridges these into an asyncio queue via
-# `loop.call_soon_threadsafe`. `None` means the caller doesn't want
-# narration and the parser is skipped entirely.
+# Called once per parsed phase event from patreon-dl stdout (plus an
+# opening `starting`). `None` disables parsing entirely.
 ProgressCallback = Callable[[dict], None]
 
 PATREON_DL_BIN = os.environ.get("PATREON_DL_BIN", "patreon-dl")
@@ -121,15 +118,9 @@ _PLAIN_URL_RE = re.compile(r"""https?://[^\s<>'"\)\]]+""", re.IGNORECASE)
 _URL_TRAILING_PUNCT = ".,;:!?"
 
 # ─── Stdout phase parsing ────────────────────────────────────────────────────
-#
-# patreon-dl logs through a ConsoleLogger that emits lines shaped like
-# `<datetime>: <level>: <originator>: <message>` (with cli-color ANSI escapes
-# decorating each segment). We disable color in `_write_config` and strip
-# residual ANSI before matching, so the parser only sees plain text.
-#
-# Phase events the SSE route bridges to the UI. Anything that doesn't match
-# a known pattern stays out of the event stream — the log tail still picks
-# it up for the post-mortem disclosure.
+# patreon-dl emits ANSI-decorated lines; color is disabled in `_write_config`
+# and residual escapes are stripped here. Unmatched lines fall through to the
+# log tail (used by the dry-run + no-posts disclosure).
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 

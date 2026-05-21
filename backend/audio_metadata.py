@@ -1,16 +1,8 @@
 """Read / write / clear ID3, FLAC, MP4 audio metadata via mutagen.
 
-One source of truth for the title / artist / album / album_artist tag-field
-dispatch. Three format families:
-
-- MP3 → ID3 frames (TIT2, TPE1, TALB, TPE2)
-- FLAC + OGG → Vorbis comments
-- M4A + AAC → MP4 atoms
-
-Imported by `backend.routes.files` (single-file rename, bulk-write) and
-`backend.routes.patreon` (post-ingest write). Keeping the helpers here
-instead of in `backend.main` lets the catch-all module shrink toward its
-stated role (app construction + shared validators).
+One source of truth for the title / artist / album / album_artist
+tag-field dispatch across three format families (MP3 → ID3 frames,
+FLAC + OGG → Vorbis comments, M4A + AAC → MP4 atoms).
 """
 
 from collections.abc import Callable
@@ -21,9 +13,7 @@ from mutagen.id3 import ID3, TALB, TIT2, TPE1, TPE2, ID3NoHeaderError
 from mutagen.mp4 import MP4
 from mutagen.oggvorbis import OggVorbis
 
-# Canonical field set every read/write/clear in this module operates on.
-# Adding a fifth field is a one-line change here + per-format key in the
-# tables below.
+# Canonical field set. Add a new field here and in each per-format table.
 FIELDS: tuple[str, ...] = ("title", "artist", "album", "album_artist")
 
 # field name → (ID3 frame id, ID3 frame class). MP3 only.
@@ -52,14 +42,9 @@ _M4A_TAGS: dict[str, str] = {
 
 
 class _Handle:
-    """Format-uniform view over a mutagen file. Each format family — MP3,
-    FLAC/OGG, M4A/AAC — has different reader / writer call shapes; this
-    wrapper hides them so the read / write / clear functions become
-    straight loops over `FIELDS`.
-
-    `audio` is `None` when the file has no metadata header (MP3 without an
-    ID3 frame) — read returns empties; write creates the header; clear is
-    a no-op.
+    """Format-uniform view over a mutagen file. `audio` is None when an
+    MP3 has no ID3 header — read returns empties, write creates it,
+    clear is a no-op.
     """
 
     def __init__(self, path: Path):
@@ -145,8 +130,6 @@ class _Handle:
 
 
 def _first(values: object) -> str:
-    """Normalise mutagen's per-format value shapes (list[str], list[frame],
-    str) to the first string-able value or an empty string."""
     if isinstance(values, list) and values:
         v = values[0]
         return str(v) if v is not None else ""
