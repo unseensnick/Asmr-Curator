@@ -474,6 +474,11 @@ export default function LibraryExplorerSheet({
     // lets Radix's own cleanup attempt first; we only step in if it
     // didn't finish. Re-evaluate on the next radix-ui upgrade and drop
     // if the upstream behaviour is fixed.
+    // `renamePath` deliberately omitted: it changes per keystroke, but the
+    // aria-hidden race only fires on overlay open/close transitions — not
+    // on inline input edits. Including it would run the DOM sweep on every
+    // character typed during a rename. The other deps cover the actual
+    // overlay-mount transitions (menu open/close, cut clipboard, etc.).
     useEffect(() => {
         if (!open) return;
         return deferToNextMacrotask(() => {
@@ -486,7 +491,8 @@ export default function LibraryExplorerSheet({
                     }
                 });
         });
-    }, [open, menuTarget, cutPaths, moveNotice, deleteCandidate, moveBusy, renamePath]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
+    }, [open, menuTarget, cutPaths, moveNotice, deleteCandidate, moveBusy]);
 
     // File-explorer hotkeys: N / F2 / Del.
     //
