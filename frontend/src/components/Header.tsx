@@ -29,6 +29,10 @@ interface HeaderProps {
      *  focus of the Dictionary button so the slide-in animation starts
      *  immediately on click instead of waiting for the lazy chunk. */
     onPrefetchLibrarySettings?: () => void;
+    /** Pre-warm the Help chunk; mirrors `onPrefetchLibrarySettings`. */
+    onPrefetchHelp?: () => void;
+    /** Pre-warm the Cookies chunk; mirrors `onPrefetchLibrarySettings`. */
+    onPrefetchCookies?: () => void;
     /** Open the standalone Cookies modal. */
     onOpenCookies: () => void;
     /** Open the Help reference sheet. */
@@ -54,6 +58,8 @@ export default function Header({
     dictTagCount,
     onOpenLibrarySettings,
     onPrefetchLibrarySettings,
+    onPrefetchHelp,
+    onPrefetchCookies,
     onOpenCookies,
     onOpenHelp,
     powerMode,
@@ -125,6 +131,8 @@ export default function Header({
                             variant="ghost"
                             size="icon"
                             onClick={handleOpenHelp}
+                            onMouseEnter={onPrefetchHelp}
+                            onFocus={onPrefetchHelp}
                             aria-label="Help and reference"
                             className="relative"
                         >
@@ -200,7 +208,11 @@ export default function Header({
                         </DropdownMenuCheckboxItem>
 
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem onSelect={onOpenCookies}>
+                        <DropdownMenuItem
+                            onSelect={onOpenCookies}
+                            onMouseEnter={onPrefetchCookies}
+                            onFocus={onPrefetchCookies}
+                        >
                             <Cookie size={14} aria-hidden />
                             Manage cookies
                         </DropdownMenuItem>

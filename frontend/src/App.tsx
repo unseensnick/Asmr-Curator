@@ -1,33 +1,31 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 
-import CookiesSheet from "@/components/CookiesSheet";
 import FileBrowser from "@/components/FileBrowser";
 import Header from "@/components/Header";
-import HelpSheet from "@/components/HelpSheet";
 import OutputPanel from "@/components/OutputPanel";
 import PatreonPanel from "@/components/PatreonPanel";
 import ScreenshotPanel from "@/components/ScreenshotPanel";
 import TagsEditor from "@/components/TagsEditor";
 
-// LibrarySettingsSheet is heavy (Dictionary modal + Vocabulary/Suppressed
-// panes + DictionaryTester) and only renders when the user opens it via
-// the Header. React.lazy moves it out of the initial chunk; Suspense
-// fallback is null because the Sheet's open animation covers the brief
-// load — but only when the chunk has already been fetched. The factory
-// is exported so `prefetchLibrarySettings` can warm the chunk before
-// the user clicks (hover-prefetch from the Dictionary buttons), so the
-// slide-in animation starts on click rather than waiting for the chunk
-// to arrive.
+// All four right-side sheets are lazy. The `load*` factories are kept as
+// callable references so we can warm the chunk via prefetch on the
+// open-button's hover / focus — that's what makes the slide-in animation
+// start on click instead of waiting for the chunk to arrive.
 const loadLibrarySettings = () => import("@/components/LibrarySettingsSheet");
+const loadHelpSheet = () => import("@/components/HelpSheet");
+const loadCookiesSheet = () => import("@/components/CookiesSheet");
 const LibrarySettingsSheet = lazy(loadLibrarySettings);
-/** Kick off the LibrarySettingsSheet chunk fetch without rendering anything.
- *  Idempotent — Vite's dynamic-import cache de-dupes follow-up calls. */
+const HelpSheet = lazy(loadHelpSheet);
+const CookiesSheet = lazy(loadCookiesSheet);
 function prefetchLibrarySettings() {
     void loadLibrarySettings();
 }
-// BulkEditSheet will grow heavy as phases 4-7 land the per-file table,
-// shared form, and rename-preview pane. Lazy from the start so the
-// initial chunk doesn't carry it.
+function prefetchHelpSheet() {
+    void loadHelpSheet();
+}
+function prefetchCookiesSheet() {
+    void loadCookiesSheet();
+}
 const BulkEditSheet = lazy(() => import("@/components/BulkEditSheet"));
 import type { BulkEditRoot } from "@/components/BulkEditSheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -214,6 +212,8 @@ export default function App() {
                 <Header
                     dictTagCount={dict.vocabulary.length}
                     onPrefetchLibrarySettings={prefetchLibrarySettings}
+                    onPrefetchHelp={prefetchHelpSheet}
+                    onPrefetchCookies={prefetchCookiesSheet}
                     onOpenLibrarySettings={() => {
                         // Mutually exclusive — having more than one right-side
                         // sheet open at once is undefined stacking and the
@@ -427,8 +427,14 @@ export default function App() {
                         onPrefetchDictionary={prefetchLibrarySettings}
                     />
                 </Suspense>
-                <CookiesSheet open={cookiesOpen} onClose={() => setCookiesOpen(false)} />
-                <HelpSheet open={helpOpen} onClose={() => setHelpOpen(false)} />
+                <Suspense fallback={null}>
+                    {cookiesOpen && (
+                        <CookiesSheet open={cookiesOpen} onClose={() => setCookiesOpen(false)} />
+                    )}
+                </Suspense>
+                <Suspense fallback={null}>
+                    {helpOpen && <HelpSheet open={helpOpen} onClose={() => setHelpOpen(false)} />}
+                </Suspense>
             </div>
         </TooltipProvider>
     );
