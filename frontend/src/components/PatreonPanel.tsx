@@ -171,7 +171,7 @@ export default function PatreonPanel({
         onExtracted(title || p.title || "", normalised, p.artist || "");
         setApplyStatus({
             type: "success",
-            msg: `Applied #${p.post_id} — edit tags or generate filename.`,
+            msg: `Applied #${p.post_id}. Edit tags or generate the filename next.`,
         });
         setLastApplied(p);
     }
@@ -354,7 +354,7 @@ export default function PatreonPanel({
                             <strong className="font-semibold text-foreground">
                                 {posts.length}
                             </strong>{" "}
-                            posts found — tap a row to use it.
+                            posts found. Click a row to use it.
                         </p>
                     )}
                     {post && <SinglePostResult post={post} onApply={() => applyPost(post)} />}

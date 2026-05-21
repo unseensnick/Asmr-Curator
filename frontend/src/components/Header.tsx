@@ -119,7 +119,7 @@ export default function Header({
                 <h1 className="font-display text-2xl lg:text-3xl font-semibold tracking-tight text-foreground">
                     ASMR Curator
                 </h1>
-                <p className="font-display text-base italic text-muted-foreground/80 leading-snug">
+                <p className="text-sm text-muted-foreground/80 leading-snug">
                     A quiet place for your audio library.
                 </p>
             </div>

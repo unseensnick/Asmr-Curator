@@ -639,17 +639,17 @@ function ShortcutsTopic() {
                 <div className="flex flex-col gap-2.5">
                     <HelpCard
                         icon={<Keyboard size={14} aria-hidden />}
-                        title="F2 — rename"
+                        title="F2 to rename"
                         body="Renames the file or folder your cursor is hovering, or the only selected row. With multiple files selected, F2 does nothing (rename one at a time)."
                     />
                     <HelpCard
                         icon={<Keyboard size={14} aria-hidden />}
-                        title="Delete — delete"
+                        title="Delete key to delete"
                         body="Prompts to delete the hovered file or, with multiple files selected, the whole selection. A confirm dialog appears first; nothing deletes silently."
                     />
                     <HelpCard
                         icon={<Keyboard size={14} aria-hidden />}
-                        title="N — new folder"
+                        title="N for new folder"
                         body="Creates a new folder in the current Library subdirectory. Ctrl / Cmd + N would conflict with the browser's New window shortcut, so it's plain N."
                     />
                     <HelpCard
