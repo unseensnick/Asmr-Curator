@@ -66,6 +66,13 @@ interface FileBrowserProps {
      *  The parent already has the files (from `bulkSelected`), so this
      *  only carries the source root. */
     onOpenBulkEdit?: (root: FileRoot) => void;
+    /** App-wide library-subdir position. Shared with the LibraryExplorer
+     *  Sheet (rail navigation) + the single-file MoveToLibrarySection
+     *  + the BulkEditSheet's Move picker, so navigating one updates all
+     *  three. Lifted from internal state so the bulk move surface lands
+     *  at the same spot the rest of the app is already pointing at. */
+    librarySubdir: string;
+    onLibrarySubdirChange: (subdir: string) => void;
 }
 
 interface SearchResponse {
@@ -99,6 +106,8 @@ export default function FileBrowser({
     bulkSelected,
     onBulkSelectedChange,
     onOpenBulkEdit,
+    librarySubdir,
+    onLibrarySubdirChange: setLibrarySubdir,
 }: FileBrowserProps) {
     // Persist the last-opened root across reloads so a user who lives in
     // Downloads after a bridge doesn't get forced back to Library on every
@@ -122,10 +131,6 @@ export default function FileBrowser({
     // Drives the Downloads-tab badge; refreshed on open / tab switch / move.
     const [downloadsCount, setDownloadsCount] = useState<number | null>(null);
     const [explorerOpen, setExplorerOpen] = useState(false);
-
-    // Sheet + Move-to-library picker share this so navigating one updates
-    // the other — batch-filing into the same destination doesn't re-walk.
-    const [librarySubdir, setLibrarySubdir] = useState("");
 
     // Conversion preferences, persist across sessions.
     const [convertFormat, setConvertFormat] = useState<ConvertFormat>(() => {

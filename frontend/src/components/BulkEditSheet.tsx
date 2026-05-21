@@ -105,6 +105,13 @@ interface BulkEditSheetProps {
      */
     onPromoteToCanonical: (text: string) => Promise<void>;
     onPromoteToAlias: (text: string, canonical: VocabEntry) => Promise<void>;
+    /** App-wide library-subdir position (shared with the FileBrowser's
+     *  LibraryExplorerSheet rail + the single-file MoveToLibrarySection
+     *  picker). Doubles as the Move section's destination — when the
+     *  Move toggle is on, this is what flows into the bulk-write's
+     *  `to_subdir`. */
+    librarySubdir: string;
+    onLibrarySubdirChange: (subdir: string) => void;
 }
 
 /**
@@ -139,6 +146,8 @@ export default function BulkEditSheet({
     onRemoveFile,
     onPromoteToCanonical,
     onPromoteToAlias,
+    librarySubdir,
+    onLibrarySubdirChange,
 }: BulkEditSheetProps) {
     // Keyed by `FileEntry.path` (relative to the chosen root). Paths the
     // user hasn't touched aren't in the map — `editFor` falls back to
@@ -183,13 +192,13 @@ export default function BulkEditSheet({
     // a rename in the eventual commit.
     const [rename, setRename] = useState(false);
 
-    // Optional move-to-library destination. Only meaningful when the
-    // sheet was opened from Downloads (library-to-library moves stay on
-    // /api/move). The checkbox gates the input; an empty input with the
+    // Move-to-library checkbox. The destination subdir itself is the
+    // app-wide `librarySubdir` (controlled by App.tsx and shared with
+    // the LibraryExplorerSheet + single-file MoveToLibrarySection) —
+    // navigating one updates the others. An empty subdir with the
     // checkbox on is treated as "no move" so the user can toggle
     // without typing.
     const [moveEnabled, setMoveEnabled] = useState(false);
-    const [moveSubdir, setMoveSubdir] = useState("");
     const moveAvailable = root === "downloads";
 
     // Persistent link between Artist and Album artist (the common case —
@@ -403,7 +412,7 @@ export default function BulkEditSheet({
     // Move is only meaningful when source is Downloads (library-to-library
     // stays on /api/move). Empty string with the checkbox on = no-op, so
     // the user can toggle freely without typing.
-    const effectiveMoveSubdir = moveEnabled && moveAvailable ? moveSubdir.trim() : "";
+    const effectiveMoveSubdir = moveEnabled && moveAvailable ? librarySubdir.trim() : "";
     const hasMove = effectiveMoveSubdir !== "";
     const canCommit = hasPerFileEdit || hasSharedEdit || hasClear || hasRename || hasMove;
     const anyTooLong = rename && previewRows.some((r) => r.tooLong);
@@ -458,7 +467,9 @@ export default function BulkEditSheet({
             setLinkArtists(true); // matches the default — see useState init
             setRename(false);
             setMoveEnabled(false);
-            setMoveSubdir("");
+            // librarySubdir is app-wide navigation state — leave it
+            // where the user landed it so a follow-up Browse / Move
+            // opens at the same spot they just filed files into.
             setLoadFeedback({ kind: "none" });
             onClose();
         } catch (err) {
@@ -810,8 +821,8 @@ export default function BulkEditSheet({
                             {moveEnabled && (
                                 <div className="flex flex-col gap-2">
                                     <LibrarySubdirPicker
-                                        subdir={moveSubdir}
-                                        onSubdirChange={setMoveSubdir}
+                                        subdir={librarySubdir}
+                                        onSubdirChange={onLibrarySubdirChange}
                                         onError={(msg) =>
                                             // Reuse the existing submit-error
                                             // surface in the footer so picker
@@ -823,7 +834,9 @@ export default function BulkEditSheet({
                                     <span className="text-xs text-muted-foreground">
                                         Moving to:{" "}
                                         <span className="font-mono text-foreground break-all">
-                                            {moveSubdir ? `Library / ${moveSubdir}` : "Library"}
+                                            {librarySubdir
+                                                ? `Library / ${librarySubdir}`
+                                                : "Library"}
                                         </span>
                                     </span>
                                 </div>

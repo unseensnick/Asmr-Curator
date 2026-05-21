@@ -60,6 +60,11 @@ export default function App() {
     const [bulkEditOpen, setBulkEditOpen] = useState(false);
     const [bulkEditFiles, setBulkEditFiles] = useState<FileEntry[]>([]);
     const [bulkEditRoot, setBulkEditRoot] = useState<BulkEditRoot>("library");
+    // App-wide position within LIBRARY_PATH. Lifted out of FileBrowser so
+    // the BulkEditSheet's Move-to-library picker, the single-file Move
+    // section, and the LibraryExplorerSheet all share one navigation
+    // state — pick /A/B in any of them, the next surface opens there.
+    const [librarySubdir, setLibrarySubdir] = useState("");
 
     function openBulkEdit(selectionRoot: BulkEditRoot) {
         // The selection itself already lives in `bulkEditFiles` (the
@@ -354,6 +359,8 @@ export default function App() {
                     bulkSelected={bulkEditFiles}
                     onBulkSelectedChange={setBulkEditFiles}
                     onOpenBulkEdit={openBulkEdit}
+                    librarySubdir={librarySubdir}
+                    onLibrarySubdirChange={setLibrarySubdir}
                 />
             </section>
 
@@ -384,6 +391,8 @@ export default function App() {
                     onRemoveFile={removeBulkEditFile}
                     onPromoteToCanonical={promoteToCanonical}
                     onPromoteToAlias={promoteToAlias}
+                    librarySubdir={librarySubdir}
+                    onLibrarySubdirChange={setLibrarySubdir}
                 />
             </Suspense>
             <CookiesSheet open={cookiesOpen} onClose={() => setCookiesOpen(false)} />
