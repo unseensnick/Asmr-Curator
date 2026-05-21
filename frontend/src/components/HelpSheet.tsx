@@ -459,10 +459,10 @@ function LibraryTopic() {
                         a Library subfolder.
                     </li>
                     <li>
-                        <span className="text-foreground/90">Convert</span>: ffmpeg re-encodes any
-                        of WAV, WMA, MP4, MOV, AVI, MKV, WebM, M4A, or AAC into MP3, FLAC, or OGG.
-                        The conversion is what lets the metadata writer attach tags; the formats in
-                        the first list don&apos;t support the tag fields the app uses.
+                        <span className="text-foreground/90">Convert</span>: re-encode any of WAV,
+                        WMA, MP4, MOV, AVI, MKV, WebM, M4A, or AAC into MP3, FLAC, or OGG. The
+                        conversion is what lets the tag writer attach a title and artist; the
+                        formats in the first list can&apos;t hold those tag fields.
                     </li>
                     <li>
                         <span className="text-foreground/90">Browse</span>: open the folder-tree
@@ -701,7 +701,7 @@ function ShortcutsTopic() {
                     <HelpCard
                         icon={<Sparkles size={14} aria-hidden />}
                         title="Power mode"
-                        body="Toggle in Settings (gear icon, top-right). Auto-expands More options on the source panels, surfaces raw LLM output after a screenshot fetch, and turns on advanced filters in the file list."
+                        body="Toggle in Settings (gear icon, top-right). Auto-expands More options on the source panels, surfaces the raw model output after a screenshot fetch, and adds a Bitrate slider to the Convert panel so you can pin a specific kbps target instead of trusting the preset."
                     />
                     <HelpCard
                         icon={<Keyboard size={14} aria-hidden />}

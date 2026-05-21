@@ -13,42 +13,40 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ### Additions
 
-- **Power mode unlocks an explicit bitrate input in the Convert panel.** Override the preset when you want a specific kbps target (32 to 320 kbps in 8 kbps steps). Leave it blank and the four-tier preset picker still works as before. Disabled for FLAC because lossless has no bitrate to set.
+- **Power mode unlocks a Bitrate slider in the Convert panel.** Drag to pin a specific kbps target (32 to 320 kbps, 8 kbps steps); the four-tier preset picker still works as before, and a Use preset button on the slider returns to it. FLAC shows a plain note instead — there's no bitrate to set on a lossless format.
 - **Help &amp; reference sheet in the header.** A new `?` button next to Dictionary opens a calm right-side sheet covering the three workflows (Patreon URL / Screenshot / files on disk), first-time cookie setup, and the non-obvious affordances (right-click a tag chip, Cmd / Ctrl + Enter, Power mode). A small dot next to the icon clears on first open. Not a tutorial — it's a reference card the user pulls open when they want it.
 
 ### Changes
 
-- **The Patreon fetch now narrates as it runs.** A creator-wide pull used to sit on one static label for what could be a multi-hour download; the URL panel now shows live phases — looking up the creator, reading the post list (N of M), found N posts, downloading post #X (title), saved &lt;filename&gt;, skipped, wrapping up. Single-post and creator-wide pulls report progress identically. Closing the panel or pasting a different URL cancels the in-flight pull cleanly.
-- **The layout scales into ultrawide aspect ratios.** Above the 2xl breakpoint (1536px) the container cap is removed so the 3-column dashboard (Source / Edit / Output) grows proportionally with the screen, and the FileBrowser sits in its own section below at the full container width. Users on 21:9 (3440×1440) and 32:9 / 5K (5120×2160) monitors get controls that fill the screen instead of narrow columns centred with background on each side.
+- **The Patreon fetch now narrates as it runs.** A creator-wide pull used to sit on one static label for a multi-hour download; the URL panel now shows live phases — looking up the creator, reading the post list, downloading post #X, saving each file, wrapping up. Closing the panel or pasting a different URL cancels cleanly.
+- **The layout scales into ultrawide aspect ratios.** Above 1536px the container cap is removed so the 3-column dashboard grows proportionally with the screen, and the file browser fills the width below. Ultrawide users get controls that fill the screen instead of narrow columns flanked by background.
 - **Cmd / Ctrl + Enter from the title or format input fires Generate filename.** The shortcut shows next to the button label (`⌘↵` on macOS, `Ctrl↵` elsewhere) so the late-night repeat workflow doesn't have to reach for the mouse.
-- **The FileBrowser remembers which tab you were on across reloads.** Previously every refresh reset to Library; users who live in Downloads after a Patreon bridge had to switch back manually each time.
-- **Secondary text in light mode now clears WCAG AA on tinted surfaces.** Log tails, code-block previews, and hints sitting on `bg-muted/40` were borderline against the contrast floor in light mode; the muted-foreground token nudged darker so legibility holds up in daylight.
-- **Each row in the Bulk edit sheet now shows the proposed filename's byte count under its Tags field.** Same `bytes / 255 bytes` indicator the single-file rename uses (warning past 200, destructive past 255) — so you catch a too-long name while editing tags, not after toggling Rename and scrolling to the preview.
-- **The Bulk edit sheet header gets a Dictionary shortcut, and hovering a filename no longer shows the text cursor.** Click Dictionary inside Bulk edit to open the canonical-tags sheet on top with all in-flight edits preserved; closing it returns you to Bulk edit. Opening Dictionary from the app header still returns you to where you were. The per-row filename also picks up the pointer cursor so it reads like the FileBrowser's hoverable rows.
-- **Tooltips across the app now use one consistent style, and only show up where they add information.** Icon-only buttons (theme toggle, refresh, browse, batch convert, help) and truncated content (the alias-conflict badge in the dictionary, the Downloads pending count, the long error message in Bulk edit) all use the same delayed hover affordance. Tooltips that just restated a button's visible label (Close, Save, Cancel, Delete, Remove, etc.) are gone, so hovering an obvious button no longer pops a redundant label.
-- **The Help & reference sheet is now organised by topic.** A left-side rail (matching the Browse sheet) lets you jump between Overview, Getting started, Patreon URL, Screenshot, File library, Bulk edit, Tag dictionary, Shortcuts and tips, and Self-hosting instead of scrolling one long page. The Getting started topic covers per-browser extension install (Chrome / Firefox / Zen, with the about:config tweak for unsigned add-ons) plus a small troubleshooting section. The Shortcuts topic now lists every selection / file-manager / source-panel shortcut the app supports, not just the highlights.
-- **Opening the Dictionary from inside Bulk edit no longer briefly blanks the sheet** — the slide-in starts immediately on click.
+- **The file browser remembers which tab you were on across reloads.** No more bouncing back to Library after every refresh when you live in Downloads.
+- **Secondary text in light mode now clears WCAG AA on tinted surfaces.** Log tails, code-block previews, and hints on faintly-tinted backgrounds nudged darker so legibility holds up in daylight.
+- **Each row in the Bulk edit sheet shows the proposed filename's byte count under its Tags field.** Same warning-then-destructive thresholds as the single-file rename — catch a too-long name while editing tags, not after toggling Rename.
+- **Dictionary shortcut in the Bulk edit sheet header.** Click Dictionary inside Bulk edit to open the canonical-tags sheet on top with all in-flight edits preserved; closing it returns you to Bulk edit.
+- **Tooltips use one consistent style and only appear where they add information.** Icon-only buttons and truncated content get them; obvious buttons (Close, Save, Cancel, Delete) no longer pop a redundant label.
+- **The Help & reference sheet is organised by topic.** A left-side rail lets you jump between Overview, Getting started, the three workflows, File library, Bulk edit, Tag dictionary, Shortcuts, and Self-hosting instead of scrolling one long page.
+- **Opening the Dictionary from inside Bulk edit no longer briefly blanks the sheet.** The slide-in starts immediately on click.
 - **The Dictionary sheet opens faster on first click.** Inactive tabs now load only when you click them, so a large vocabulary doesn't delay the slide-in.
-- **The Library tab's file rows match the Downloads tab's row rhythm.** Library subdir listings showed a single line per row while Downloads (and search results) showed two — filename plus folder hint — so the two tabs felt jarringly different in density. A minimum row height now keeps both visually consistent.
-- **Conversion presets retuned to more comfortable bitrates.** Low now matches the quality you'd get from VLC's default MP3 export (around 130 kbps); Standard moves up to roughly 160 kbps. OGG's Low and Standard get the same nudge. FLAC keeps the source's sample rate and bit depth instead of forcing 44.1 kHz / 16-bit.
+- **Library and Downloads tabs share one row rhythm.** Library subdir listings used to look more compact than Downloads; a minimum row height keeps both consistent.
+- **Conversion presets retuned to more comfortable bitrates.** MP3 Low now matches VLC's default (~130 kbps); Standard moves up to ~160 kbps. OGG Low and Standard get the same nudge. FLAC keeps the source's sample rate and bit depth instead of forcing 44.1 kHz / 16-bit.
 
 ### Fixes
 
-- **Plain-English error and helper text in a few spots that leaked engineer nouns.** The bulk-edit Convert helper no longer mentions `ffmpeg`; the FileBrowser load-error no longer surfaces internal path-variable names; move and rename failures read in the librarian's voice instead of pasting raw backend strings.
-
-- **Drag-selecting bottom-to-top in the FileBrowser no longer drops the first row** when the multi-selection action bar appears mid-drag.
-- **Drag-select's auto-scroll stops at the bottom of the list** instead of looping forever when the cursor parks at the bottom edge after scrolling to the end.
-- **Click jitter no longer toggles a row into multi-select mode** — the threshold to engage a drag is higher now, so a slightly-shaky click stays a click.
-
-- **Emoji stripping in extracted titles now catches every Unicode pictograph block.** Characters like ⭐ ⬛ ⌛ and ZWJ sequences (e.g. 🐈‍⬛) used to slip through the strip rules and leave fragments behind in filenames; the rule now uses the canonical Unicode pictograph set so dense-emoji Patreon titles come out clean.
-- **Right-click → "Add as alias of…" on an unrecognised tag chip now opens the picker reliably, and the chip snaps to the canonical form once you pick one.** Previously the picker flashed open then dismissed, and the chip stayed visible as the original novel text instead of the canonical you aliased it to.
-- **Patches two starlette CVEs** (CVE-2025-54121, CVE-2025-62727) by bumping fastapi to 0.130.0 and pinning starlette to 0.52.1. Affects request-body and multipart handling — pull the new image to pick up the fix.
+- **Error and helper text rewritten in plain English.** The Bulk edit Convert helper no longer mentions `ffmpeg`; the file browser's load-error no longer leaks internal path-variable names; move and rename failures read in the librarian's voice instead of pasting raw backend strings.
+- **Drag-select bottom-to-top no longer drops the first row** when the multi-selection action bar appears mid-drag.
+- **Drag-select's auto-scroll stops at the bottom of the list** instead of looping forever when the cursor parks at the bottom edge.
+- **Click jitter no longer toggles a row into multi-select mode.** The threshold to engage a drag is higher so a slightly-shaky click stays a click.
+- **Emoji stripping in extracted titles catches every Unicode pictograph block.** Characters like ⭐ ⬛ ⌛ and joined sequences (e.g. 🐈‍⬛) used to leave fragments in filenames; the rule now uses the canonical pictograph set.
+- **Right-click → "Add as alias of…" on an unrecognised tag chip opens the picker reliably, and the chip snaps to the canonical form once you pick one.** Previously the picker flashed open then dismissed.
+- **Patches two starlette CVEs** (CVE-2025-54121, CVE-2025-62727) by bumping fastapi to 0.130.0 and pinning starlette to 0.52.1. Pull the new image to pick up the fix.
 - **Drops the unused `python-multipart` runtime dependency**, closing 4 high + 4 moderate CVEs (GHSA-59g5-xgcq-4qw3, GHSA-wp53-j4wj-2cfg, GHSA-mj87-hwqh-73pj, GHSA-pp6c-gr5w-3c5g).
 - **Bumps `idna` 3.11 → 3.15**, closing the `idna.encode()` resource-exhaustion advisory (GHSA-65pc-fj4g-8rjx).
 - **Frontend deps bumped to latest across majors** (vite 8.0.x, vitest 4.x), which transitively retires the vulnerable nested `esbuild` 0.21.5 (GHSA-67mh-4wv8-2f99).
-- **File-API path validators now return a clean 403 on malformed input** (null bytes, paths the OS refuses to resolve). Previously these surfaced as a 500 with a Python stack trace — defence-in-depth tightening, not a known exploit.
-- **Clicking "New folder" in the Browse sheet now lands focus in the input on the first try, with no console warning.** Both routes — the toolbar button and the right-click → New folder action — were racing Radix's focus management and either leaving the input unfocused or briefly marking the Sheet content `aria-hidden` while focus was inside it.
-- **Hitting Esc inside the Bulk edit sheet (or any other open sheet / dialog) no longer wipes the FileBrowser's selection.** Esc now only clears the selection when no sheet or dialog is open; closing the sheet first then pressing Esc still clears it.
+- **File-API path validators return a clean 403 on malformed input** (null bytes, paths the OS refuses to resolve). Previously these surfaced as a 500 with a Python stack trace.
+- **"New folder" in the Browse sheet now lands focus in the input on the first try** with no console warning. Both the toolbar button and the right-click action used to race Radix's focus management.
+- **Esc inside the Bulk edit sheet (or any open sheet / dialog) no longer wipes the file browser's selection.** Esc only clears the selection when no sheet or dialog is open.
 
 ## [2.0.4]
 

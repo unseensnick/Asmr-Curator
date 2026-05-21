@@ -362,7 +362,7 @@ Every file endpoint accepts a `root` parameter (`"library"` for `LIBRARY_PATH`, 
 | Method | Path                    | Description                                                                                          |
 | ------ | ----------------------- | ---------------------------------------------------------------------------------------------------- |
 | GET    | `/api/convert/formats`  | List supported output formats and quality levels (sourced from `frontend/src/lib/audio-formats.json`) |
-| POST   | `/api/convert`          | Re-encode a file with `ffmpeg`. Request: `{ "path": "...", "output_format": "mp3"\|"flac"\|"ogg", "quality": "low"\|"standard"\|"high"\|"best"\|"lossless", "root"?: "library"\|"downloads", "delete_original": false }` |
+| POST   | `/api/convert`          | Re-encode a file with `ffmpeg`. Request: `{ "path": "...", "output_format": "mp3"\|"flac"\|"ogg", "quality": "low"\|"standard"\|"high"\|"best"\|"lossless", "root"?: "library"\|"downloads", "delete_original": false, "bitrate_kbps"?: number }`. The optional `bitrate_kbps` (32 to 320, in steps of 8) is the power-mode override the UI sends when the user drags the bitrate slider; it swaps the preset's `-q:a` VBR target for `-b:a <N>k` and is rejected for FLAC |
 
 ### Supported Audio/Video Formats
 
