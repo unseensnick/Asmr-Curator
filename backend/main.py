@@ -1,12 +1,9 @@
-"""FastAPI app construction + shared backend helpers.
+"""FastAPI app construction + shared helpers.
 
-This module assembles the app (lifespan, SPA fallback, router registration)
-and exposes the dependencies every route module pulls in: path validators
-(`validate_under_*`), env-resolved roots (`LIBRARY_PATH`, `DOWNLOAD_PATH`),
-metadata-writer (`_write_metadata`), audio-format tables, subprocess-timeout
-constants, and the small validation helpers (`require_non_empty`,
-`require_file`, `reject_if_exists`, `root_for`). Route handlers themselves
-live under `backend/routes/`.
+Owns app assembly (lifespan, SPA fallback, router registration), path
+validators, env-resolved roots, audio-format tables, and a few small
+validation helpers. Route handlers live under `backend/routes/`; audio
+metadata reads / writes live in `backend.audio_metadata`.
 """
 
 import logging
@@ -20,17 +17,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from mutagen.flac import FLAC
-from mutagen.id3 import ID3, TALB, TIT2, TPE1, TPE2, ID3NoHeaderError
-from mutagen.mp4 import MP4
-from mutagen.oggvorbis import OggVorbis
 
 from backend import drive_fetch
 from backend.audio_utils import AUDIO_FORMATS_CONFIG
 
-# Audio format sets derived from the shared config in audio_utils. The
-# frontend reads the same audio-formats.json, so adding a new extension
-# in one place propagates to both halves automatically.
 _FORMATS_CONFIG = AUDIO_FORMATS_CONFIG
 
 log = logging.getLogger("asmr_curator")
@@ -209,61 +199,12 @@ def reject_if_exists(path: Path) -> None:
         raise HTTPException(409, f"File already exists: {path.name}")
 
 
-# ── Audio metadata writer (shared by rename + move + external-audio ingest) ──
-
-# field name → (ID3 tag id, ID3 tag class) for MP3
-_MP3_TAGS = {
-    "title": ("TIT2", TIT2),
-    "artist": ("TPE1", TPE1),
-    "album": ("TALB", TALB),
-    "album_artist": ("TPE2", TPE2),
-}
-# field name → Vorbis comment key for FLAC/OGG
-_VORBIS_TAGS = {
-    "title": "title",
-    "artist": "artist",
-    "album": "album",
-    "album_artist": "albumartist",
-}
-# field name → MP4 atom key for M4A/AAC
-_M4A_TAGS = {
-    "title": "\xa9nam",
-    "artist": "\xa9ART",
-    "album": "\xa9alb",
-    "album_artist": "aART",
-}
-
-
-def _write_metadata(path: Path, title: str, artist: str, album: str, album_artist: str) -> None:
-    """Write title/artist/album/album_artist tags to a metadata-compatible audio file."""
-    ext = path.suffix.lower()
-    fields = {"title": title, "artist": artist, "album": album, "album_artist": album_artist}
-
-    if ext == ".mp3":
-        try:
-            audio = ID3(str(path))
-        except ID3NoHeaderError:
-            audio = ID3()
-        for field, value in fields.items():
-            if value:
-                tag_id, tag_cls = _MP3_TAGS[field]
-                audio.setall(tag_id, [tag_cls(encoding=3, text=value)])
-        audio.save(str(path))
-
-    elif ext in (".flac", ".ogg"):
-        audio = FLAC(str(path)) if ext == ".flac" else OggVorbis(str(path))
-        for field, value in fields.items():
-            if value:
-                audio[_VORBIS_TAGS[field]] = [value]
-        audio.save()
-
-    elif ext in (".m4a", ".aac"):
-        audio = MP4(str(path))
-        for field, value in fields.items():
-            if value:
-                audio[_M4A_TAGS[field]] = [value]
-        audio.save()
-
+# Audio-metadata helpers live in `backend.audio_metadata`. Re-exported
+# under their previous underscored names for the route modules that import
+# them from here. F401: re-exports for external callers are not unused.
+from backend.audio_metadata import clear_metadata as _clear_metadata  # noqa: E402,F401
+from backend.audio_metadata import read_metadata as _read_metadata  # noqa: E402,F401
+from backend.audio_metadata import write_metadata as _write_metadata  # noqa: E402,F401
 
 # ── Audio-format catalogue (file browser + convert + rename ext gating) ──────
 
@@ -274,31 +215,38 @@ OUTPUT_FORMATS = _FORMATS_CONFIG["outputFormats"]
 
 QUALITY_FLAGS: dict[str, dict[str, list[str]]] = {
     "mp3": {
-        # VBR: -q:a 0 = best (~220-260kbps avg), 9 = worst (~45-85kbps avg)
-        "low": ["-codec:a", "libmp3lame", "-q:a", "7"],  # ~96-112kbps
-        "standard": ["-codec:a", "libmp3lame", "-q:a", "4"],  # ~140-185kbps
-        "high": ["-codec:a", "libmp3lame", "-q:a", "2"],  # ~170-210kbps
-        "best": ["-codec:a", "libmp3lame", "-q:a", "0"],  # ~220-260kbps
+        # LAME VBR: -q:a 0 = best (~245kbps avg), 9 = worst (~65kbps avg).
+        # "low" anchors at ~130kbps to match VLC's MP3 default; the earlier
+        # -q:a 7 sat below that floor and made the preset feel cheaper than
+        # a comparable VLC export at the same size.
+        "low": ["-codec:a", "libmp3lame", "-q:a", "5"],  # ~130kbps
+        "standard": ["-codec:a", "libmp3lame", "-q:a", "3"],  # ~160kbps
+        "high": ["-codec:a", "libmp3lame", "-q:a", "2"],  # ~190kbps
+        "best": ["-codec:a", "libmp3lame", "-q:a", "0"],  # ~245kbps
     },
     "flac": {
-        "lossless": [
-            "-codec:a",
-            "flac",
-            "-compression_level",
-            "8",
-            "-ar",
-            "44100",
-            "-sample_fmt",
-            "s16",
-        ],
+        # No -ar / -sample_fmt: ffmpeg preserves source rate + bit depth,
+        # so a 48kHz / 24-bit source stays 48kHz / 24-bit instead of being
+        # silently downsampled to 44.1kHz / 16-bit.
+        "lossless": ["-codec:a", "flac", "-compression_level", "8"],
     },
     "ogg": {
-        "low": ["-codec:a", "libvorbis", "-q:a", "3"],
-        "standard": ["-codec:a", "libvorbis", "-q:a", "5"],
-        "high": ["-codec:a", "libvorbis", "-q:a", "7"],
-        "best": ["-codec:a", "libvorbis", "-q:a", "9"],
+        # libvorbis -q:a scale: 0 = worst, 10 = best.
+        "low": ["-codec:a", "libvorbis", "-q:a", "4"],  # ~128kbps
+        "standard": ["-codec:a", "libvorbis", "-q:a", "6"],  # ~192kbps
+        "high": ["-codec:a", "libvorbis", "-q:a", "7"],  # ~224kbps
+        "best": ["-codec:a", "libvorbis", "-q:a", "9"],  # ~320kbps
     },
 }
+
+# Codecs that support an explicit CBR bitrate override (power-mode field).
+# Wired in `routes/convert.py` — when a request carries `bitrate_kbps`, the
+# preset's `-q:a` flag is swapped for `-b:a <N>k` and the codec is taken
+# from the table above. FLAC is intentionally omitted; lossless has no
+# bitrate target.
+BITRATE_OVERRIDE_FORMATS: frozenset[str] = frozenset({"mp3", "ogg"})
+BITRATE_OVERRIDE_MIN_KBPS = 32
+BITRATE_OVERRIDE_MAX_KBPS = 320
 
 
 # ── Router registration ──────────────────────────────────────────────────────

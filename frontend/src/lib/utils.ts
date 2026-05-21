@@ -36,6 +36,21 @@ export function sanitizeFilename(str: string): string {
         .replace(/ +$/, "");
 }
 
+/** Strip any number of leading + trailing `[bracket]` markers (and the
+ *  whitespace around them) regardless of contents. Mid-title brackets
+ *  are left alone — they're usually part of the actual title.
+ *
+ *  Canonical rule for both the single-file generate flow and the bulk
+ *  edit sheet's submit step: brackets get stripped from the ID3 title,
+ *  but KEPT in the filename. So callers feed this to the ID3 path only.
+ */
+export function stripOuterBrackets(str: string): string {
+    return str
+        .replace(/^(?:\s*\[[^\]]*\]\s*)+/, "")
+        .replace(/(?:\s*\[[^\]]*\]\s*)+$/, "")
+        .trim();
+}
+
 /** Normalises a tag through the dictionary.
  *  Returns null if the tag is empty or suppressed.
  *  Pass { titleCase: true } to title-case unknown tags (used during LLM extraction). */

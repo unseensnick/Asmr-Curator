@@ -52,24 +52,10 @@ interface TagChipProps {
 }
 
 /**
- * Draggable, editable tag chip used by `TagsEditor`. Mono label (filenames
- * are mono per the Two-Voices Rule), drag handle reveals on hover/focus,
- * remove X is always visible.
- *
- * Three display variants:
- *   - Canonical (default): chip with handle + clickable mono label + remove.
- *   - Novel (`novel=true`): same shape with `bg-warning/10` warm-amber tint
- *     to mark "not in your dictionary yet" without nagging — the color is
- *     the signal, plus a tooltip explains it for non-visual users. A
- *     right-click context menu offers "Add to dictionary as new tag"
- *     (creates a canonical) or "Add as alias of…" (picks an existing
- *     canonical via a searchable popover).
- *   - Edit: inline `<input>` autosizes to character count, with save +
- *     cancel buttons. Enter saves, Esc cancels, blur saves.
- *
- * Drag/drop state lives in the parent (TagsEditor); this component
- * surfaces the HTML5 DnD handlers as props. Touch DnD is a known
- * limitation, deferred to a future pass.
+ * Draggable, editable tag chip. Variants: canonical (default), novel
+ * (warm-amber tint + right-click "add to dictionary" / "alias of"
+ * context menu for tags the dictionary doesn't know), and inline edit.
+ * Drag/drop state is owned by the parent; touch DnD is unsupported.
  */
 export default function TagChip({
     label,
@@ -175,9 +161,7 @@ export default function TagChip({
             }}
             onKeyDown={handleKeyDown}
             title={
-                novel
-                    ? "Not in your dictionary yet. Click to edit, right-click to add."
-                    : "Click to edit"
+                novel ? "Not in your dictionary yet. Click to edit, right-click to add." : undefined
             }
             aria-label={`Edit tag ${label}`}
             className={`${baseClasses} ${chromeClasses}`}
@@ -195,7 +179,6 @@ export default function TagChip({
                     onRemove();
                 }}
                 className="text-muted-foreground/60 hover:text-destructive transition-colors leading-none shrink-0 p-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                title="Remove tag"
                 aria-label={`Remove tag ${label}`}
             >
                 <X size={14} aria-hidden />
@@ -338,7 +321,6 @@ function EditingChip({
                 type="button"
                 onClick={onSaveEdit}
                 className="text-success hover:text-success/80 transition-colors leading-none shrink-0 p-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                title="Save"
                 aria-label="Save edit"
             >
                 <Check size={14} aria-hidden />
@@ -347,7 +329,6 @@ function EditingChip({
                 type="button"
                 onClick={onCancelEdit}
                 className="text-muted-foreground hover:text-foreground transition-colors leading-none shrink-0 p-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                title="Cancel"
                 aria-label="Cancel edit"
             >
                 <X size={14} aria-hidden />

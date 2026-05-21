@@ -1,6 +1,9 @@
 export const API = {
     files: "/api/files",
     search: "/api/files/search",
+    loadCachedMetadata: "/api/files/load-cached-metadata",
+    loadCurrentMetadata: "/api/files/load-current-metadata",
+    bulkWrite: "/api/files/bulk-write",
     rename: "/api/rename",
     renamePath: "/api/rename-path",
     convert: "/api/convert",
@@ -37,11 +40,11 @@ const ENDPOINT_TIMEOUTS: Array<{ match: RegExp; ms: number }> = [
     { match: /^\/api\/extract\b/, ms: 120_000 }, // Ollama vision can be slow on cold start
     { match: /^\/api\/preview-tags\b/, ms: 120_000 },
     { match: /^\/api\/convert\b/, ms: 600_000 }, // ffmpeg encodes; matches backend timeout
-    { match: /^\/api\/patreon\/fetch\b/, ms: 1_800_000 }, // creator-wide downloads
     { match: /^\/api\/patreon\/ingest-external-audio\b/, ms: 600_000 },
-    // `/api/patreon/ingest-drive-link` and `/api/move/batch` are SSE
-    // streams (see ingestDriveLinkStream / moveBatchStream) — no total
-    // timeout, that would cut healthy long streams short.
+    // `/api/patreon/fetch`, `/api/patreon/ingest-drive-link`, and
+    // `/api/move/batch` are SSE streams (see fetchPatreonPost /
+    // ingestDriveLinkStream / moveBatchStream) — no total timeout, that
+    // would cut healthy long streams short.
 ];
 
 function timeoutFor(path: string): number {
@@ -129,6 +132,7 @@ import type {
     IngestDriveLinkEvent,
     IngestDriveLinkResponse,
     PatreonCookieStatus,
+    PatreonFetchEvent,
     PatreonFetchOptions,
     PatreonFetchResponse,
 } from "./types";
@@ -256,9 +260,25 @@ export async function ingestDriveLinkStream(
     return finalResult;
 }
 
-export function fetchPatreonPost(
+/**
+ * Stream Patreon-fetch progress via SSE.
+ *
+ * `onEvent` fires for each progress event (`starting` → `resolving` →
+ * `fetching_posts` → `posts_found` → `post_progress` → `downloading` →
+ * `wrote_file` → … → `done` | `error`). Resolves with the final response
+ * payload on `done`, rejects on `error`. `AbortSignal` cancels mid-stream
+ * — the backend cancels its runner task on client disconnect, though an
+ * already-spawned patreon-dl subprocess may continue to its own timeout.
+ *
+ * The returned shape matches what the prior synchronous endpoint returned
+ * (`PatreonFetchResponse`) so call sites only have to add the `onEvent`
+ * narration hook.
+ */
+export async function fetchPatreonPost(
     url: string,
     options: PatreonFetchOptions = {},
+    onEvent?: (event: PatreonFetchEvent) => void,
+    signal?: AbortSignal,
 ): Promise<PatreonFetchResponse> {
     const body: Record<string, unknown> = {
         url,
@@ -276,7 +296,73 @@ export function fetchPatreonPost(
     if (options.dryRun) {
         body.dry_run = true;
     }
-    return apiPost<PatreonFetchResponse>(API.patreonFetch, body);
+
+    const response = await fetch(API.patreonFetch, {
+        method: "POST",
+        headers: { ...JSON_HEADERS, Accept: "text/event-stream" },
+        body: JSON.stringify(body),
+        signal,
+    });
+    if (!response.ok) {
+        // Up-front validation errors (412 missing cookie, 400 bad date) come
+        // through as regular JSON responses, not SSE. Surface their `detail`.
+        const text = await response.text().catch(() => "");
+        throw new Error(text || `Request failed: ${response.status}`);
+    }
+    if (!response.body) {
+        throw new Error("Response has no body — SSE not supported in this browser?");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    let finalResult: PatreonFetchResponse | undefined;
+    let finalError: string | undefined;
+
+    try {
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            while (true) {
+                const sepIdx = buffer.indexOf("\n\n");
+                if (sepIdx < 0) break;
+                const frame = buffer.slice(0, sepIdx).replace(/\r/g, "");
+                buffer = buffer.slice(sepIdx + 2);
+                for (const line of frame.split("\n")) {
+                    if (!line.startsWith("data:")) continue;
+                    const payload = line.slice(5).trimStart();
+                    let parsed: PatreonFetchEvent;
+                    try {
+                        parsed = JSON.parse(payload) as PatreonFetchEvent;
+                    } catch {
+                        continue; // Malformed frame — ignore rather than crash.
+                    }
+                    onEvent?.(parsed);
+                    if (parsed.state === "done") {
+                        const { state: _state, ...rest } = parsed;
+                        finalResult = rest as PatreonFetchResponse;
+                    } else if (parsed.state === "error") {
+                        finalError = parsed.message;
+                    }
+                }
+            }
+        }
+    } finally {
+        try {
+            reader.releaseLock();
+        } catch {
+            // Already released by abort — no-op.
+        }
+    }
+
+    if (finalError) {
+        throw new Error(finalError);
+    }
+    if (!finalResult) {
+        throw new Error("Patreon fetch ended without a final `done` event");
+    }
+    return finalResult;
 }
 
 // ── Batch move (cut/paste) ───────────────────────────────────────────────────
@@ -378,4 +464,152 @@ export async function moveBatchStream(
         throw new Error("Move batch ended without a final `complete` event");
     }
     return final;
+}
+
+// ── Bulk-edit helpers ────────────────────────────────────────────────────────
+//
+// Phase 1 of the BulkEditSheet plan: lookup cached Patreon `title` /
+// `artist` / `tags` for each selected file from `post-api.json` sidecars
+// under `DOWNLOAD_PATH/.patreon-dl/`. Files without a matching sidecar
+// come back with no metadata fields — `LoadCachedMetadataItem.title /
+// artist / tags` are all optional. The frontend treats absent fields as
+// "no cached info for this file" and leaves the user's existing edits
+// alone.
+
+/** One entry of `/api/files/load-cached-metadata`'s `items[]`. Fields are
+ *  optional because files outside the `<post_id> - <title>/` folder shape
+ *  come back without metadata, and the bulk-edit UI surfaces those as
+ *  "no cached info" rather than treating it as an error. */
+export interface LoadCachedMetadataItem {
+    path: string;
+    title?: string;
+    artist?: string;
+    tags?: string[];
+}
+
+export interface LoadCachedMetadataResponse {
+    items: LoadCachedMetadataItem[];
+}
+
+export function loadCachedMetadata(
+    paths: string[],
+    root: FileRoot,
+): Promise<LoadCachedMetadataResponse> {
+    return apiPost<LoadCachedMetadataResponse>(API.loadCachedMetadata, { paths, root });
+}
+
+/** Current on-disk ID3 / FLAC / MP4 tags for the bulk-edit auto-load
+ *  step. Files without tags / wrong extensions / missing on disk come
+ *  back with all-empty fields rather than as errors. */
+export interface LoadCurrentMetadataItem {
+    path: string;
+    title: string;
+    artist: string;
+    album: string;
+    album_artist: string;
+}
+
+export interface LoadCurrentMetadataResponse {
+    items: LoadCurrentMetadataItem[];
+}
+
+export function loadCurrentMetadata(
+    paths: string[],
+    root: FileRoot,
+): Promise<LoadCurrentMetadataResponse> {
+    return apiPost<LoadCurrentMetadataResponse>(API.loadCurrentMetadata, { paths, root });
+}
+
+// Phase 2 of the BulkEditSheet plan: per-file title + optional canonical
+// rename + shared artist / album / album_artist + the explicit-blank
+// `clear[]` list, all committed in one PATCH with two-phase validation
+// on the backend.
+
+export interface BulkWriteItem {
+    path: string;
+    /** Per-file ID3 TIT2. Empty string -> leave existing title alone. */
+    title?: string;
+    /** Pre-composed canonical filename WITH extension. Empty string ->
+     *  don't rename this specific file even when the request-level
+     *  `rename` flag is true. The backend treats this as opaque and
+     *  only enforces shape / length / collision rules. */
+    new_name?: string;
+}
+
+export interface BulkWriteShared {
+    artist?: string;
+    album_artist?: string;
+    album?: string;
+    /** Subset of ["artist", "album_artist", "album"] — these fields are
+     *  cleared (frame removed) on every file in the selection. Distinct
+     *  from an empty string in `artist` / `album_artist` / `album`, which
+     *  means 'leave existing per file'. */
+    clear?: ("artist" | "album_artist" | "album")[];
+}
+
+export interface BulkWriteRequest {
+    items: BulkWriteItem[];
+    shared: BulkWriteShared;
+    rename: boolean;
+    root: FileRoot;
+    /** Optional library-subdir destination. When set (and `root` is
+     *  "downloads"), each item's post-rename file moves into
+     *  LIBRARY_PATH/<to_subdir>/. Empty string / undefined = no move. */
+    to_subdir?: string;
+}
+
+export interface BulkWriteItemResult {
+    path: string;
+    ok: boolean;
+    error?: string;
+    new_path?: string;
+    /** Present only when the item moved as part of bulk-write. Signals
+     *  that `new_path` is relative to LIBRARY_PATH instead of the
+     *  request's `root`. */
+    new_root?: FileRoot;
+}
+
+export interface BulkWriteResponse {
+    ok: boolean;
+    results: BulkWriteItemResult[];
+}
+
+/** Thrown when /api/files/bulk-write returns 422 (validation aborted the
+ *  whole batch). Carries the per-item results so the UI can highlight
+ *  which file(s) caused the abort instead of dumping the raw JSON. */
+export class BulkWriteValidationError extends Error {
+    readonly results: BulkWriteItemResult[];
+    constructor(message: string, results: BulkWriteItemResult[]) {
+        super(message);
+        this.name = "BulkWriteValidationError";
+        this.results = results;
+    }
+}
+
+/** Returns the backend's `{ok, results}` payload on a 2xx. Validation
+ *  failures (422) raise as `BulkWriteValidationError` with the parsed
+ *  detail attached. Other transport errors (network, 5xx) re-throw the
+ *  shared `request` wrapper's plain Error. */
+export async function bulkWrite(body: BulkWriteRequest): Promise<BulkWriteResponse> {
+    try {
+        return await apiPatch<BulkWriteResponse>(API.bulkWrite, body);
+    } catch (err) {
+        if (err instanceof Error && err.message.startsWith("{")) {
+            try {
+                const parsed = JSON.parse(err.message) as {
+                    detail?: { ok?: boolean; results?: BulkWriteItemResult[] };
+                };
+                const results = parsed.detail?.results;
+                if (Array.isArray(results)) {
+                    const firstFailure = results.find((r) => !r.ok);
+                    const msg = firstFailure?.error ?? "Validation failed.";
+                    throw new BulkWriteValidationError(msg, results);
+                }
+            } catch (parseErr) {
+                if (parseErr instanceof BulkWriteValidationError) throw parseErr;
+                // JSON.parse failed — fall through to the original error.
+            }
+        }
+        throw err;
+    }
 }

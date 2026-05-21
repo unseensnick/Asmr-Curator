@@ -1,24 +1,40 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 
-import CookiesSheet from "@/components/CookiesSheet";
 import FileBrowser from "@/components/FileBrowser";
 import Header from "@/components/Header";
 import OutputPanel from "@/components/OutputPanel";
 import PatreonPanel from "@/components/PatreonPanel";
+import RecoverableErrorBanner from "@/components/RecoverableErrorBanner";
 import ScreenshotPanel from "@/components/ScreenshotPanel";
 import TagsEditor from "@/components/TagsEditor";
 
-// LibrarySettingsSheet is heavy (Dictionary modal + Vocabulary/Suppressed
-// panes + DictionaryTester) and only renders when the user opens it via
-// the Header. React.lazy moves it out of the initial chunk; Suspense
-// fallback is null because the Sheet's open animation already covers
-// the brief load.
-const LibrarySettingsSheet = lazy(() => import("@/components/LibrarySettingsSheet"));
+// All four right-side sheets are lazy. The `load*` factories are kept as
+// callable references so we can warm the chunk via prefetch on the
+// open-button's hover / focus — that's what makes the slide-in animation
+// start on click instead of waiting for the chunk to arrive.
+const loadLibrarySettings = () => import("@/components/LibrarySettingsSheet");
+const loadHelpSheet = () => import("@/components/HelpSheet");
+const loadCookiesSheet = () => import("@/components/CookiesSheet");
+const LibrarySettingsSheet = lazy(loadLibrarySettings);
+const HelpSheet = lazy(loadHelpSheet);
+const CookiesSheet = lazy(loadCookiesSheet);
+function prefetchLibrarySettings() {
+    void loadLibrarySettings();
+}
+function prefetchHelpSheet() {
+    void loadHelpSheet();
+}
+function prefetchCookiesSheet() {
+    void loadCookiesSheet();
+}
+const BulkEditSheet = lazy(() => import("@/components/BulkEditSheet"));
+import type { BulkEditRoot } from "@/components/BulkEditSheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { API, apiGet, apiPatch, apiPost } from "@/lib/api";
-import type { AppDict, DictionaryApiResponse, VocabEntry } from "@/lib/types";
+import type { AppDict, DictionaryApiResponse, FileEntry, VocabEntry } from "@/lib/types";
 import { dictFromApiResponse, emptyDict } from "@/lib/types";
-import { getErrorMessage, sanitizeFilename } from "@/lib/utils";
+import { getErrorMessage, sanitizeFilename, stripOuterBrackets } from "@/lib/utils";
 
 type SourceMode = "patreon" | "screenshot";
 
@@ -46,18 +62,34 @@ export default function App() {
     const [stripBrackets, setStripBrackets] = useState(true);
     const [libraryOpen, setLibraryOpen] = useState(false);
     const [cookiesOpen, setCookiesOpen] = useState(false);
+    const [helpOpen, setHelpOpen] = useState(false);
+    const [bulkEditOpen, setBulkEditOpen] = useState(false);
+    const [bulkEditFiles, setBulkEditFiles] = useState<FileEntry[]>([]);
+    const [bulkEditRoot, setBulkEditRoot] = useState<BulkEditRoot>("library");
+    // Library subdir shared across the BulkEditSheet move picker, the
+    // single-file Move section, and the LibraryExplorerSheet rail so a
+    // navigation in one surface lands the next at the same spot.
+    const [librarySubdir, setLibrarySubdir] = useState("");
+
+    function openBulkEdit(selectionRoot: BulkEditRoot) {
+        // Right-side sheets are mutually exclusive — open ours, close the rest
+        // so Radix focus scopes don't fight.
+        setLibraryOpen(false);
+        setCookiesOpen(false);
+        setHelpOpen(false);
+        setBulkEditRoot(selectionRoot);
+        setBulkEditOpen(true);
+    }
+
+    function removeBulkEditFile(path: string) {
+        setBulkEditFiles((prev) => prev.filter((f) => f.path !== path));
+    }
     const [extractedArtist, setExtractedArtist] = useState("");
     const [sourceMode, setSourceMode] = useState<SourceMode>("patreon");
     const [powerMode, setPowerMode] = useState<boolean>(() => loadPowerMode());
-    // Surfaced when the cold-load dictionary fetch fails. Without it the
-    // app would silently come up with an empty vocabulary and the user
-    // would assume the whole thing is broken — the librarian-voice
-    // banner says the backend isn't responding and offers a retry.
+    // Cold-load dictionary error: surfaced (with a Retry) instead of letting
+    // the app silently come up with an empty vocabulary that reads as broken.
     const [dictLoadError, setDictLoadError] = useState<string | null>(null);
-    // After a Patreon Apply the user can click "Rename and move <file>" to
-    // jump straight to the FileBrowser Downloads tab with the downloaded
-    // file pre-selected. Lifted state because PatreonPanel and FileBrowser
-    // live in different columns and need to coordinate.
     const [bridgeRequest, setBridgeRequest] = useState<{ path: string; filename: string } | null>(
         null,
     );
@@ -74,15 +106,10 @@ export default function App() {
     // ── Filename generation ───────────────────────────────────────────────────
     function generate() {
         const sfx = suffix.trim() || "F4A";
-        // Strip any number of leading and trailing [bracket] markers (and the
-        // whitespace around them) regardless of contents. Mid-title brackets
-        // are left alone — they're usually part of the actual title.
-        const pipeTitle = stripBrackets
-            ? title
-                  .replace(/^(?:\s*\[[^\]]*\]\s*)+/, "")
-                  .replace(/(?:\s*\[[^\]]*\]\s*)+$/, "")
-                  .trim()
-            : title;
+        // Brackets-in-filename, stripped-from-ID3 rule. Canonical in
+        // `stripOuterBrackets`; the dashed filename output keeps them
+        // verbatim, the piped tag-string for ID3 drops them.
+        const pipeTitle = stripBrackets ? stripOuterBrackets(title) : title;
         setOutputDash([title, ...tags, sfx].map(sanitizeFilename).filter(Boolean).join(" - "));
         setOutputPipe([pipeTitle, ...tags, sfx].join(" | "));
     }
@@ -106,7 +133,14 @@ export default function App() {
                 // explanation reads as "the app is broken" to the
                 // sleepy persona — librarian voice + a Retry button
                 // beats a silent empty state every time.
-                setDictLoadError("Couldn't reach the dictionary. " + getErrorMessage(e));
+                // Surface a clean, deterministic line — the raw error
+                // (often a network/timeout string from `fetch`) doesn't
+                // help the sleepy persona figure out what to do next.
+                setDictLoadError(
+                    "Couldn't reach the dictionary. Tags won't match canonical forms until this resolves.",
+                );
+                // eslint-disable-next-line no-console -- aid for self-host debugging
+                console.warn("Dictionary load failed:", getErrorMessage(e));
             });
     }
     useEffect(() => {
@@ -155,50 +189,56 @@ export default function App() {
     }
 
     return (
-        <div className="max-w-[160rem] 2xl:max-w-none mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 py-8 lg:py-10">
-            <Header
-                dictTagCount={dict.vocabulary.length}
-                onOpenLibrarySettings={() => {
-                    // Mutually exclusive — having both right-side modals
-                    // open at once is undefined-stacking and the Radix
-                    // focus scopes fight each other.
-                    setCookiesOpen(false);
-                    setLibraryOpen(true);
-                }}
-                onOpenCookies={() => {
-                    setLibraryOpen(false);
-                    setCookiesOpen(true);
-                }}
-                powerMode={powerMode}
-                onPowerModeChange={setPowerMode}
-            />
+        // App-level TooltipProvider with a generous delay so casual cursor
+        // fly-overs don't trigger every chip and toolbar icon. Every Radix
+        // Tooltip across the frontend reads its open delay from here — no
+        // per-component provider needed. The 500ms matches the FileBrowser
+        // row tooltip that pre-existed this hoist.
+        <TooltipProvider delayDuration={500}>
+            <div className="max-w-[160rem] 2xl:max-w-none mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 py-8 lg:py-10">
+                <Header
+                    dictTagCount={dict.vocabulary.length}
+                    onPrefetchLibrarySettings={prefetchLibrarySettings}
+                    onPrefetchHelp={prefetchHelpSheet}
+                    onPrefetchCookies={prefetchCookiesSheet}
+                    onOpenLibrarySettings={() => {
+                        // Mutually exclusive — having more than one right-side
+                        // sheet open at once is undefined stacking and the
+                        // Radix focus scopes fight each other.
+                        setCookiesOpen(false);
+                        setHelpOpen(false);
+                        setBulkEditOpen(false);
+                        setLibraryOpen(true);
+                    }}
+                    onOpenCookies={() => {
+                        setLibraryOpen(false);
+                        setHelpOpen(false);
+                        setBulkEditOpen(false);
+                        setCookiesOpen(true);
+                    }}
+                    onOpenHelp={() => {
+                        setLibraryOpen(false);
+                        setCookiesOpen(false);
+                        setBulkEditOpen(false);
+                        setHelpOpen(true);
+                    }}
+                    powerMode={powerMode}
+                    onPowerModeChange={setPowerMode}
+                />
 
-            {/* Cold-load dictionary error. Shows once if the initial
-             *  /api/dictionary fetch fails; clears on successful retry.
-             *  Quiet warning surface — destructive color is reserved
-             *  for dangerous actions, not "thing didn't load." */}
-            {dictLoadError && (
-                <div className="mt-6 flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground/90">
-                    <span className="flex-1 leading-relaxed">
-                        {dictLoadError} Tags won&apos;t match canonical forms until this resolves.
-                    </span>
-                    <button
-                        type="button"
-                        onClick={() => {
-                            // Clear the banner immediately for feedback;
-                            // .then will set it back to null on success
-                            // and .catch will re-populate on failure.
+                {dictLoadError && (
+                    <RecoverableErrorBanner
+                        className="mt-6"
+                        message={`${dictLoadError} Tags won't match canonical forms until this resolves.`}
+                        actionLabel="Retry"
+                        onAction={() => {
                             setDictLoadError(null);
                             fetchDictionary();
                         }}
-                        className="font-medium text-foreground hover:text-primary transition-colors underline-offset-4 hover:underline"
-                    >
-                        Retry
-                    </button>
-                </div>
-            )}
+                    />
+                )}
 
-            {/* Top trio: 1-col mobile → 2-col lg → 3-col dashboard at xl+.
+                {/* Top trio: 1-col mobile → 2-col lg → 3-col dashboard at xl+.
                 Visual flow is Source → Edit → Output at every breakpoint.
                 Base-level `order-*` utilities apply at every size so the
                 empty Output column never lands between Source and Edit on
@@ -211,115 +251,166 @@ export default function App() {
                 rather than centering narrow with background on each side.
                 FileBrowser sits in its own section below so its layout
                 stays independent from the trio. */}
-            <section className="mt-8 lg:mt-10 grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-[3fr_4fr_3fr] gap-6 lg:gap-10 2xl:gap-12 items-start">
-                <div className="order-1 flex flex-col min-h-0">
-                    <Tabs
-                        value={sourceMode}
-                        onValueChange={(v) => setSourceMode(v as SourceMode)}
-                        className="flex flex-col gap-3 min-h-0"
-                    >
-                        <TabsList
-                            variant="line"
-                            className="h-auto p-0 gap-0 bg-transparent justify-start rounded-none border-b border-border w-full"
+                <section className="mt-8 lg:mt-10 grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-[3fr_4fr_3fr] gap-6 lg:gap-10 2xl:gap-12 items-start">
+                    <div className="order-1 flex flex-col min-h-0">
+                        <Tabs
+                            value={sourceMode}
+                            onValueChange={(v) => setSourceMode(v as SourceMode)}
+                            className="flex flex-col gap-3 min-h-0"
                         >
-                            <TabsTrigger
+                            <TabsList
+                                variant="line"
+                                className="h-auto p-0 gap-0 bg-transparent justify-start rounded-none border-b border-border w-full"
+                            >
+                                <TabsTrigger
+                                    value="patreon"
+                                    className="px-4 py-2.5 text-xs font-medium tracking-[0.04em] whitespace-nowrap rounded-none"
+                                >
+                                    Patreon URL
+                                </TabsTrigger>
+                                <TabsTrigger
+                                    value="screenshot"
+                                    className="px-4 py-2.5 text-xs font-medium tracking-[0.04em] whitespace-nowrap rounded-none"
+                                >
+                                    Screenshot
+                                </TabsTrigger>
+                            </TabsList>
+
+                            <TabsContent
                                 value="patreon"
-                                className="px-4 py-2.5 text-xs font-medium tracking-[0.04em] whitespace-nowrap rounded-none"
+                                className="flex-1 mt-0 min-h-0 flex flex-col data-[state=inactive]:hidden"
                             >
-                                Patreon URL
-                            </TabsTrigger>
-                            <TabsTrigger
+                                <PatreonPanel
+                                    dict={dict}
+                                    onExtracted={handleExtracted}
+                                    powerMode={powerMode}
+                                    onOpenCookies={() => {
+                                        setLibraryOpen(false);
+                                        setHelpOpen(false);
+                                        setBulkEditOpen(false);
+                                        setCookiesOpen(true);
+                                    }}
+                                    onBridgeToDownloads={(path, filename) =>
+                                        setBridgeRequest({ path, filename })
+                                    }
+                                />
+                            </TabsContent>
+
+                            <TabsContent
                                 value="screenshot"
-                                className="px-4 py-2.5 text-xs font-medium tracking-[0.04em] whitespace-nowrap rounded-none"
+                                className="flex-1 mt-0 min-h-0 flex flex-col data-[state=inactive]:hidden"
                             >
-                                Screenshot
-                            </TabsTrigger>
-                        </TabsList>
+                                <ScreenshotPanel
+                                    dict={dict}
+                                    onExtracted={handleExtracted}
+                                    powerMode={powerMode}
+                                    isActive={sourceMode === "screenshot"}
+                                />
+                            </TabsContent>
+                        </Tabs>
+                    </div>
 
-                        <TabsContent
-                            value="patreon"
-                            className="flex-1 mt-0 min-h-0 flex flex-col data-[state=inactive]:hidden"
-                        >
-                            <PatreonPanel
-                                dict={dict}
-                                onExtracted={handleExtracted}
-                                powerMode={powerMode}
-                                onOpenCookies={() => {
-                                    setLibraryOpen(false);
-                                    setCookiesOpen(true);
-                                }}
-                                onBridgeToDownloads={(path, filename) =>
-                                    setBridgeRequest({ path, filename })
-                                }
-                            />
-                        </TabsContent>
+                    <div className="order-3 lg:col-span-2 xl:col-span-1 flex flex-col">
+                        <OutputPanel
+                            outputDash={outputDash}
+                            outputPipe={outputPipe}
+                            stripBrackets={stripBrackets}
+                            onStripBracketsChange={setStripBrackets}
+                        />
+                    </div>
 
-                        <TabsContent
-                            value="screenshot"
-                            className="flex-1 mt-0 min-h-0 flex flex-col data-[state=inactive]:hidden"
-                        >
-                            <ScreenshotPanel
-                                dict={dict}
-                                onExtracted={handleExtracted}
-                                powerMode={powerMode}
-                                isActive={sourceMode === "screenshot"}
-                            />
-                        </TabsContent>
-                    </Tabs>
-                </div>
+                    <div className="order-2 flex flex-col">
+                        <TagsEditor
+                            title={title}
+                            onTitleChange={setTitle}
+                            tags={tags}
+                            onTagsChange={setTags}
+                            suffix={suffix}
+                            onSuffixChange={setSuffix}
+                            artist={extractedArtist}
+                            dict={dict}
+                            onPromoteToCanonical={promoteToCanonical}
+                            onPromoteToAlias={promoteToAlias}
+                            onGenerate={generate}
+                        />
+                    </div>
+                </section>
 
-                <div className="order-3 lg:col-span-2 xl:col-span-1 flex flex-col">
-                    <OutputPanel
-                        outputDash={outputDash}
-                        outputPipe={outputPipe}
-                        stripBrackets={stripBrackets}
-                        onStripBracketsChange={setStripBrackets}
-                    />
-                </div>
-
-                <div className="order-2 flex flex-col">
-                    <TagsEditor
-                        title={title}
-                        onTitleChange={setTitle}
-                        tags={tags}
-                        onTagsChange={setTags}
-                        suffix={suffix}
-                        onSuffixChange={setSuffix}
-                        artist={extractedArtist}
-                        dict={dict}
-                        onPromoteToCanonical={promoteToCanonical}
-                        onPromoteToAlias={promoteToAlias}
-                        onGenerate={generate}
-                    />
-                </div>
-            </section>
-
-            {/* FileBrowser lives outside the top grid so its layout is
+                {/* FileBrowser lives outside the top grid so its layout is
                 decoupled from the trio's column tracks. Both surfaces
                 expand to the full container width on ultrawide, which
                 is the right shape for a dense file list. */}
-            <section className="mt-6 lg:mt-10">
-                <FileBrowser
-                    outputDash={outputDash}
-                    outputPipe={outputPipe}
-                    extractedArtist={extractedArtist}
-                    defaultOpen={false}
-                    bridgeRequest={bridgeRequest}
-                    onBridgeConsumed={() => setBridgeRequest(null)}
-                />
-            </section>
-
-            <Suspense fallback={null}>
-                {libraryOpen && (
-                    <LibrarySettingsSheet
-                        open={libraryOpen}
-                        onClose={() => setLibraryOpen(false)}
-                        dict={dict}
-                        onDictChange={setDict}
+                <section className="mt-6 lg:mt-10">
+                    <FileBrowser
+                        outputDash={outputDash}
+                        outputPipe={outputPipe}
+                        extractedArtist={extractedArtist}
+                        defaultOpen={false}
+                        bridgeRequest={bridgeRequest}
+                        onBridgeConsumed={() => setBridgeRequest(null)}
+                        bulkSelected={bulkEditFiles}
+                        onBulkSelectedChange={setBulkEditFiles}
+                        onOpenBulkEdit={openBulkEdit}
+                        librarySubdir={librarySubdir}
+                        onLibrarySubdirChange={setLibrarySubdir}
+                        powerMode={powerMode}
                     />
-                )}
-            </Suspense>
-            <CookiesSheet open={cookiesOpen} onClose={() => setCookiesOpen(false)} />
-        </div>
+                </section>
+
+                {/* Each lazy-loaded sheet sits in its OWN Suspense boundary.
+                    Sharing one boundary across both meant that opening
+                    Dictionary while BulkEdit was already open suspended
+                    the WHOLE boundary on the Dictionary chunk fetch,
+                    which unmounted BulkEdit mid-animation — the user
+                    saw BulkEdit blink out, the Dictionary flash in, and
+                    then the slide-in animation only after the chunk
+                    arrived. Per-sheet boundaries isolate the suspend so
+                    BulkEdit stays painted while its sibling loads. */}
+                <Suspense fallback={null}>
+                    {libraryOpen && (
+                        <LibrarySettingsSheet
+                            open={libraryOpen}
+                            onClose={() => setLibraryOpen(false)}
+                            dict={dict}
+                            onDictChange={setDict}
+                        />
+                    )}
+                </Suspense>
+                <Suspense fallback={null}>
+                    {/* Always-mounted, no `key` reset. Per-file edits + shared
+                    values + load-from-cache results all live inside the
+                    sheet; keying on the selection would wipe them every
+                    time the user adds / removes files. Keying on `open`
+                    would wipe them on every close+reopen. Instead, edits
+                    are path-keyed so the user can drop a file mid-batch
+                    (X button on the row), pick up extras from the
+                    FileBrowser, and come back without retyping. State
+                    only resets on successful submit. */}
+                    <BulkEditSheet
+                        open={bulkEditOpen}
+                        onClose={() => setBulkEditOpen(false)}
+                        files={bulkEditFiles}
+                        root={bulkEditRoot}
+                        dict={dict}
+                        onRemoveFile={removeBulkEditFile}
+                        onPromoteToCanonical={promoteToCanonical}
+                        onPromoteToAlias={promoteToAlias}
+                        librarySubdir={librarySubdir}
+                        onLibrarySubdirChange={setLibrarySubdir}
+                        onOpenDictionary={() => setLibraryOpen(true)}
+                        onPrefetchDictionary={prefetchLibrarySettings}
+                        powerMode={powerMode}
+                    />
+                </Suspense>
+                <Suspense fallback={null}>
+                    {cookiesOpen && (
+                        <CookiesSheet open={cookiesOpen} onClose={() => setCookiesOpen(false)} />
+                    )}
+                </Suspense>
+                <Suspense fallback={null}>
+                    {helpOpen && <HelpSheet open={helpOpen} onClose={() => setHelpOpen(false)} />}
+                </Suspense>
+            </div>
+        </TooltipProvider>
     );
 }

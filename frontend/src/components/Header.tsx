@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BookOpen, Cookie, Moon, Settings2, Sun } from "lucide-react";
+import { BookOpen, CircleHelp, Cookie, Moon, Settings2, Sun } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -11,6 +11,7 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { API, apiGet } from "@/lib/api";
 import { applyTheme, getInitialTheme, setStoredTheme, type ThemeMode } from "@/lib/theme";
 
@@ -24,12 +25,26 @@ interface HeaderProps {
     dictTagCount: number;
     /** Open the Library settings modal (vocabulary, suppressed, test). */
     onOpenLibrarySettings: () => void;
+    /** Optional pre-warm: kick off the Dictionary chunk fetch on hover /
+     *  focus of the Dictionary button so the slide-in animation starts
+     *  immediately on click instead of waiting for the lazy chunk. */
+    onPrefetchLibrarySettings?: () => void;
+    /** Pre-warm the Help chunk; mirrors `onPrefetchLibrarySettings`. */
+    onPrefetchHelp?: () => void;
+    /** Pre-warm the Cookies chunk; mirrors `onPrefetchLibrarySettings`. */
+    onPrefetchCookies?: () => void;
     /** Open the standalone Cookies modal. */
     onOpenCookies: () => void;
+    /** Open the Help reference sheet. */
+    onOpenHelp: () => void;
     /** App-level power mode flag; controls auto-expand of "More options" disclosures. */
     powerMode: boolean;
     onPowerModeChange: (next: boolean) => void;
 }
+
+/** localStorage flag: cleared on first Help open so the discovery dot
+ *  next to the ? icon disappears after the user has seen the panel once. */
+const HELP_SEEN_KEY = "app.helpSeen";
 
 /**
  * Single-row app chrome. Brand mark left; Library settings action and
@@ -42,12 +57,35 @@ interface HeaderProps {
 export default function Header({
     dictTagCount,
     onOpenLibrarySettings,
+    onPrefetchLibrarySettings,
+    onPrefetchHelp,
+    onPrefetchCookies,
     onOpenCookies,
+    onOpenHelp,
     powerMode,
     onPowerModeChange,
 }: HeaderProps) {
     const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
     const [info, setInfo] = useState<SystemInfo | null>(null);
+    const [helpSeen, setHelpSeen] = useState<boolean>(() => {
+        try {
+            return localStorage.getItem(HELP_SEEN_KEY) === "true";
+        } catch {
+            return false;
+        }
+    });
+
+    function handleOpenHelp() {
+        if (!helpSeen) {
+            setHelpSeen(true);
+            try {
+                localStorage.setItem(HELP_SEEN_KEY, "true");
+            } catch {
+                // non-fatal
+            }
+        }
+        onOpenHelp();
+    }
 
     useEffect(() => {
         applyTheme(theme);
@@ -81,17 +119,44 @@ export default function Header({
                 <h1 className="font-display text-2xl lg:text-3xl font-semibold tracking-tight text-foreground">
                     ASMR Curator
                 </h1>
-                <p className="font-display text-base italic text-muted-foreground/80 leading-snug">
+                <p className="text-sm text-muted-foreground/80 leading-snug">
                     A quiet place for your audio library.
                 </p>
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={handleOpenHelp}
+                            onMouseEnter={onPrefetchHelp}
+                            onFocus={onPrefetchHelp}
+                            aria-label="Help and reference"
+                            className="relative"
+                        >
+                            <CircleHelp size={16} aria-hidden />
+                            {!helpSeen && (
+                                // First-run discovery dot. Clears on first open and
+                                // does not return; we trust the user to remember the
+                                // button is here.
+                                <span
+                                    aria-hidden
+                                    className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-primary"
+                                />
+                            )}
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Help and reference</TooltipContent>
+                </Tooltip>
                 <Button
                     variant="outline"
                     onClick={onOpenLibrarySettings}
-                    title="Open dictionary"
+                    onMouseEnter={onPrefetchLibrarySettings}
+                    onFocus={onPrefetchLibrarySettings}
                     className="gap-2"
+                    aria-label="Open dictionary"
                 >
                     <BookOpen size={14} aria-hidden />
                     <span>Dictionary</span>
@@ -143,7 +208,11 @@ export default function Header({
                         </DropdownMenuCheckboxItem>
 
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem onSelect={onOpenCookies}>
+                        <DropdownMenuItem
+                            onSelect={onOpenCookies}
+                            onMouseEnter={onPrefetchCookies}
+                            onFocus={onPrefetchCookies}
+                        >
                             <Cookie size={14} aria-hidden />
                             Manage cookies
                         </DropdownMenuItem>
