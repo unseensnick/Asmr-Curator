@@ -14,6 +14,23 @@ from backend.main import GOOGLE_COOKIE_KEY, PATREON_COOKIE_KEY
 
 router = APIRouter()
 
+# Cap incoming cookie PUT bodies so a runaway client (or a localhost attacker
+# behind a malicious tab if CORS ever widens) can't OOM the worker by streaming
+# gigabytes. 256 KiB is comfortably above realistic Patreon + Google cookie
+# blobs (typical ~10 KiB combined) but small enough to cost nothing to reject.
+_MAX_COOKIE_BODY_BYTES = 256 * 1024
+
+
+def _reject_oversized_body(request: Request) -> None:
+    cl = request.headers.get("content-length")
+    if cl is None:
+        return
+    try:
+        if int(cl) > _MAX_COOKIE_BODY_BYTES:
+            raise HTTPException(413, "Cookie body too large")
+    except ValueError:
+        raise HTTPException(400, "Malformed Content-Length header")
+
 
 # Playwright accepts only these three sameSite values. Browser cookie APIs use
 # different vocabularies — Chrome ("no_restriction"|"lax"|"strict"|"unspecified")
@@ -68,6 +85,7 @@ async def set_patreon_cookie(request: Request):
     """Accepts the cookie as either `application/json {"cookie": "..."}` or as
     a raw text/plain body. The text/plain path lets `curl --data-binary @cookie.txt`
     work without JSON-escaping embedded quotes in `g_state={...}` etc."""
+    _reject_oversized_body(request)
     content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
 
     if content_type == "application/json":
@@ -108,6 +126,7 @@ async def set_google_cookie(request: Request):
     missing required fields are silently dropped; an empty array clears the
     setting. Always invalidates the shared Playwright context so the next
     scrape picks up the freshly-synced (or cleared) cookies."""
+    _reject_oversized_body(request)
     try:
         data = await request.json()
     except ValueError:
