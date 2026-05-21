@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
     AlertTriangle,
     ChevronDown,
@@ -24,8 +24,10 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { type DragRect, useDragSelect } from "@/hooks/useDragSelect";
 import { API, apiGet, apiPost, buildQueryString, type FileRoot } from "@/lib/api";
 import { FORMAT_EXT, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
+import { selectAll, selectionFromClick } from "@/lib/explorerSelection";
 import type { ConvertFormat, ConvertQuality, FileEntry, SearchMode } from "@/lib/types";
 import { getErrorMessage } from "@/lib/utils";
 
@@ -120,6 +122,56 @@ export default function FileBrowser({
     const [batchMode, setBatchMode] = useState(false);
     const [batchSelected, setBatchSelected] = useState<Set<string>>(new Set());
     const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null);
+    // Anchor for Shift-click range selection in the Downloads list.
+    // Tracks the row a future Shift-click should extend FROM. Plain and
+    // toggle clicks move the anchor onto themselves; the empty-area
+    // drag-clear path zeroes it (no anchor → Shift falls through to a
+    // plain click). Library tab is unaffected — it routes through the
+    // single-select / LibraryExplorerSheet flow.
+    const [downloadsAnchor, setDownloadsAnchor] = useState<string | null>(null);
+
+    // Live mirror of `batchSelected` for useDragSelect's mousedown to
+    // capture without leaning on a closure over render-time state. The
+    // hook reads this ref at the start of each drag so concurrent
+    // toggles between drags don't desync the base selection.
+    const batchSelectedRef = useRef<Set<string>>(new Set());
+    useEffect(() => {
+        batchSelectedRef.current = batchSelected;
+    }, [batchSelected]);
+    // FileBrowser has no inline-rename surface, but the hook expects this
+    // ref. A constant null means "never block dragging on a rename".
+    const renamePathRef = useRef<string | null>(null);
+
+    // Wrapped setters that enter batch mode + clear the single-select
+    // anchor whenever a multi-select drag yields any rows. Plain empty
+    // drags fall straight through to `setBatchSelected(new Set())` which
+    // leaves batchMode alone.
+    const setBatchSelectedFromDrag = useCallback((next: Set<string>) => {
+        if (next.size > 0) {
+            setBatchMode(true);
+            setSelected(null);
+        }
+        setBatchSelected(next);
+    }, []);
+
+    const dragSelectActive = root === "downloads";
+    const {
+        scrollContainerRef: downloadsScrollRef,
+        onMouseDown: handleDownloadsMouseDown,
+        dragRect,
+        cleanup: cleanupDragSelect,
+    } = useDragSelect({
+        selectedPathsRef: batchSelectedRef,
+        renamePathRef,
+        setSelectedPaths: setBatchSelectedFromDrag,
+        setAnchorPath: setDownloadsAnchor,
+    });
+    // Tear down any in-flight drag when the user switches off the
+    // Downloads tab. Without this the window listeners would race a
+    // re-render that swaps the underlying rows out.
+    useEffect(() => {
+        if (!dragSelectActive) cleanupDragSelect();
+    }, [dragSelectActive, cleanupDragSelect]);
 
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const rootRef = useRef<HTMLDivElement | null>(null);
@@ -277,6 +329,103 @@ export default function FileBrowser({
         });
     }
 
+    /**
+     * Click handler for a Downloads-list row. Routes the click through the
+     * shared selection model used by `LibraryExplorerSheet` so users get
+     * the same OS-file-manager idioms in both surfaces — Shift extends
+     * from the anchor, Ctrl/Cmd toggles in place, plain click replaces
+     * the selection (or single-selects when no multi-select is active).
+     *
+     * The first modifier-bearing click in Downloads also flips batchMode
+     * on so the Bulk-edit button + per-row checkboxes appear without an
+     * extra step. Library tab is unaffected — it keeps the single-click
+     * → SelectedFilePanel flow it had before (multi-select for Library
+     * lives in `LibraryExplorerSheet`).
+     */
+    function handleDownloadsClick(file: FileEntry, modifiers: { shift: boolean; toggle: boolean }) {
+        const isMulti = modifiers.shift || modifiers.toggle;
+
+        if (isMulti) {
+            // Multi-select gesture in Downloads. Seed the previous set:
+            // if the user had a single file selected via plain click,
+            // carry it into the multi-selection so Ctrl-clicking a second
+            // file ends up with two rows highlighted (matches Finder /
+            // Explorer's behaviour). batchMode flips on lazily — the
+            // gesture is the entry point.
+            const seed = !batchMode && selected ? new Set([selected.path]) : batchSelected;
+            const anchor =
+                !batchMode && selected
+                    ? selected.path
+                    : (downloadsAnchor ?? selected?.path ?? null);
+            const update = selectionFromClick(files, seed, anchor, file.path, modifiers);
+            if (!batchMode) {
+                setBatchMode(true);
+                setSelected(null);
+            }
+            setBatchSelected(update.selected);
+            setDownloadsAnchor(update.anchor);
+            return;
+        }
+
+        if (batchMode) {
+            // Plain click while in batchMode toggles the checkbox + moves
+            // the anchor onto the clicked row so a follow-up Shift-click
+            // ranges from there.
+            toggleBatch(file.path);
+            setDownloadsAnchor(file.path);
+            return;
+        }
+
+        // Default Downloads single-click — open the file in the work
+        // area. Clicking the already-selected file deselects (matches
+        // pre-multi-select behaviour).
+        setSelected(selected?.path === file.path ? null : file);
+    }
+
+    // Downloads-tab keyboard shortcuts:
+    //   • Ctrl/Cmd+A — select every visible row, engage batchMode
+    //   • Esc       — deselect everything (matches OS file-manager idiom)
+    // Library tab leaves both to the browser default — multi-select for
+    // Library lives in LibraryExplorerSheet, which has its own handlers.
+    // Both shortcuts bail when the user is typing inside an input so the
+    // search box doesn't lose its own Esc-to-clear behaviour.
+    useEffect(() => {
+        if (root !== "downloads") return;
+        const handler = (e: KeyboardEvent) => {
+            const target = e.target as HTMLElement | null;
+            const tag = target?.tagName ?? "";
+            if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) return;
+
+            if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+                if (e.key === "a" || e.key === "A") {
+                    if (files.length === 0) return;
+                    const update = selectAll(files);
+                    if (!update) return;
+                    e.preventDefault();
+                    if (!batchMode) {
+                        setBatchMode(true);
+                        setSelected(null);
+                    }
+                    setBatchSelected(update.selected);
+                    setDownloadsAnchor(update.anchor);
+                    return;
+                }
+            }
+
+            if (e.key === "Escape") {
+                // No-op when nothing is selected — let the keypress fall
+                // through to any ancestor (Sheet close, dialog dismiss).
+                if (batchSelected.size === 0 && !selected) return;
+                e.preventDefault();
+                if (batchSelected.size > 0) setBatchSelected(new Set());
+                if (downloadsAnchor) setDownloadsAnchor(null);
+                if (selected) setSelected(null);
+            }
+        };
+        document.addEventListener("keydown", handler);
+        return () => document.removeEventListener("keydown", handler);
+    }, [root, files, batchMode, batchSelected, selected, downloadsAnchor]);
+
     async function handleBatchConvert() {
         const filesToConvert = files.filter((f) => batchSelected.has(f.path));
         if (!filesToConvert.length) return;
@@ -424,10 +573,21 @@ export default function FileBrowser({
                                           ? "No matching downloads."
                                           : "No pending downloads."
                                 }
-                                onSelect={(file) =>
-                                    setSelected(selected?.path === file.path ? null : file)
-                                }
+                                onSelect={(file, modifiers) => {
+                                    if (root === "downloads") {
+                                        handleDownloadsClick(file, modifiers);
+                                        return;
+                                    }
+                                    // Library tab keeps its single-select
+                                    // behaviour — multi-select for Library
+                                    // lives in LibraryExplorerSheet.
+                                    setSelected(selected?.path === file.path ? null : file);
+                                }}
                                 onBatchToggle={toggleBatch}
+                                dragSelectActive={dragSelectActive}
+                                scrollContainerRef={downloadsScrollRef}
+                                onContainerMouseDown={handleDownloadsMouseDown}
+                                dragRect={dragRect}
                             />
                             <WorkArea
                                 root={root}
@@ -639,8 +799,16 @@ interface FileListProps {
     batchMode: boolean;
     batchSelected: Set<string>;
     emptyText: string;
-    onSelect: (file: FileEntry) => void;
+    onSelect: (file: FileEntry, modifiers: { shift: boolean; toggle: boolean }) => void;
     onBatchToggle: (path: string) => void;
+    /** When true (Downloads tab), the list owns its scroll container ref
+     *  and listens for drag-rubber-band gestures. Library leaves all of
+     *  this undefined; the conditional render below skips the overlay
+     *  and the ref/handler are never wired. */
+    dragSelectActive?: boolean;
+    scrollContainerRef?: React.MutableRefObject<HTMLDivElement | null>;
+    onContainerMouseDown?: (e: React.MouseEvent<HTMLDivElement>) => void;
+    dragRect?: DragRect | null;
 }
 
 function FileList({
@@ -652,13 +820,24 @@ function FileList({
     emptyText,
     onSelect,
     onBatchToggle,
+    dragSelectActive = false,
+    scrollContainerRef,
+    onContainerMouseDown,
+    dragRect,
 }: FileListProps) {
     return (
+        // The list shell receives drag-select's mousedown directly so
+        // the rubber-band's coordinate frame matches the scroll
+        // container. The per-row interactive contract is fulfilled by
+        // the children (`role="button"`); the shell itself is the
+        // background canvas for the gesture, not a clickable target.
+        // eslint-disable-next-line jsx-a11y/no-static-element-interactions
         <div
-            role="region"
             aria-label="File list"
             aria-busy={loading}
-            className="bg-muted/40 border border-border rounded-md overflow-y-auto max-h-[28rem] min-h-40"
+            ref={dragSelectActive ? scrollContainerRef : undefined}
+            onMouseDown={dragSelectActive ? onContainerMouseDown : undefined}
+            className="bg-muted/40 border border-border rounded-md overflow-y-auto max-h-[28rem] min-h-40 relative select-none"
         >
             {loading ? (
                 <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
@@ -681,15 +860,78 @@ function FileList({
                         isSelected={selected?.path === file.path}
                         batchMode={batchMode}
                         isBatchSelected={batchSelected.has(file.path)}
-                        onClick={() => {
-                            if (batchMode) onBatchToggle(file.path);
-                            else onSelect(file);
+                        onClick={(modifiers) => {
+                            // batchMode without modifiers keeps the
+                            // original toggle-the-checkbox behaviour;
+                            // anything modifier-bearing falls through to
+                            // the parent's gesture-aware handler.
+                            if (
+                                batchMode &&
+                                !modifiers.shift &&
+                                !modifiers.toggle &&
+                                !dragSelectActive
+                            ) {
+                                onBatchToggle(file.path);
+                                return;
+                            }
+                            onSelect(file, modifiers);
                         }}
                         onBatchToggle={() => onBatchToggle(file.path)}
                     />
                 ))
             )}
+            {/* Drag-select overlay. Rendered as a portal-like absolute
+                element inside the scroll container so the rectangle sits
+                visually on top of the rows. The hook itself owns the
+                math; we just paint what it tells us. */}
+            {dragSelectActive && dragRect && scrollContainerRef && (
+                <DragSelectOverlay rect={dragRect} containerRef={scrollContainerRef} />
+            )}
         </div>
+    );
+}
+
+/** Translucent rectangle painted while a drag-rubber-band is in flight.
+ *  Positioned in container-local content coordinates (so the overlay
+ *  scrolls with the rows). Reads the container ref inside a layout
+ *  effect — React 19's `react-hooks/refs` rule forbids reading
+ *  `.current` during render, so we mirror the rect into state. */
+function DragSelectOverlay({
+    rect,
+    containerRef,
+}: {
+    rect: DragRect;
+    containerRef: React.MutableRefObject<HTMLDivElement | null>;
+}) {
+    const [pos, setPos] = useState<{
+        left: number;
+        top: number;
+        width: number;
+        height: number;
+    } | null>(null);
+
+    useLayoutEffect(() => {
+        const container = containerRef.current;
+        if (!container) {
+            setPos(null);
+            return;
+        }
+        const c = container.getBoundingClientRect();
+        setPos({
+            left: rect.left - c.left + container.scrollLeft,
+            top: rect.top - c.top + container.scrollTop,
+            width: rect.width,
+            height: rect.height,
+        });
+    }, [rect, containerRef]);
+
+    if (!pos) return null;
+    return (
+        <div
+            aria-hidden
+            className="absolute pointer-events-none bg-accent/15 border border-accent/40 rounded-sm"
+            style={pos}
+        />
     );
 }
 

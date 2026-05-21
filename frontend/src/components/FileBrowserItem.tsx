@@ -10,7 +10,10 @@ interface FileBrowserItemProps {
     isSelected: boolean;
     batchMode: boolean;
     isBatchSelected: boolean;
-    onClick: () => void;
+    /** Receives the modifiers the user held during the click. The parent
+     *  decides what to do (toggle in batch mode, range-select on Shift,
+     *  toggle individual on Ctrl/Cmd, plain single-select otherwise). */
+    onClick: (modifiers: { shift: boolean; toggle: boolean }) => void;
     onBatchToggle: () => void;
 }
 
@@ -53,11 +56,24 @@ export default function FileBrowserItem({
                     <div
                         role="button"
                         tabIndex={0}
-                        onClick={onClick}
+                        // data-entry-path is the hit-test contract for
+                        // `useDragSelect` — the rubber-band hook walks
+                        // these to figure out which rows fall inside the
+                        // dragged rectangle.
+                        data-entry-path={file.path}
+                        onClick={(e) =>
+                            onClick({
+                                shift: e.shiftKey,
+                                toggle: e.ctrlKey || e.metaKey,
+                            })
+                        }
                         onKeyDown={(e) => {
                             if (e.key === "Enter" || e.key === " ") {
                                 e.preventDefault();
-                                onClick();
+                                onClick({
+                                    shift: e.shiftKey,
+                                    toggle: e.ctrlKey || e.metaKey,
+                                });
                             }
                         }}
                         className={rowClass}

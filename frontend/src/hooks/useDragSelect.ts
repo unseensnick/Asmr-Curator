@@ -158,20 +158,41 @@ export function useDragSelect(options: UseDragSelectOptions): UseDragSelectResul
         (e: ReactMouseEvent<HTMLDivElement>) => {
             if (e.button !== 0) return;
             const target = e.target as HTMLElement | null;
-            // Mousedown on a row defers to its click handler — drag-select
-            // only starts in empty space (between rows or below the list).
-            if (target?.closest?.("[data-entry-path]")) return;
             // Don't drag-select while the inline rename input is showing —
             // it's already a focus-stealing surface.
             if (renamePathRef.current) return;
-            e.preventDefault();
+            // Mousedown ON a row still starts tracking, but `engaged`
+            // only flips to true once movement crosses the 3px threshold.
+            // That way: a quiet click + release lets the row's onClick
+            // handle the file normally; a click + drag engages the
+            // rubber-band starting from the clicked row. Dense lists
+            // (FileBrowser's Downloads tab) need this — relying on
+            // gaps-between-rows for drag-select fails there because
+            // there are no gaps.
+            const onRow = !!target?.closest?.("[data-entry-path]");
+            // Only preventDefault on empty-space clicks; on rows let the
+            // browser deliver focus + the row's click event normally
+            // until / unless we engage.
+            if (!onRow) e.preventDefault();
             dragStartRef.current = { x: e.clientX, y: e.clientY };
             dragBaseRef.current = new Set(selectedPathsRef.current);
             dragAdditiveRef.current = e.ctrlKey || e.metaKey || e.shiftKey;
             lastPointerRef.current = { x: e.clientX, y: e.clientY };
+            let engaged = false;
             const onMove = (ev: MouseEvent) => {
                 if (!dragStartRef.current) return;
                 lastPointerRef.current = { x: ev.clientX, y: ev.clientY };
+                if (!engaged) {
+                    const start = dragStartRef.current;
+                    const moved =
+                        Math.abs(ev.clientX - start.x) > 3 || Math.abs(ev.clientY - start.y) > 3;
+                    if (!moved) return;
+                    engaged = true;
+                    // Now that we're committed to a drag, suppress the
+                    // browser's text selection that would otherwise
+                    // build up as the pointer sweeps over rows.
+                    ev.preventDefault();
+                }
                 updateDragSelection(ev.clientX, ev.clientY);
                 ensureAutoScroll();
             };
@@ -180,15 +201,36 @@ export function useDragSelect(options: UseDragSelectOptions): UseDragSelectResul
                 const last = lastPointerRef.current;
                 // No-drag click in empty space — clear selection if it was a
                 // genuine click (no Shift/Ctrl held to preserve, no
-                // movement). Mirrors what an OS file explorer does when you
-                // click the empty area of a folder.
+                // movement, and the click landed outside any row). Mirrors
+                // what an OS file explorer does when you click the empty
+                // area of a folder. Row clicks always fall through to the
+                // row's onClick instead.
                 if (start && last) {
                     const moved = Math.abs(last.x - start.x) > 3 || Math.abs(last.y - start.y) > 3;
-                    if (!moved && !dragAdditiveRef.current) {
+                    if (!moved && !dragAdditiveRef.current && !onRow) {
                         setSelectedPaths(new Set());
                         setAnchorPath(null);
                         setDragRect(null);
                     }
+                }
+                // When the drag actually engaged, swallow the trailing
+                // click event the browser will fire on the row under
+                // mouseup. Without this, the row's onClick would race
+                // ahead and toggle the file we just drag-selected.
+                if (engaged) {
+                    const cancelClick = (ev: Event) => {
+                        ev.stopPropagation();
+                        ev.preventDefault();
+                        window.removeEventListener("click", cancelClick, true);
+                    };
+                    window.addEventListener("click", cancelClick, true);
+                    // Safety: if for some reason no click follows
+                    // (e.g. mouseup landed outside any clickable
+                    // surface), drop the suppressor so a future click
+                    // unrelated to the drag isn't swallowed.
+                    setTimeout(() => {
+                        window.removeEventListener("click", cancelClick, true);
+                    }, 100);
                 }
                 dragStartRef.current = null;
                 setDragRect(null);
