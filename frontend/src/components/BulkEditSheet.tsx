@@ -7,9 +7,15 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { bulkWrite, loadCachedMetadata } from "@/lib/api";
-import type { FileEntry } from "@/lib/types";
-import { getErrorMessage, sanitizeFilename, stripOuterBrackets } from "@/lib/utils";
+import { bulkWrite, BulkWriteValidationError, loadCachedMetadata } from "@/lib/api";
+import { parseTitleLine } from "@/lib/parser";
+import type { AppDict, FileEntry } from "@/lib/types";
+import {
+    getErrorMessage,
+    normaliseAndDedupeTags,
+    sanitizeFilename,
+    stripOuterBrackets,
+} from "@/lib/utils";
 
 export type BulkEditRoot = "library" | "downloads";
 
@@ -76,6 +82,14 @@ interface BulkEditSheetProps {
      * backend resolves paths against the right side of the bind-mount.
      */
     root: BulkEditRoot;
+    /**
+     * Tag dictionary, passed through so the Load-from-cache step can
+     * normalise sidecar tags through the same `parseTitleLine` +
+     * `normaliseAndDedupeTags` pipeline the Patreon URL workflow uses.
+     * Without this the bulk path would write raw sidecar tags that
+     * bypass the user's alias / suppression rules.
+     */
+    dict: AppDict;
 }
 
 /**
@@ -101,7 +115,7 @@ type LoadFeedback =
     | { kind: "empty" }
     | { kind: "error"; message: string };
 
-export default function BulkEditSheet({ open, onClose, files, root }: BulkEditSheetProps) {
+export default function BulkEditSheet({ open, onClose, files, root, dict }: BulkEditSheetProps) {
     // Keyed by `FileEntry.path` (relative to the chosen root). Paths the
     // user hasn't touched aren't in the map — `editFor` falls back to
     // EMPTY_EDIT so the inputs render as blank with placeholder copy.
@@ -145,6 +159,14 @@ export default function BulkEditSheet({ open, onClose, files, root }: BulkEditSh
     // a rename in the eventual commit.
     const [rename, setRename] = useState(false);
 
+    // Persistent link between Artist and Album artist (the common case —
+    // anything that isn't a compilation). When on, the album_artist
+    // input mirrors `shared.artist` live and is disabled; the commit
+    // step writes shared.artist into both fields. Mirrors the existing
+    // RenameSection's `linkArtists` pattern so users get the same
+    // affordance everywhere artist + album_artist appear together.
+    const [linkArtists, setLinkArtists] = useState(false);
+
     // Commit state. `isSubmitting` gates the footer + reopens prevention;
     // `submitError` carries the message when the PATCH fails. Success
     // closes the sheet via `onClose`, so there's no success-feedback
@@ -161,9 +183,14 @@ export default function BulkEditSheet({ open, onClose, files, root }: BulkEditSh
                 files.map((f) => f.path),
                 root,
             );
-            // Walk the items: populate per-file edits where the sidecar
-            // returned data, collect non-empty artists across the
-            // selection so we can decide single-value vs mixed.
+            // Run each sidecar through the same pipeline the Patreon URL
+            // applyPost flow uses in PatreonPanel: parseTitleLine splits
+            // any [bracketed] / (parenthesised) tags out of the raw title
+            // into `embeddedTags`, and normaliseAndDedupeTags resolves
+            // aliases against the dictionary + drops suppressed terms +
+            // dedupes. Without this the bulk path would write raw
+            // sidecar values that bypass the user's vocabulary, leaving
+            // tag chips that don't match canonical forms.
             const nextEdits: Record<string, PerFileEdit> = { ...edits };
             const artistsSeen = new Set<string>();
             let loaded = 0;
@@ -171,9 +198,12 @@ export default function BulkEditSheet({ open, onClose, files, root }: BulkEditSh
                 const hasData = item.title || item.artist || (item.tags && item.tags.length > 0);
                 if (!hasData) continue;
                 loaded += 1;
+                const { title: cleanTitle, embeddedTags } = parseTitleLine(item.title ?? "");
+                const allTags = [...embeddedTags, ...(item.tags ?? [])];
+                const normalised = normaliseAndDedupeTags(allTags, dict);
                 nextEdits[item.path] = {
-                    title: item.title ?? "",
-                    tags: item.tags?.join(", ") ?? "",
+                    title: cleanTitle || item.title || "",
+                    tags: normalised.join(", "),
                 };
                 if (item.artist) artistsSeen.add(item.artist);
             }
@@ -316,7 +346,12 @@ export default function BulkEditSheet({ open, onClose, files, root }: BulkEditSh
     // that would be a 200 with all `unchanged` rows.
 
     const hasPerFileEdit = Object.values(edits).some((e) => e.title || e.tags);
-    const hasSharedEdit = Boolean(shared.artist || shared.album_artist || shared.album);
+    // When linkArtists is on, the album_artist contribution to the commit
+    // is `shared.artist`, not the (potentially stale) `shared.album_artist`
+    // sitting in state from before the link was toggled. Match the
+    // displayed value so canCommit reflects what the user actually sees.
+    const effectiveAlbumArtist = linkArtists ? shared.artist : shared.album_artist;
+    const hasSharedEdit = Boolean(shared.artist || effectiveAlbumArtist || shared.album);
     const hasClear = clearFields.size > 0;
     const hasRename = rename && previewRows.some((r) => r.proposed && !r.unchanged && !r.tooLong);
     const canCommit = hasPerFileEdit || hasSharedEdit || hasClear || hasRename;
@@ -339,13 +374,19 @@ export default function BulkEditSheet({ open, onClose, files, root }: BulkEditSh
                     new_name: proposed ?? "",
                 };
             });
+            // linkArtists collapses album_artist onto artist at commit
+            // time + drops any pending Clear on album_artist (a link
+            // overrides a clear — the user clearly wants album_artist
+            // to track artist, not be blanked).
+            const effectiveClear = new Set(clearFields);
+            if (linkArtists) effectiveClear.delete("album_artist");
             await bulkWrite({
                 items,
                 shared: {
                     artist: shared.artist,
-                    album_artist: shared.album_artist,
+                    album_artist: linkArtists ? shared.artist : shared.album_artist,
                     album: shared.album,
-                    clear: [...clearFields],
+                    clear: [...effectiveClear],
                 },
                 rename,
                 root,
@@ -354,9 +395,33 @@ export default function BulkEditSheet({ open, onClose, files, root }: BulkEditSh
             // its next render (phase 8 will plumb a refresh callback so
             // the new names appear without the user having to navigate
             // away and back).
+            // Wipe the edit state before closing so reopening this
+            // selection starts fresh — the submitted values are now on
+            // disk, so showing them again as pending inputs would just
+            // confuse the user into re-applying a no-op.
+            setEdits({});
+            setShared(EMPTY_SHARED);
+            setClearFields(new Set());
+            setMixedFields(new Set());
+            setLinkArtists(false);
+            setRename(false);
+            setLoadFeedback({ kind: "none" });
             onClose();
         } catch (err) {
-            setSubmitError(getErrorMessage(err));
+            if (err instanceof BulkWriteValidationError) {
+                // Surface the first real per-item failure (skipping the
+                // 'Aborted — other items failed validation' markers the
+                // backend adds for the would-have-been-fine items) so the
+                // user sees the actual cause, not a downstream symptom.
+                const real = err.results.find((r) => !r.ok && !r.error?.startsWith("Aborted"));
+                if (real) {
+                    setSubmitError(`${real.path}: ${real.error}`);
+                } else {
+                    setSubmitError(err.message);
+                }
+            } else {
+                setSubmitError(getErrorMessage(err));
+            }
         } finally {
             setIsSubmitting(false);
         }
@@ -459,96 +524,92 @@ export default function BulkEditSheet({ open, onClose, files, root }: BulkEditSh
                                         </span>
                                     )}
                                 </div>
+                                {/* Stacked per-file blocks. The original 3-column
+                                    table cratered the moment real Patreon ASMR
+                                    filenames hit it — long `[EXCLUSIVE] [27_23] …`
+                                    names ate the row, leaving the Title and Tags
+                                    inputs at ~30px wide. Stacking the filename
+                                    header above full-width inputs gives every
+                                    field room without horizontal scroll. */}
                                 <TooltipProvider delayDuration={500}>
-                                    <table className="w-full text-sm">
-                                        <thead>
-                                            <tr className="border-b border-border">
-                                                <th
-                                                    scope="col"
-                                                    className="text-left text-[10px] font-medium tracking-[0.08em] uppercase text-muted-foreground/80 px-3 py-2 w-[34%]"
+                                    <div className="flex flex-col gap-3">
+                                        {files.map((file, idx) => {
+                                            const edit = editFor(file.path);
+                                            const titleId = `bulk-title-${idx}`;
+                                            const tagsId = `bulk-tags-${idx}`;
+                                            return (
+                                                <div
+                                                    key={file.path}
+                                                    className={
+                                                        idx > 0
+                                                            ? "flex flex-col gap-2 pt-3 border-t border-border/50"
+                                                            : "flex flex-col gap-2"
+                                                    }
                                                 >
-                                                    File
-                                                </th>
-                                                <th
-                                                    scope="col"
-                                                    className="text-left text-[10px] font-medium tracking-[0.08em] uppercase text-muted-foreground/80 px-3 py-2 w-[30%]"
-                                                >
-                                                    Title
-                                                </th>
-                                                <th
-                                                    scope="col"
-                                                    className="text-left text-[10px] font-medium tracking-[0.08em] uppercase text-muted-foreground/80 px-3 py-2"
-                                                >
-                                                    Tags
-                                                </th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {files.map((file) => {
-                                                const edit = editFor(file.path);
-                                                return (
-                                                    <tr
-                                                        key={file.path}
-                                                        className="border-b border-border last:border-b-0"
-                                                    >
-                                                        <th
-                                                            scope="row"
-                                                            className="text-left font-normal px-3 py-3 align-middle min-w-0"
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <span className="block font-mono text-xs text-foreground truncate">
+                                                                {file.name}
+                                                            </span>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent
+                                                            side="right"
+                                                            className="max-w-md"
                                                         >
-                                                            <Tooltip>
-                                                                <TooltipTrigger asChild>
-                                                                    <span className="block font-mono text-xs text-foreground truncate">
-                                                                        {file.name}
+                                                            <div className="flex flex-col gap-0.5 font-mono text-left">
+                                                                <span className="break-all">
+                                                                    {file.name}
+                                                                </span>
+                                                                {file.folder && (
+                                                                    <span className="text-background/70 break-all">
+                                                                        {file.folder}/
                                                                     </span>
-                                                                </TooltipTrigger>
-                                                                <TooltipContent
-                                                                    side="right"
-                                                                    className="max-w-md"
-                                                                >
-                                                                    <div className="flex flex-col gap-0.5 font-mono text-left">
-                                                                        <span className="break-all">
-                                                                            {file.name}
-                                                                        </span>
-                                                                        {file.folder && (
-                                                                            <span className="text-background/70 break-all">
-                                                                                {file.folder}/
-                                                                            </span>
-                                                                        )}
-                                                                    </div>
-                                                                </TooltipContent>
-                                                            </Tooltip>
-                                                        </th>
-                                                        <td className="px-3 py-2 align-middle">
-                                                            <Input
-                                                                value={edit.title}
-                                                                onChange={(ev) =>
-                                                                    patchEdit(file.path, {
-                                                                        title: ev.target.value,
-                                                                    })
-                                                                }
-                                                                placeholder="Keep existing"
-                                                                aria-label={`Title for ${file.name}`}
-                                                                className="font-mono text-sm"
-                                                            />
-                                                        </td>
-                                                        <td className="px-3 py-2 align-middle">
-                                                            <Input
-                                                                value={edit.tags}
-                                                                onChange={(ev) =>
-                                                                    patchEdit(file.path, {
-                                                                        tags: ev.target.value,
-                                                                    })
-                                                                }
-                                                                placeholder="tag1, tag2, …"
-                                                                aria-label={`Tags for ${file.name}`}
-                                                                className="font-mono text-sm"
-                                                            />
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
+                                                                )}
+                                                            </div>
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                    <div className="flex items-center gap-2">
+                                                        <label
+                                                            htmlFor={titleId}
+                                                            className="w-12 shrink-0 text-xs text-muted-foreground"
+                                                        >
+                                                            Title
+                                                        </label>
+                                                        <Input
+                                                            id={titleId}
+                                                            value={edit.title}
+                                                            onChange={(ev) =>
+                                                                patchEdit(file.path, {
+                                                                    title: ev.target.value,
+                                                                })
+                                                            }
+                                                            placeholder="Keep existing"
+                                                            className="flex-1 font-mono text-sm"
+                                                        />
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <label
+                                                            htmlFor={tagsId}
+                                                            className="w-12 shrink-0 text-xs text-muted-foreground"
+                                                        >
+                                                            Tags
+                                                        </label>
+                                                        <Input
+                                                            id={tagsId}
+                                                            value={edit.tags}
+                                                            onChange={(ev) =>
+                                                                patchEdit(file.path, {
+                                                                    tags: ev.target.value,
+                                                                })
+                                                            }
+                                                            placeholder="tag1, tag2, …"
+                                                            className="flex-1 font-mono text-sm"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
                                 </TooltipProvider>
                             </>
                         )}
@@ -562,39 +623,66 @@ export default function BulkEditSheet({ open, onClose, files, root }: BulkEditSh
                         </p>
                         <div className="flex flex-col gap-2.5">
                             {SHARED_ID_FIELDS.map((field) => {
-                                const isCleared = clearFields.has(field);
+                                // Album artist mirrors Artist when linkArtists
+                                // is on — disabled input that displays the
+                                // live shared.artist; commit step writes
+                                // shared.artist into both fields. Matches
+                                // RenameSection's existing link pattern.
+                                const isLinked = field === "album_artist" && linkArtists;
+                                const isCleared = clearFields.has(field) && !isLinked;
                                 const inputId = `bulk-shared-${field}`;
+                                const displayValue = isLinked ? shared.artist : shared[field];
                                 return (
-                                    <div key={field} className="flex items-center gap-2">
-                                        <label
-                                            htmlFor={inputId}
-                                            className="w-28 shrink-0 text-sm text-muted-foreground"
-                                        >
-                                            {SHARED_FIELD_LABELS[field]}
-                                        </label>
-                                        <Input
-                                            id={inputId}
-                                            value={shared[field]}
-                                            onChange={(e) => patchShared(field, e.target.value)}
-                                            disabled={isCleared}
-                                            placeholder={placeholderForShared(field)}
-                                            className="flex-1 font-mono text-sm"
-                                        />
-                                        <Button
-                                            type="button"
-                                            variant={isCleared ? "secondary" : "ghost"}
-                                            size="sm"
-                                            onClick={() => toggleClear(field)}
-                                            aria-pressed={isCleared}
-                                            aria-label={
-                                                isCleared
-                                                    ? `Cancel clearing ${SHARED_FIELD_LABELS[field]}`
-                                                    : `Clear ${SHARED_FIELD_LABELS[field]} on all files`
-                                            }
-                                            className="shrink-0"
-                                        >
-                                            {isCleared ? "Clearing" : "Clear"}
-                                        </Button>
+                                    <div key={field} className="flex flex-col gap-1.5">
+                                        <div className="flex items-center gap-2">
+                                            <label
+                                                htmlFor={inputId}
+                                                className="w-28 shrink-0 text-sm text-muted-foreground"
+                                            >
+                                                {SHARED_FIELD_LABELS[field]}
+                                            </label>
+                                            <Input
+                                                id={inputId}
+                                                value={displayValue}
+                                                onChange={(e) => patchShared(field, e.target.value)}
+                                                disabled={isCleared || isLinked}
+                                                placeholder={placeholderForShared(field)}
+                                                className="flex-1 font-mono text-sm"
+                                            />
+                                            <Button
+                                                type="button"
+                                                variant={isCleared ? "secondary" : "ghost"}
+                                                size="sm"
+                                                onClick={() => toggleClear(field)}
+                                                disabled={isLinked}
+                                                aria-pressed={isCleared}
+                                                aria-label={
+                                                    isCleared
+                                                        ? `Cancel clearing ${SHARED_FIELD_LABELS[field]}`
+                                                        : `Clear ${SHARED_FIELD_LABELS[field]} on all files`
+                                                }
+                                                className="shrink-0"
+                                            >
+                                                {isCleared ? "Clearing" : "Clear"}
+                                            </Button>
+                                        </div>
+                                        {field === "album_artist" && (
+                                            <label
+                                                htmlFor="bulk-link-artists"
+                                                className="flex items-center gap-2 cursor-pointer select-none w-fit pl-[7.5rem]"
+                                            >
+                                                <Checkbox
+                                                    id="bulk-link-artists"
+                                                    checked={linkArtists}
+                                                    onCheckedChange={(v) =>
+                                                        setLinkArtists(v === true)
+                                                    }
+                                                />
+                                                <span className="text-sm text-muted-foreground">
+                                                    Same as artist
+                                                </span>
+                                            </label>
+                                        )}
                                     </div>
                                 );
                             })}
@@ -655,27 +743,36 @@ export default function BulkEditSheet({ open, onClose, files, root }: BulkEditSh
                                     {previewRows.filter((r) => r.proposed && !r.unchanged).length}{" "}
                                     of {count} will rename)
                                 </div>
+                                {/* Stacked rows. Side-by-side current → proposed
+                                    truncated both names down to ~30 chars on a
+                                    sheet of this width with real-world Patreon
+                                    ASMR filenames in the mix. Stacking gives
+                                    each name its own line so the user can
+                                    read what they're about to commit. */}
                                 <ul className="divide-y divide-border">
                                     {previewRows.map((row) => (
                                         <li
                                             key={row.file.path}
-                                            className="flex items-center gap-3 px-3 py-2 font-mono text-xs"
+                                            className="flex flex-col gap-1 px-3 py-2 font-mono text-xs"
                                         >
-                                            <span className="flex-1 min-w-0 truncate text-muted-foreground">
+                                            <span className="text-muted-foreground break-all">
                                                 {row.file.name}
                                             </span>
-                                            <span aria-hidden className="text-muted-foreground/60">
-                                                →
-                                            </span>
-                                            <span className="flex-1 min-w-0 truncate">
+                                            <span className="flex items-start gap-1.5 break-all">
+                                                <span
+                                                    aria-hidden
+                                                    className="text-muted-foreground/60 shrink-0"
+                                                >
+                                                    →
+                                                </span>
                                                 {row.tooLong ? (
-                                                    <span className="inline-flex items-center gap-1 text-destructive">
+                                                    <span className="inline-flex items-start gap-1 text-destructive">
                                                         <AlertCircle
                                                             size={12}
                                                             aria-hidden
-                                                            className="shrink-0"
+                                                            className="shrink-0 mt-0.5"
                                                         />
-                                                        Name too long (max 255 bytes)
+                                                        <span>Name too long (max 255 bytes)</span>
                                                     </span>
                                                 ) : row.proposed === null || row.unchanged ? (
                                                     <span className="text-muted-foreground/70 italic">

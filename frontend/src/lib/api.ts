@@ -460,10 +460,42 @@ export interface BulkWriteResponse {
     results: BulkWriteItemResult[];
 }
 
+/** Thrown when /api/files/bulk-write returns 422 (validation aborted the
+ *  whole batch). Carries the per-item results so the UI can highlight
+ *  which file(s) caused the abort instead of dumping the raw JSON. */
+export class BulkWriteValidationError extends Error {
+    readonly results: BulkWriteItemResult[];
+    constructor(message: string, results: BulkWriteItemResult[]) {
+        super(message);
+        this.name = "BulkWriteValidationError";
+        this.results = results;
+    }
+}
+
 /** Returns the backend's `{ok, results}` payload on a 2xx. Validation
- *  failures (422) raise via the shared `request` wrapper with the raw
- *  response text as the Error message — JSON-parse the message to dig
- *  out per-item errors when surfacing them in the UI. */
-export function bulkWrite(body: BulkWriteRequest): Promise<BulkWriteResponse> {
-    return apiPatch<BulkWriteResponse>(API.bulkWrite, body);
+ *  failures (422) raise as `BulkWriteValidationError` with the parsed
+ *  detail attached. Other transport errors (network, 5xx) re-throw the
+ *  shared `request` wrapper's plain Error. */
+export async function bulkWrite(body: BulkWriteRequest): Promise<BulkWriteResponse> {
+    try {
+        return await apiPatch<BulkWriteResponse>(API.bulkWrite, body);
+    } catch (err) {
+        if (err instanceof Error && err.message.startsWith("{")) {
+            try {
+                const parsed = JSON.parse(err.message) as {
+                    detail?: { ok?: boolean; results?: BulkWriteItemResult[] };
+                };
+                const results = parsed.detail?.results;
+                if (Array.isArray(results)) {
+                    const firstFailure = results.find((r) => !r.ok);
+                    const msg = firstFailure?.error ?? "Validation failed.";
+                    throw new BulkWriteValidationError(msg, results);
+                }
+            } catch (parseErr) {
+                if (parseErr instanceof BulkWriteValidationError) throw parseErr;
+                // JSON.parse failed — fall through to the original error.
+            }
+        }
+        throw err;
+    }
 }

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
 import CookiesSheet from "@/components/CookiesSheet";
 import FileBrowser from "@/components/FileBrowser";
@@ -69,6 +69,20 @@ export default function App() {
         setBulkEditRoot(selectionRoot);
         setBulkEditOpen(true);
     }
+
+    // Stable identity for the current selection — same set of paths
+    // (regardless of array reference) produces the same string. React
+    // uses this as the BulkEditSheet's `key`: a same-selection reopen
+    // hits the cached subtree (state preserved); a different selection
+    // forces a remount with a clean slate.
+    const bulkEditSelectionKey = useMemo(
+        () =>
+            bulkEditFiles
+                .map((f) => f.path)
+                .sort()
+                .join("|") || "empty",
+        [bulkEditFiles],
+    );
     const [extractedArtist, setExtractedArtist] = useState("");
     const [sourceMode, setSourceMode] = useState<SourceMode>("patreon");
     const [powerMode, setPowerMode] = useState<boolean>(() => loadPowerMode());
@@ -349,14 +363,21 @@ export default function App() {
                         onDictChange={setDict}
                     />
                 )}
-                {bulkEditOpen && (
-                    <BulkEditSheet
-                        open={bulkEditOpen}
-                        onClose={() => setBulkEditOpen(false)}
-                        files={bulkEditFiles}
-                        root={bulkEditRoot}
-                    />
-                )}
+                {/* Content-keyed always-mount. Without this, closing the
+                    sheet (`bulkEditOpen` -> false) would unmount the
+                    component and wipe in-flight edits — the user would
+                    have to re-run Load from cached post info and re-do
+                    every change. Keying on the selection's path-set
+                    means same-selection reopens preserve state, while a
+                    fresh selection remounts with a clean slate. */}
+                <BulkEditSheet
+                    key={bulkEditSelectionKey}
+                    open={bulkEditOpen}
+                    onClose={() => setBulkEditOpen(false)}
+                    files={bulkEditFiles}
+                    root={bulkEditRoot}
+                    dict={dict}
+                />
             </Suspense>
             <CookiesSheet open={cookiesOpen} onClose={() => setCookiesOpen(false)} />
             <HelpSheet open={helpOpen} onClose={() => setHelpOpen(false)} />
