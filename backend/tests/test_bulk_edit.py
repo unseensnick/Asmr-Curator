@@ -521,3 +521,173 @@ class TestBulkWriteCommit:
         )
         assert r.status_code == 200
         assert r.json() == {"ok": True, "results": []}
+
+
+class TestBulkWriteMove:
+    """The optional `to_subdir` field — moves each (post-rename) file into
+    LIBRARY_PATH/<to_subdir>/. Gated to root=='downloads' because
+    library-to-library moves stay on /api/move."""
+
+    def test_moves_file_into_library_subfolder(self, client):
+        c, download, library = client
+        rel = "Solar Girl/raw-1.mp3"
+        (download / "Solar Girl").mkdir()
+        (download / rel).write_bytes(b"")
+        (library / "Solar Girl").mkdir()
+        r = c.patch(
+            "/api/files/bulk-write",
+            json={
+                "items": [{"path": rel}],
+                "shared": {"artist": "Solar Girl"},
+                "rename": False,
+                "root": "downloads",
+                "to_subdir": "Solar Girl",
+            },
+        )
+        assert r.status_code == 200, r.json()
+        result = r.json()["results"][0]
+        assert result["ok"] is True
+        assert result["new_path"] == "Solar Girl/raw-1.mp3"
+        assert result["new_root"] == "library"
+        # Source gone, dest landed.
+        assert not (download / rel).exists()
+        assert (library / "Solar Girl" / "raw-1.mp3").exists()
+        # Metadata write still applied to the moved file.
+        assert _read_id3(library / "Solar Girl" / "raw-1.mp3")["TPE1"] == "Solar Girl"
+
+    def test_renames_then_moves_in_one_call(self, client):
+        c, download, library = client
+        rel = "Solar Girl/raw-1.mp3"
+        (download / "Solar Girl").mkdir()
+        (download / rel).write_bytes(b"")
+        (library / "Whispers").mkdir()
+        r = c.patch(
+            "/api/files/bulk-write",
+            json={
+                "items": [
+                    {
+                        "path": rel,
+                        "title": "Sleepy",
+                        "new_name": "Sleepy - F4A.mp3",
+                    },
+                ],
+                "shared": {"artist": "Solar Girl"},
+                "rename": True,
+                "root": "downloads",
+                "to_subdir": "Whispers",
+            },
+        )
+        assert r.status_code == 200, r.json()
+        result = r.json()["results"][0]
+        assert result["new_path"] == "Whispers/Sleepy - F4A.mp3"
+        assert result["new_root"] == "library"
+        assert (library / "Whispers" / "Sleepy - F4A.mp3").exists()
+        # Source's parent stays around (we don't prune empty post folders).
+        assert not (download / rel).exists()
+
+    def test_rejects_to_subdir_when_root_is_library(self, client):
+        c, _, library = client
+        rel = _stage_mp3(library, "a.mp3")
+        r = c.patch(
+            "/api/files/bulk-write",
+            json={
+                "items": [{"path": rel}],
+                "shared": {"artist": "X"},
+                "rename": False,
+                "root": "library",
+                "to_subdir": "Whispers",
+            },
+        )
+        # 400 — this is a request-shape error, not a per-item one. The
+        # /api/move endpoint handles library→library directly; bulk-write
+        # only opens the move door for the downloads→library workflow.
+        assert r.status_code == 400
+
+    def test_collision_at_destination_aborts_batch(self, client):
+        c, download, library = client
+        rel = "Solar Girl/raw-1.mp3"
+        (download / "Solar Girl").mkdir()
+        (download / rel).write_bytes(b"")
+        (library / "Solar Girl").mkdir()
+        # A file with the same name already sits at the destination.
+        (library / "Solar Girl" / "raw-1.mp3").write_bytes(b"existing")
+        r = c.patch(
+            "/api/files/bulk-write",
+            json={
+                "items": [{"path": rel}],
+                "shared": {},
+                "rename": False,
+                "root": "downloads",
+                "to_subdir": "Solar Girl",
+            },
+        )
+        assert r.status_code == 422
+        # Source untouched, existing dest untouched.
+        assert (download / rel).exists()
+        assert (library / "Solar Girl" / "raw-1.mp3").read_bytes() == b"existing"
+
+    def test_within_batch_move_collision_aborts(self, client):
+        c, download, library = client
+        # Two source files in different parent dirs but with the SAME
+        # filename — without the move-dest dedupe they'd both try to
+        # land at library/Whispers/raw.mp3.
+        (download / "post-a").mkdir()
+        (download / "post-a" / "raw.mp3").write_bytes(b"")
+        (download / "post-b").mkdir()
+        (download / "post-b" / "raw.mp3").write_bytes(b"")
+        (library / "Whispers").mkdir()
+        r = c.patch(
+            "/api/files/bulk-write",
+            json={
+                "items": [
+                    {"path": "post-a/raw.mp3"},
+                    {"path": "post-b/raw.mp3"},
+                ],
+                "shared": {},
+                "rename": False,
+                "root": "downloads",
+                "to_subdir": "Whispers",
+            },
+        )
+        assert r.status_code == 422
+        # Neither file moved.
+        assert (download / "post-a" / "raw.mp3").exists()
+        assert (download / "post-b" / "raw.mp3").exists()
+        assert not (library / "Whispers" / "raw.mp3").exists()
+
+    def test_missing_destination_folder_returns_404(self, client):
+        c, download, _ = client
+        rel = "Solar Girl/raw-1.mp3"
+        (download / "Solar Girl").mkdir()
+        (download / rel).write_bytes(b"")
+        r = c.patch(
+            "/api/files/bulk-write",
+            json={
+                "items": [{"path": rel}],
+                "shared": {},
+                "rename": False,
+                "root": "downloads",
+                "to_subdir": "Does Not Exist",
+            },
+        )
+        assert r.status_code == 404
+
+    def test_empty_to_subdir_is_no_move(self, client):
+        # Equivalent to omitting the field — useful so the frontend can
+        # send "" without conditionalising the payload.
+        c, _, library = client
+        rel = _stage_mp3(library, "a.mp3")
+        r = c.patch(
+            "/api/files/bulk-write",
+            json={
+                "items": [{"path": rel, "title": "T"}],
+                "shared": {},
+                "rename": False,
+                "root": "library",
+                "to_subdir": "",
+            },
+        )
+        assert r.status_code == 200
+        result = r.json()["results"][0]
+        assert "new_root" not in result
+        assert _read_id3(library / rel)["TIT2"] == "T"

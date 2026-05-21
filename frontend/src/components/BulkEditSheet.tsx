@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { AlertCircle, Loader2, RefreshCw, X } from "lucide-react";
 
+import LibrarySubdirPicker from "@/components/LibrarySubdirPicker";
 import SectionLabel from "@/components/SectionLabel";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -90,6 +91,13 @@ interface BulkEditSheetProps {
      * bypass the user's alias / suppression rules.
      */
     dict: AppDict;
+    /**
+     * Drop a file from the working selection without closing the sheet.
+     * Per-row X button on each entry; the parent (App.tsx) edits
+     * `bulkEditFiles` so the row + its edits stay paired. Optional —
+     * surfaces tabbed-off callers can skip the remove UI by omitting.
+     */
+    onRemoveFile?: (path: string) => void;
 }
 
 /**
@@ -115,7 +123,14 @@ type LoadFeedback =
     | { kind: "empty" }
     | { kind: "error"; message: string };
 
-export default function BulkEditSheet({ open, onClose, files, root, dict }: BulkEditSheetProps) {
+export default function BulkEditSheet({
+    open,
+    onClose,
+    files,
+    root,
+    dict,
+    onRemoveFile,
+}: BulkEditSheetProps) {
     // Keyed by `FileEntry.path` (relative to the chosen root). Paths the
     // user hasn't touched aren't in the map — `editFor` falls back to
     // EMPTY_EDIT so the inputs render as blank with placeholder copy.
@@ -159,13 +174,24 @@ export default function BulkEditSheet({ open, onClose, files, root, dict }: Bulk
     // a rename in the eventual commit.
     const [rename, setRename] = useState(false);
 
+    // Optional move-to-library destination. Only meaningful when the
+    // sheet was opened from Downloads (library-to-library moves stay on
+    // /api/move). The checkbox gates the input; an empty input with the
+    // checkbox on is treated as "no move" so the user can toggle
+    // without typing.
+    const [moveEnabled, setMoveEnabled] = useState(false);
+    const [moveSubdir, setMoveSubdir] = useState("");
+    const moveAvailable = root === "downloads";
+
     // Persistent link between Artist and Album artist (the common case —
     // anything that isn't a compilation). When on, the album_artist
     // input mirrors `shared.artist` live and is disabled; the commit
     // step writes shared.artist into both fields. Mirrors the existing
-    // RenameSection's `linkArtists` pattern so users get the same
-    // affordance everywhere artist + album_artist appear together.
-    const [linkArtists, setLinkArtists] = useState(false);
+    // RenameSection's `linkArtists` pattern. Defaults ON because the
+    // single-artist case is the overwhelming majority for the ASMR
+    // workflows that drive this surface — the toggle is right there to
+    // unlink for the rare compilation / collab.
+    const [linkArtists, setLinkArtists] = useState(true);
 
     // Commit state. `isSubmitting` gates the footer + reopens prevention;
     // `submitError` carries the message when the PATCH fails. Success
@@ -354,7 +380,12 @@ export default function BulkEditSheet({ open, onClose, files, root, dict }: Bulk
     const hasSharedEdit = Boolean(shared.artist || effectiveAlbumArtist || shared.album);
     const hasClear = clearFields.size > 0;
     const hasRename = rename && previewRows.some((r) => r.proposed && !r.unchanged && !r.tooLong);
-    const canCommit = hasPerFileEdit || hasSharedEdit || hasClear || hasRename;
+    // Move is only meaningful when source is Downloads (library-to-library
+    // stays on /api/move). Empty string with the checkbox on = no-op, so
+    // the user can toggle freely without typing.
+    const effectiveMoveSubdir = moveEnabled && moveAvailable ? moveSubdir.trim() : "";
+    const hasMove = effectiveMoveSubdir !== "";
+    const canCommit = hasPerFileEdit || hasSharedEdit || hasClear || hasRename || hasMove;
     const anyTooLong = rename && previewRows.some((r) => r.tooLong);
 
     async function handleSubmit() {
@@ -390,6 +421,7 @@ export default function BulkEditSheet({ open, onClose, files, root, dict }: Bulk
                 },
                 rename,
                 root,
+                to_subdir: effectiveMoveSubdir,
             });
             // Success — close the sheet. The FileBrowser will refresh on
             // its next render (phase 8 will plumb a refresh callback so
@@ -403,8 +435,10 @@ export default function BulkEditSheet({ open, onClose, files, root, dict }: Bulk
             setShared(EMPTY_SHARED);
             setClearFields(new Set());
             setMixedFields(new Set());
-            setLinkArtists(false);
+            setLinkArtists(true); // matches the default — see useState init
             setRename(false);
+            setMoveEnabled(false);
+            setMoveSubdir("");
             setLoadFeedback({ kind: "none" });
             onClose();
         } catch (err) {
@@ -546,28 +580,43 @@ export default function BulkEditSheet({ open, onClose, files, root, dict }: Bulk
                                                             : "flex flex-col gap-2"
                                                     }
                                                 >
-                                                    <Tooltip>
-                                                        <TooltipTrigger asChild>
-                                                            <span className="block font-mono text-xs text-foreground truncate">
-                                                                {file.name}
-                                                            </span>
-                                                        </TooltipTrigger>
-                                                        <TooltipContent
-                                                            side="right"
-                                                            className="max-w-md"
-                                                        >
-                                                            <div className="flex flex-col gap-0.5 font-mono text-left">
-                                                                <span className="break-all">
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <span className="flex-1 min-w-0 block font-mono text-xs text-foreground truncate">
                                                                     {file.name}
                                                                 </span>
-                                                                {file.folder && (
-                                                                    <span className="text-background/70 break-all">
-                                                                        {file.folder}/
+                                                            </TooltipTrigger>
+                                                            <TooltipContent
+                                                                side="right"
+                                                                className="max-w-md"
+                                                            >
+                                                                <div className="flex flex-col gap-0.5 font-mono text-left">
+                                                                    <span className="break-all">
+                                                                        {file.name}
                                                                     </span>
-                                                                )}
-                                                            </div>
-                                                        </TooltipContent>
-                                                    </Tooltip>
+                                                                    {file.folder && (
+                                                                        <span className="text-background/70 break-all">
+                                                                            {file.folder}/
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                        {onRemoveFile && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() =>
+                                                                    onRemoveFile(file.path)
+                                                                }
+                                                                className="shrink-0 text-muted-foreground hover:text-destructive transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                                                                aria-label={`Remove ${file.name} from this batch`}
+                                                                title="Remove from this batch"
+                                                            >
+                                                                <X size={14} aria-hidden />
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                     <div className="flex items-center gap-2">
                                                         <label
                                                             htmlFor={titleId}
@@ -707,6 +756,58 @@ export default function BulkEditSheet({ open, onClose, files, root, dict }: Bulk
                             </div>
                         </div>
                     </section>
+
+                    {moveAvailable && (
+                        <section aria-label="Move to library" className="flex flex-col gap-3">
+                            <SectionLabel>Move to library</SectionLabel>
+                            <label
+                                htmlFor="bulk-move-toggle"
+                                className="flex items-start gap-3 cursor-pointer"
+                            >
+                                <Checkbox
+                                    id="bulk-move-toggle"
+                                    checked={moveEnabled}
+                                    onCheckedChange={(v) => setMoveEnabled(v === true)}
+                                    className="mt-0.5"
+                                />
+                                <span className="flex flex-col gap-1 min-w-0">
+                                    <span className="text-sm text-foreground">
+                                        Move into a library subfolder
+                                    </span>
+                                    <span className="text-xs text-muted-foreground leading-relaxed">
+                                        Each file moves into
+                                        <code className="font-mono text-foreground/80 mx-1">
+                                            LIBRARY_PATH/&lt;subfolder&gt;/
+                                        </code>
+                                        after metadata + rename apply. Browse to the destination
+                                        below — or create a new folder there with the same
+                                        affordance the single-file Move flow uses.
+                                    </span>
+                                </span>
+                            </label>
+                            {moveEnabled && (
+                                <div className="flex flex-col gap-2">
+                                    <LibrarySubdirPicker
+                                        subdir={moveSubdir}
+                                        onSubdirChange={setMoveSubdir}
+                                        onError={(msg) =>
+                                            // Reuse the existing submit-error
+                                            // surface in the footer so picker
+                                            // failures don't need a parallel
+                                            // banner. Empty string clears.
+                                            setSubmitError(msg || null)
+                                        }
+                                    />
+                                    <span className="text-xs text-muted-foreground">
+                                        Moving to:{" "}
+                                        <span className="font-mono text-foreground break-all">
+                                            {moveSubdir ? `Library / ${moveSubdir}` : "Library"}
+                                        </span>
+                                    </span>
+                                </div>
+                            )}
+                        </section>
+                    )}
 
                     <section aria-label="Rename" className="flex flex-col gap-3">
                         <SectionLabel>Rename</SectionLabel>

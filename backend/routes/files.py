@@ -318,6 +318,12 @@ class BulkWriteIn(BaseModel):
     shared: BulkWriteShared = BulkWriteShared()
     rename: bool = False
     root: str = "library"
+    # Optional library-subdir destination. When set (only valid with
+    # root=='downloads'), each item's post-rename file moves into
+    # LIBRARY_PATH/<to_subdir>/ at the end of phase 2. Subsumes a
+    # separate /api/move/batch round-trip the frontend would otherwise
+    # have to chain. Empty string and null both mean "don't move".
+    to_subdir: str | None = None
 
 
 def _validate_bulk_rename_name(name: str) -> str | None:
@@ -341,22 +347,31 @@ def _validate_bulk_rename_name(name: str) -> str | None:
 
 @router.patch("/api/files/bulk-write")
 def bulk_write(body: BulkWriteIn):
-    """Apply bulk metadata + optional canonical rename across the selection.
+    """Apply bulk metadata + optional canonical rename + optional move
+    across the selection in one transactional request.
 
     **Two-phase commit.** Phase 1 walks every item and validates path
     resolution, file existence, metadata-compatible extension, rename
     target shape + length + collision (both on-disk and against other
-    items in the same batch). If ANY item fails, the whole batch aborts
-    with 422 and disk state is untouched — the response includes per-item
-    `ok: false` for both the actual offenders and the would-have-been-fine
-    items so the UI can show the failed ones in context.
+    items in the same batch), and — when `to_subdir` is set — the
+    move-destination folder existence + per-item move collision. If ANY
+    item fails, the whole batch aborts with 422 and disk state is
+    untouched — the response includes per-item `ok: false` for both the
+    actual offenders and the would-have-been-fine items so the UI can
+    show the failed ones in context.
 
-    Phase 2 applies each item independently — rename first, then write
-    per-file title + shared fields (`_write_metadata` skips blank values)
-    + any explicit clears (`_clear_metadata` drops the frame). A mutagen
-    or OS error here is per-item `{ok: false, error}`; we don't try to
-    unwind successfully-committed earlier items because filesystem
-    rollback is unreliable.
+    Phase 2 applies each item independently — rename first (within the
+    source parent), then write per-file title + shared fields
+    (`_write_metadata` skips blank values) + any explicit clears
+    (`_clear_metadata` drops the frame), then optionally move into
+    `LIBRARY_PATH/to_subdir/`. A mutagen or OS error here is per-item
+    `{ok: false, error}`; we don't try to unwind successfully-committed
+    earlier items because filesystem rollback is unreliable.
+
+    `to_subdir` is gated to `root=="downloads"` because the only
+    intended use is the BulkEditSheet's Downloads → Library move
+    workflow; library-to-library moves stay on /api/move so this
+    endpoint doesn't grow a parallel set of source-validation paths.
 
     The frontend pre-composes `new_name` so the canonical-format rules
     (brackets-kept-in-filename, dash join, sanitize) stay in one place;
@@ -372,10 +387,30 @@ def bulk_write(body: BulkWriteIn):
             f"Allowed: {list(_BULK_SHARED_FIELDS)}.",
         )
 
+    # ── Optional move destination (downloads → library only) ─────────────────
+    # Resolved up-front so phase 1 can per-item-check collisions at the
+    # eventual landing spot. None means "don't move".
+    move_dest_dir: Path | None = None
+    if body.to_subdir is not None and body.to_subdir.strip() != "":
+        if body.root != "downloads":
+            raise HTTPException(
+                400,
+                "to_subdir is only valid when root is 'downloads' — moving WITHIN library "
+                "uses /api/move directly.",
+            )
+        move_dest_dir = validate_under_library(body.to_subdir.strip())
+        if not move_dest_dir.exists():
+            raise HTTPException(404, "Destination folder does not exist.")
+        if not move_dest_dir.is_dir():
+            raise HTTPException(400, "Destination is not a folder.")
+
     # ── Phase 1: validate every item, no writes ──────────────────────────────
     planned: list[dict] = []
     errors: list[dict] = []
     proposed_dests: set[Path] = set()
+    # Tracks the post-rename + post-move landing paths so two items in the
+    # same batch can't both try to land at the same library/to_subdir/name.
+    proposed_move_dests: set[Path] = set()
 
     for item in body.items:
         try:
@@ -437,6 +472,32 @@ def bulk_write(body: BulkWriteIn):
             proposed_dests.add(dest_candidate)
             dest = dest_candidate
 
+        # If a move is requested, work out the landing name (post-rename
+        # when rename applies, otherwise the original) and check both
+        # disk + within-batch collisions at the destination.
+        if move_dest_dir is not None:
+            final_name = dest.name if dest is not None else src.name
+            move_target = move_dest_dir / final_name
+            if move_target.exists():
+                errors.append(
+                    {
+                        "path": item.path,
+                        "ok": False,
+                        "error": "A file with this name already exists at the destination folder.",
+                    },
+                )
+                continue
+            if move_target in proposed_move_dests:
+                errors.append(
+                    {
+                        "path": item.path,
+                        "ok": False,
+                        "error": "Another item in this batch would land at the same destination.",
+                    },
+                )
+                continue
+            proposed_move_dests.add(move_target)
+
         planned.append({"item": item, "src": src, "dest": dest})
 
     if errors:
@@ -463,6 +524,7 @@ def bulk_write(body: BulkWriteIn):
         dest: Path | None = plan["dest"]
         new_path_rel: str | None = None
 
+        moved_to_library = False
         try:
             if dest is not None:
                 src.rename(dest)
@@ -485,6 +547,17 @@ def bulk_write(body: BulkWriteIn):
             # field, but order keeps the semantic crisp.
             if body.shared.clear:
                 _clear_metadata(target, body.shared.clear)
+
+            # Move step. Runs after metadata writes so the destination
+            # file lands with the requested tags + filename in one
+            # transactional unit. shutil.move (not Path.rename) so
+            # cross-mount DOWNLOAD_PATH → LIBRARY_PATH works when the
+            # two volumes differ.
+            if move_dest_dir is not None:
+                move_target = move_dest_dir / target.name
+                shutil.move(str(target), str(move_target))
+                new_path_rel = str(move_target.relative_to(_main.LIBRARY_PATH.resolve()))
+                moved_to_library = True
         except OSError as e:
             log.error("bulk-write OSError on %s: %s", src.name, e)
             results.append(
@@ -509,6 +582,11 @@ def bulk_write(body: BulkWriteIn):
         entry: dict = {"path": item.path, "ok": True}
         if new_path_rel is not None:
             entry["new_path"] = new_path_rel
+        if moved_to_library:
+            # Signal that `new_path` is relative to LIBRARY_PATH now,
+            # not the request's `root`. Frontend uses this to refresh
+            # the right tab + re-derive the Move-to picker's anchor.
+            entry["new_root"] = "library"
         results.append(entry)
 
     return {"ok": True, "results": results}

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 import CookiesSheet from "@/components/CookiesSheet";
 import FileBrowser from "@/components/FileBrowser";
@@ -70,19 +70,16 @@ export default function App() {
         setBulkEditOpen(true);
     }
 
-    // Stable identity for the current selection — same set of paths
-    // (regardless of array reference) produces the same string. React
-    // uses this as the BulkEditSheet's `key`: a same-selection reopen
-    // hits the cached subtree (state preserved); a different selection
-    // forces a remount with a clean slate.
-    const bulkEditSelectionKey = useMemo(
-        () =>
-            bulkEditFiles
-                .map((f) => f.path)
-                .sort()
-                .join("|") || "empty",
-        [bulkEditFiles],
-    );
+    /**
+     * Drop a path from the working selection without closing the sheet.
+     * The BulkEditSheet's local per-file edits + shared values persist
+     * because the sheet is always-mounted; the parent just shrinks the
+     * `files` prop, so the row goes away but its edit (if any) stays
+     * cached in case the user re-adds the file later.
+     */
+    function removeBulkEditFile(path: string) {
+        setBulkEditFiles((prev) => prev.filter((f) => f.path !== path));
+    }
     const [extractedArtist, setExtractedArtist] = useState("");
     const [sourceMode, setSourceMode] = useState<SourceMode>("patreon");
     const [powerMode, setPowerMode] = useState<boolean>(() => loadPowerMode());
@@ -363,20 +360,22 @@ export default function App() {
                         onDictChange={setDict}
                     />
                 )}
-                {/* Content-keyed always-mount. Without this, closing the
-                    sheet (`bulkEditOpen` -> false) would unmount the
-                    component and wipe in-flight edits — the user would
-                    have to re-run Load from cached post info and re-do
-                    every change. Keying on the selection's path-set
-                    means same-selection reopens preserve state, while a
-                    fresh selection remounts with a clean slate. */}
+                {/* Always-mounted, no `key` reset. Per-file edits + shared
+                    values + load-from-cache results all live inside the
+                    sheet; keying on the selection would wipe them every
+                    time the user adds / removes files. Keying on `open`
+                    would wipe them on every close+reopen. Instead, edits
+                    are path-keyed so the user can drop a file mid-batch
+                    (X button on the row), pick up extras from the
+                    FileBrowser, and come back without retyping. State
+                    only resets on successful submit. */}
                 <BulkEditSheet
-                    key={bulkEditSelectionKey}
                     open={bulkEditOpen}
                     onClose={() => setBulkEditOpen(false)}
                     files={bulkEditFiles}
                     root={bulkEditRoot}
                     dict={dict}
+                    onRemoveFile={removeBulkEditFile}
                 />
             </Suspense>
             <CookiesSheet open={cookiesOpen} onClose={() => setCookiesOpen(false)} />

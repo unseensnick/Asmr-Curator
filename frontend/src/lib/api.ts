@@ -446,6 +446,10 @@ export interface BulkWriteRequest {
     shared: BulkWriteShared;
     rename: boolean;
     root: FileRoot;
+    /** Optional library-subdir destination. When set (and `root` is
+     *  "downloads"), each item's post-rename file moves into
+     *  LIBRARY_PATH/<to_subdir>/. Empty string / undefined = no move. */
+    to_subdir?: string;
 }
 
 export interface BulkWriteItemResult {
@@ -453,6 +457,10 @@ export interface BulkWriteItemResult {
     ok: boolean;
     error?: string;
     new_path?: string;
+    /** Present only when the item moved as part of bulk-write. Signals
+     *  that `new_path` is relative to LIBRARY_PATH instead of the
+     *  request's `root`. */
+    new_root?: FileRoot;
 }
 
 export interface BulkWriteResponse {
