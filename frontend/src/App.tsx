@@ -61,21 +61,25 @@ export default function App() {
     const [bulkEditFiles, setBulkEditFiles] = useState<FileEntry[]>([]);
     const [bulkEditRoot, setBulkEditRoot] = useState<BulkEditRoot>("library");
 
-    function openBulkEdit(selectionFiles: FileEntry[], selectionRoot: BulkEditRoot) {
+    function openBulkEdit(selectionRoot: BulkEditRoot) {
+        // The selection itself already lives in `bulkEditFiles` (the
+        // FileBrowser updates it live as the user shift-clicks /
+        // drag-selects / ctrl+A's). Opening the sheet just flips the
+        // visibility + closes the other right-side sheets so Radix focus
+        // scopes don't fight each other.
         setLibraryOpen(false);
         setCookiesOpen(false);
         setHelpOpen(false);
-        setBulkEditFiles(selectionFiles);
         setBulkEditRoot(selectionRoot);
         setBulkEditOpen(true);
     }
 
     /**
      * Drop a path from the working selection without closing the sheet.
-     * The BulkEditSheet's local per-file edits + shared values persist
-     * because the sheet is always-mounted; the parent just shrinks the
-     * `files` prop, so the row goes away but its edit (if any) stays
-     * cached in case the user re-adds the file later.
+     * `bulkEditFiles` is the controlled selection for both surfaces —
+     * removing here also unchecks the row's box in the FileBrowser
+     * because the FileBrowser derives its batch-selection set from this
+     * exact array.
      */
     function removeBulkEditFile(path: string) {
         setBulkEditFiles((prev) => prev.filter((f) => f.path !== path));
@@ -347,6 +351,8 @@ export default function App() {
                     defaultOpen={false}
                     bridgeRequest={bridgeRequest}
                     onBridgeConsumed={() => setBridgeRequest(null)}
+                    bulkSelected={bulkEditFiles}
+                    onBulkSelectedChange={setBulkEditFiles}
                     onOpenBulkEdit={openBulkEdit}
                 />
             </section>

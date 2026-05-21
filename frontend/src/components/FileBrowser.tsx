@@ -1,4 +1,13 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+    lazy,
+    Suspense,
+    useCallback,
+    useEffect,
+    useLayoutEffect,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
 import {
     AlertTriangle,
     ChevronDown,
@@ -44,11 +53,19 @@ interface FileBrowserProps {
      *  the named file + scroll into view. Parent clears via onBridgeConsumed. */
     bridgeRequest?: { path: string; filename: string } | null;
     onBridgeConsumed?: () => void;
-    /** Hand the current batch selection (2+ files) up to the parent so it
-     *  can open the BulkEditSheet with that snapshot. The parent owns the
-     *  sheet's open state + mutual-exclusion with the other right-side
-     *  sheets; we just feed the click. */
-    onOpenBulkEdit?: (files: FileEntry[], root: FileRoot) => void;
+    /** Controlled multi-selection shared with the BulkEditSheet. The
+     *  FileBrowser derives its `batchSelected` set from this list for
+     *  rendering; gestures (shift / Ctrl / Ctrl+A / drag) compute the
+     *  new selection and call `onBulkSelectedChange` with the matching
+     *  FileEntry[]. Lifted out of internal state so the X button in the
+     *  BulkEditSheet can remove a file and have the FileBrowser
+     *  immediately reflect it. */
+    bulkSelected: FileEntry[];
+    onBulkSelectedChange: (next: FileEntry[]) => void;
+    /** Open the BulkEditSheet with the current bulkSelected snapshot.
+     *  The parent already has the files (from `bulkSelected`), so this
+     *  only carries the source root. */
+    onOpenBulkEdit?: (root: FileRoot) => void;
 }
 
 interface SearchResponse {
@@ -79,6 +96,8 @@ export default function FileBrowser({
     defaultOpen = false,
     bridgeRequest = null,
     onBridgeConsumed,
+    bulkSelected,
+    onBulkSelectedChange,
     onOpenBulkEdit,
 }: FileBrowserProps) {
     // Persist the last-opened root across reloads so a user who lives in
@@ -118,23 +137,48 @@ export default function FileBrowser({
     );
     const [deleteOriginal, setDeleteOriginal] = useState(false);
 
-    // Batch state
+    // Batch state. `batchSelected` is now a DERIVED view of the
+    // controlled `bulkSelected` prop — the canonical multi-selection
+    // lives in App.tsx so the BulkEditSheet's X button can deselect a
+    // file here just by trimming the array (no separate notification).
     const [batchMode, setBatchMode] = useState(false);
-    const [batchSelected, setBatchSelected] = useState<Set<string>>(new Set());
+    const batchSelected = useMemo(() => new Set(bulkSelected.map((f) => f.path)), [bulkSelected]);
     const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null);
-    // Anchor for Shift-click range selection in the Downloads list.
-    // Tracks the row a future Shift-click should extend FROM. Plain and
-    // toggle clicks move the anchor onto themselves; the empty-area
-    // drag-clear path zeroes it (no anchor → Shift falls through to a
-    // plain click). Library tab is unaffected — it routes through the
-    // single-select / LibraryExplorerSheet flow.
-    const [downloadsAnchor, setDownloadsAnchor] = useState<string | null>(null);
+    // Anchor for Shift-click range selection. Tracks the row a future
+    // Shift-click should extend FROM. Plain and toggle clicks move the
+    // anchor onto themselves; the empty-area drag-clear path zeroes it
+    // (no anchor → Shift falls through to a plain click). Works for
+    // both tabs — the Library list gets the same OS-file-manager idioms
+    // the Downloads list does.
+    const [selectionAnchor, setSelectionAnchor] = useState<string | null>(null);
+
+    // Commit a new selection (Set<string>) by mapping the paths back to
+    // FileEntry shapes the parent can hand to the BulkEditSheet. Looks
+    // first in the current `files` list (fresh data after a search /
+    // tab switch), falling back to the existing `bulkSelected` entries
+    // so cross-tab selections survive the round trip. Anything that
+    // can't be resolved either way drops out — matches the OS-file-
+    // manager rule that a missing path isn't selectable.
+    const commitSelection = useCallback(
+        (nextPaths: Set<string>) => {
+            const byPath = new Map<string, FileEntry>();
+            for (const f of bulkSelected) byPath.set(f.path, f);
+            for (const f of files) byPath.set(f.path, f);
+            const nextFiles: FileEntry[] = [];
+            for (const p of nextPaths) {
+                const entry = byPath.get(p);
+                if (entry) nextFiles.push(entry);
+            }
+            onBulkSelectedChange(nextFiles);
+        },
+        [bulkSelected, files, onBulkSelectedChange],
+    );
 
     // Live mirror of `batchSelected` for useDragSelect's mousedown to
     // capture without leaning on a closure over render-time state. The
     // hook reads this ref at the start of each drag so concurrent
     // toggles between drags don't desync the base selection.
-    const batchSelectedRef = useRef<Set<string>>(new Set());
+    const batchSelectedRef = useRef<Set<string>>(batchSelected);
     useEffect(() => {
         batchSelectedRef.current = batchSelected;
     }, [batchSelected]);
@@ -142,36 +186,38 @@ export default function FileBrowser({
     // ref. A constant null means "never block dragging on a rename".
     const renamePathRef = useRef<string | null>(null);
 
-    // Wrapped setters that enter batch mode + clear the single-select
+    // Wrapped setter that enters batch mode + clears the single-select
     // anchor whenever a multi-select drag yields any rows. Plain empty
-    // drags fall straight through to `setBatchSelected(new Set())` which
-    // leaves batchMode alone.
-    const setBatchSelectedFromDrag = useCallback((next: Set<string>) => {
-        if (next.size > 0) {
-            setBatchMode(true);
-            setSelected(null);
-        }
-        setBatchSelected(next);
-    }, []);
+    // drags fall through to `commitSelection(new Set())` which leaves
+    // batchMode alone.
+    const setBatchSelectedFromDrag = useCallback(
+        (next: Set<string>) => {
+            if (next.size > 0) {
+                setBatchMode(true);
+                setSelected(null);
+            }
+            commitSelection(next);
+        },
+        [commitSelection],
+    );
 
-    const dragSelectActive = root === "downloads";
     const {
-        scrollContainerRef: downloadsScrollRef,
-        onMouseDown: handleDownloadsMouseDown,
+        scrollContainerRef: listScrollRef,
+        onMouseDown: handleListMouseDown,
         dragRect,
         cleanup: cleanupDragSelect,
     } = useDragSelect({
         selectedPathsRef: batchSelectedRef,
         renamePathRef,
         setSelectedPaths: setBatchSelectedFromDrag,
-        setAnchorPath: setDownloadsAnchor,
+        setAnchorPath: setSelectionAnchor,
     });
-    // Tear down any in-flight drag when the user switches off the
-    // Downloads tab. Without this the window listeners would race a
-    // re-render that swaps the underlying rows out.
+    // Tear down any in-flight drag when the root flips — the underlying
+    // rows swap out and the window listeners would race the re-render
+    // otherwise.
     useEffect(() => {
-        if (!dragSelectActive) cleanupDragSelect();
-    }, [dragSelectActive, cleanupDragSelect]);
+        return () => cleanupDragSelect();
+    }, [root, cleanupDragSelect]);
 
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const rootRef = useRef<HTMLDivElement | null>(null);
@@ -279,7 +325,7 @@ export default function FileBrowser({
         setOpen(true);
         if (root !== "downloads") {
             setRoot("downloads");
-            setBatchSelected(new Set());
+            commitSelection(new Set());
             loadFiles(query, searchMode, "downloads");
         }
         const ext = filename.match(/(\.[^.]+)$/)?.[1]?.toLowerCase() ?? "";
@@ -307,7 +353,12 @@ export default function FileBrowser({
         if (next === root) return;
         setRoot(next);
         setSelected(null);
-        setBatchSelected(new Set());
+        // Selection follows the tab — paths from the other root aren't
+        // selectable here anyway, and the BulkEditSheet only handles one
+        // root at a time. Clearing on switch avoids a stale snapshot
+        // bleeding into the next bulk-edit session.
+        commitSelection(new Set());
+        setSelectionAnchor(null);
         loadFiles(query, searchMode, next);
     }
 
@@ -317,53 +368,50 @@ export default function FileBrowser({
         const paths = files
             .filter((f) => NEEDS_CONVERSION_EXTS.has(f.ext) || !!f.needs_conversion)
             .map((f) => f.path);
-        setBatchSelected(new Set(paths));
+        commitSelection(new Set(paths));
     }
 
     function toggleBatch(path: string) {
-        setBatchSelected((prev) => {
-            const next = new Set(prev);
-            if (next.has(path)) next.delete(path);
-            else next.add(path);
-            return next;
-        });
+        const next = new Set(batchSelected);
+        if (next.has(path)) next.delete(path);
+        else next.add(path);
+        commitSelection(next);
     }
 
     /**
-     * Click handler for a Downloads-list row. Routes the click through the
-     * shared selection model used by `LibraryExplorerSheet` so users get
-     * the same OS-file-manager idioms in both surfaces — Shift extends
-     * from the anchor, Ctrl/Cmd toggles in place, plain click replaces
-     * the selection (or single-selects when no multi-select is active).
+     * Click handler for a row in the file list. Routes the click through
+     * the shared selection model used by `LibraryExplorerSheet` so users
+     * get the same OS-file-manager idioms — Shift extends from the
+     * anchor, Ctrl/Cmd toggles in place, plain click replaces the
+     * selection (or single-selects when no multi-select is active).
      *
-     * The first modifier-bearing click in Downloads also flips batchMode
-     * on so the Bulk-edit button + per-row checkboxes appear without an
-     * extra step. Library tab is unaffected — it keeps the single-click
-     * → SelectedFilePanel flow it had before (multi-select for Library
-     * lives in `LibraryExplorerSheet`).
+     * The first modifier-bearing click also flips batchMode on so the
+     * Bulk-edit button + per-row checkboxes appear without an extra
+     * step. Works in both tabs — the Library list shares the gestures
+     * the Downloads list had before.
      */
-    function handleDownloadsClick(file: FileEntry, modifiers: { shift: boolean; toggle: boolean }) {
+    function handleListClick(file: FileEntry, modifiers: { shift: boolean; toggle: boolean }) {
         const isMulti = modifiers.shift || modifiers.toggle;
 
         if (isMulti) {
-            // Multi-select gesture in Downloads. Seed the previous set:
-            // if the user had a single file selected via plain click,
-            // carry it into the multi-selection so Ctrl-clicking a second
-            // file ends up with two rows highlighted (matches Finder /
-            // Explorer's behaviour). batchMode flips on lazily — the
-            // gesture is the entry point.
+            // Multi-select gesture. Seed the previous set: if the user
+            // had a single file selected via plain click, carry it into
+            // the multi-selection so Ctrl-clicking a second file ends
+            // up with two rows highlighted (matches Finder / Explorer's
+            // behaviour). batchMode flips on lazily — the gesture is
+            // the entry point.
             const seed = !batchMode && selected ? new Set([selected.path]) : batchSelected;
             const anchor =
                 !batchMode && selected
                     ? selected.path
-                    : (downloadsAnchor ?? selected?.path ?? null);
+                    : (selectionAnchor ?? selected?.path ?? null);
             const update = selectionFromClick(files, seed, anchor, file.path, modifiers);
             if (!batchMode) {
                 setBatchMode(true);
                 setSelected(null);
             }
-            setBatchSelected(update.selected);
-            setDownloadsAnchor(update.anchor);
+            commitSelection(update.selected);
+            setSelectionAnchor(update.anchor);
             return;
         }
 
@@ -372,25 +420,21 @@ export default function FileBrowser({
             // the anchor onto the clicked row so a follow-up Shift-click
             // ranges from there.
             toggleBatch(file.path);
-            setDownloadsAnchor(file.path);
+            setSelectionAnchor(file.path);
             return;
         }
 
-        // Default Downloads single-click — open the file in the work
-        // area. Clicking the already-selected file deselects (matches
-        // pre-multi-select behaviour).
+        // Default plain single-click — open the file in the work area.
+        // Clicking the already-selected file deselects.
         setSelected(selected?.path === file.path ? null : file);
     }
 
-    // Downloads-tab keyboard shortcuts:
+    // File-list keyboard shortcuts (both tabs):
     //   • Ctrl/Cmd+A — select every visible row, engage batchMode
     //   • Esc       — deselect everything (matches OS file-manager idiom)
-    // Library tab leaves both to the browser default — multi-select for
-    // Library lives in LibraryExplorerSheet, which has its own handlers.
-    // Both shortcuts bail when the user is typing inside an input so the
-    // search box doesn't lose its own Esc-to-clear behaviour.
+    // Bails when the user is typing inside an input so the search box
+    // doesn't lose its own Esc-to-clear behaviour.
     useEffect(() => {
-        if (root !== "downloads") return;
         const handler = (e: KeyboardEvent) => {
             const target = e.target as HTMLElement | null;
             const tag = target?.tagName ?? "";
@@ -406,8 +450,8 @@ export default function FileBrowser({
                         setBatchMode(true);
                         setSelected(null);
                     }
-                    setBatchSelected(update.selected);
-                    setDownloadsAnchor(update.anchor);
+                    commitSelection(update.selected);
+                    setSelectionAnchor(update.anchor);
                     return;
                 }
             }
@@ -417,14 +461,14 @@ export default function FileBrowser({
                 // through to any ancestor (Sheet close, dialog dismiss).
                 if (batchSelected.size === 0 && !selected) return;
                 e.preventDefault();
-                if (batchSelected.size > 0) setBatchSelected(new Set());
-                if (downloadsAnchor) setDownloadsAnchor(null);
+                if (batchSelected.size > 0) commitSelection(new Set());
+                if (selectionAnchor) setSelectionAnchor(null);
                 if (selected) setSelected(null);
             }
         };
         document.addEventListener("keydown", handler);
         return () => document.removeEventListener("keydown", handler);
-    }, [root, files, batchMode, batchSelected, selected, downloadsAnchor]);
+    }, [files, batchMode, batchSelected, selected, selectionAnchor, commitSelection]);
 
     async function handleBatchConvert() {
         const filesToConvert = files.filter((f) => batchSelected.has(f.path));
@@ -469,13 +513,14 @@ export default function FileBrowser({
             currentFile: "",
             results: [...results],
         });
-        setBatchSelected(new Set());
+        commitSelection(new Set());
         await loadFiles(query, searchMode, root);
     }
 
     function toggleBatchMode() {
         setBatchMode((v) => !v);
-        setBatchSelected(new Set());
+        commitSelection(new Set());
+        setSelectionAnchor(null);
         setBatchProgress(null);
     }
 
@@ -573,20 +618,10 @@ export default function FileBrowser({
                                           ? "No matching downloads."
                                           : "No pending downloads."
                                 }
-                                onSelect={(file, modifiers) => {
-                                    if (root === "downloads") {
-                                        handleDownloadsClick(file, modifiers);
-                                        return;
-                                    }
-                                    // Library tab keeps its single-select
-                                    // behaviour — multi-select for Library
-                                    // lives in LibraryExplorerSheet.
-                                    setSelected(selected?.path === file.path ? null : file);
-                                }}
+                                onSelect={handleListClick}
                                 onBatchToggle={toggleBatch}
-                                dragSelectActive={dragSelectActive}
-                                scrollContainerRef={downloadsScrollRef}
-                                onContainerMouseDown={handleDownloadsMouseDown}
+                                scrollContainerRef={listScrollRef}
+                                onContainerMouseDown={handleListMouseDown}
                                 dragRect={dragRect}
                             />
                             <WorkArea
@@ -601,24 +636,14 @@ export default function FileBrowser({
                                 onConvertQualityChange={setConvertQuality}
                                 onDeleteOriginalChange={setDeleteOriginal}
                                 onSelectAllConvertible={selectAllConvertible}
-                                onClearBatch={() => setBatchSelected(new Set())}
+                                onClearBatch={() => {
+                                    commitSelection(new Set());
+                                    setSelectionAnchor(null);
+                                }}
                                 onBatchConvert={handleBatchConvert}
                                 onClearBatchResults={() => setBatchProgress(null)}
                                 onOpenBulkEdit={
-                                    onOpenBulkEdit
-                                        ? () => {
-                                              // Snapshot the current selection
-                                              // at click time — the sheet
-                                              // mounts with this list and
-                                              // later toggling files in/out
-                                              // of batchSelected doesn't
-                                              // mutate the open sheet.
-                                              onOpenBulkEdit(
-                                                  files.filter((f) => batchSelected.has(f.path)),
-                                                  root,
-                                              );
-                                          }
-                                        : undefined
+                                    onOpenBulkEdit ? () => onOpenBulkEdit(root) : undefined
                                 }
                                 selected={selected}
                                 outputDash={outputDash}
@@ -665,7 +690,8 @@ export default function FileBrowser({
                             // over. Mirrors the Patreon-bridge handoff.
                             if (root !== pickedRoot) {
                                 setRoot(pickedRoot);
-                                setBatchSelected(new Set());
+                                commitSelection(new Set());
+                                setSelectionAnchor(null);
                                 loadFiles(query, searchMode, pickedRoot);
                             }
                             setSelected(file);
@@ -801,14 +827,11 @@ interface FileListProps {
     emptyText: string;
     onSelect: (file: FileEntry, modifiers: { shift: boolean; toggle: boolean }) => void;
     onBatchToggle: (path: string) => void;
-    /** When true (Downloads tab), the list owns its scroll container ref
-     *  and listens for drag-rubber-band gestures. Library leaves all of
-     *  this undefined; the conditional render below skips the overlay
-     *  and the ref/handler are never wired. */
-    dragSelectActive?: boolean;
-    scrollContainerRef?: React.MutableRefObject<HTMLDivElement | null>;
-    onContainerMouseDown?: (e: React.MouseEvent<HTMLDivElement>) => void;
-    dragRect?: DragRect | null;
+    /** Shared with the useDragSelect hook upstream so the rubber-band's
+     *  coordinate frame matches the same DOM that holds the rows. */
+    scrollContainerRef: React.MutableRefObject<HTMLDivElement | null>;
+    onContainerMouseDown: (e: React.MouseEvent<HTMLDivElement>) => void;
+    dragRect: DragRect | null;
 }
 
 function FileList({
@@ -820,7 +843,6 @@ function FileList({
     emptyText,
     onSelect,
     onBatchToggle,
-    dragSelectActive = false,
     scrollContainerRef,
     onContainerMouseDown,
     dragRect,
@@ -835,8 +857,8 @@ function FileList({
         <div
             aria-label="File list"
             aria-busy={loading}
-            ref={dragSelectActive ? scrollContainerRef : undefined}
-            onMouseDown={dragSelectActive ? onContainerMouseDown : undefined}
+            ref={scrollContainerRef}
+            onMouseDown={onContainerMouseDown}
             className="bg-muted/40 border border-border rounded-md overflow-y-auto max-h-[28rem] min-h-40 relative select-none"
         >
             {loading ? (
@@ -865,12 +887,7 @@ function FileList({
                             // original toggle-the-checkbox behaviour;
                             // anything modifier-bearing falls through to
                             // the parent's gesture-aware handler.
-                            if (
-                                batchMode &&
-                                !modifiers.shift &&
-                                !modifiers.toggle &&
-                                !dragSelectActive
-                            ) {
+                            if (batchMode && !modifiers.shift && !modifiers.toggle) {
                                 onBatchToggle(file.path);
                                 return;
                             }
@@ -884,9 +901,7 @@ function FileList({
                 element inside the scroll container so the rectangle sits
                 visually on top of the rows. The hook itself owns the
                 math; we just paint what it tells us. */}
-            {dragSelectActive && dragRect && scrollContainerRef && (
-                <DragSelectOverlay rect={dragRect} containerRef={scrollContainerRef} />
-            )}
+            {dragRect && <DragSelectOverlay rect={dragRect} containerRef={scrollContainerRef} />}
         </div>
     );
 }
