@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { AlertTriangle, File, Music2 } from "lucide-react";
 
 import { Checkbox } from "@/components/ui/checkbox";
@@ -12,11 +12,11 @@ interface FileBrowserItemProps {
     isSelected: boolean;
     batchMode: boolean;
     isBatchSelected: boolean;
-    /** Receives the modifiers the user held during the click. The parent
-     *  decides what to do (toggle in batch mode, range-select on Shift,
-     *  toggle individual on Ctrl/Cmd, plain single-select otherwise). */
-    onClick: (modifiers: { shift: boolean; toggle: boolean }) => void;
-    onBatchToggle: () => void;
+    /** Parent receives both the row's file and the click modifiers, so the
+     *  handler doesn't have to close over `file` per row (which would mint
+     *  a fresh function per render and defeat memoization). */
+    onClick: (file: FileEntry, modifiers: { shift: boolean; toggle: boolean }) => void;
+    onBatchToggle: (path: string) => void;
     /** Inline-rename state. When `renaming` is true the row swaps the
      *  filename label for an Input — Enter commits via `onRenameSubmit`,
      *  Escape aborts via `onRenameCancel`, blur commits like Enter
@@ -49,7 +49,7 @@ interface FileBrowserItemProps {
  * the LibraryExplorerSheet uses, just inline in this row template so
  * right-click → Rename in the FileBrowser feels identical.
  */
-export default function FileBrowserItem({
+function FileBrowserItemImpl({
     file,
     isSelected,
     batchMode,
@@ -130,7 +130,7 @@ export default function FileBrowserItem({
                     // dragged rectangle.
                     data-entry-path={file.path}
                     onClick={(e) =>
-                        onClick({
+                        onClick(file, {
                             shift: e.shiftKey,
                             toggle: e.ctrlKey || e.metaKey,
                         })
@@ -138,7 +138,7 @@ export default function FileBrowserItem({
                     onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault();
-                            onClick({
+                            onClick(file, {
                                 shift: e.shiftKey,
                                 toggle: e.ctrlKey || e.metaKey,
                             });
@@ -149,7 +149,7 @@ export default function FileBrowserItem({
                     {batchMode && (
                         <Checkbox
                             checked={isBatchSelected}
-                            onCheckedChange={onBatchToggle}
+                            onCheckedChange={() => onBatchToggle(file.path)}
                             onClick={(e) => e.stopPropagation()}
                             className="shrink-0"
                         />
@@ -181,6 +181,30 @@ export default function FileBrowserItem({
         </Tooltip>
     );
 }
+
+/** Custom equality so a parent re-render (drag-mousemove, batchSelected
+ *  set identity churn, App-state churn) doesn't re-render every row.
+ *  Compares the primitive props that actually visually change. The callback
+ *  props (onClick / onBatchToggle / rename callbacks) are accepted as stable
+ *  references from the parent — see FileBrowser's useCallback wrappers. */
+function arePropsEqual(prev: FileBrowserItemProps, next: FileBrowserItemProps): boolean {
+    return (
+        prev.file === next.file &&
+        prev.isSelected === next.isSelected &&
+        prev.batchMode === next.batchMode &&
+        prev.isBatchSelected === next.isBatchSelected &&
+        prev.renaming === next.renaming &&
+        prev.renameValue === next.renameValue &&
+        prev.onClick === next.onClick &&
+        prev.onBatchToggle === next.onBatchToggle &&
+        prev.onRenameChange === next.onRenameChange &&
+        prev.onRenameSubmit === next.onRenameSubmit &&
+        prev.onRenameCancel === next.onRenameCancel
+    );
+}
+
+const FileBrowserItem = memo(FileBrowserItemImpl, arePropsEqual);
+export default FileBrowserItem;
 
 function FileIcon({ ext }: { ext: string }) {
     if (NEEDS_CONVERSION_EXTS.has(ext))

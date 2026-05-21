@@ -415,63 +415,78 @@ export default function FileBrowser({
         commitSelection(new Set(paths));
     }
 
-    function toggleBatch(path: string) {
-        const next = new Set(batchSelected);
-        if (next.has(path)) next.delete(path);
-        else next.add(path);
-        commitSelection(next);
-    }
+    // Live mirrors so the click handlers below stay reference-stable
+    // (useCallback with empty deps). Without this, every parent re-render
+    // would mint fresh handler identities, blowing the FileBrowserItem
+    // memoization on every drag-mousemove / batch state churn.
+    const selectedRef = useRef<FileEntry | null>(selected);
+    const batchModeRef = useRef<boolean>(batchMode);
+    const selectionAnchorRef = useRef<string | null>(selectionAnchor);
+    const filesRef = useRef<FileEntry[]>(files);
+    useEffect(() => {
+        selectedRef.current = selected;
+    }, [selected]);
+    useEffect(() => {
+        batchModeRef.current = batchMode;
+    }, [batchMode]);
+    useEffect(() => {
+        selectionAnchorRef.current = selectionAnchor;
+    }, [selectionAnchor]);
+    useEffect(() => {
+        filesRef.current = files;
+    }, [files]);
 
-    /**
-     * Click handler for a row in the file list. Routes the click through
-     * the shared selection model used by `LibraryExplorerSheet` so users
-     * get the same OS-file-manager idioms — Shift extends from the
-     * anchor, Ctrl/Cmd toggles in place, plain click replaces the
-     * selection (or single-selects when no multi-select is active).
-     *
-     * The first modifier-bearing click also flips batchMode on so the
-     * Bulk-edit button + per-row checkboxes appear without an extra
-     * step. Works in both tabs — the Library list shares the gestures
-     * the Downloads list had before.
-     */
-    function handleListClick(file: FileEntry, modifiers: { shift: boolean; toggle: boolean }) {
-        const isMulti = modifiers.shift || modifiers.toggle;
+    const toggleBatch = useCallback(
+        (path: string) => {
+            const next = new Set(batchSelectedRef.current);
+            if (next.has(path)) next.delete(path);
+            else next.add(path);
+            commitSelection(next);
+        },
+        [commitSelection],
+    );
 
-        if (isMulti) {
-            // Multi-select gesture. Seed the previous set: if the user
-            // had a single file selected via plain click, carry it into
-            // the multi-selection so Ctrl-clicking a second file ends
-            // up with two rows highlighted (matches Finder / Explorer's
-            // behaviour). batchMode flips on lazily — the gesture is
-            // the entry point.
-            const seed = !batchMode && selected ? new Set([selected.path]) : batchSelected;
-            const anchor =
-                !batchMode && selected
-                    ? selected.path
-                    : (selectionAnchor ?? selected?.path ?? null);
-            const update = selectionFromClick(files, seed, anchor, file.path, modifiers);
-            if (!batchMode) {
-                setBatchMode(true);
-                setSelected(null);
+    const handleListClick = useCallback(
+        (file: FileEntry, modifiers: { shift: boolean; toggle: boolean }) => {
+            const isMulti = modifiers.shift || modifiers.toggle;
+            const inBatchMode = batchModeRef.current;
+            const currentSelected = selectedRef.current;
+
+            if (isMulti) {
+                const seed =
+                    !inBatchMode && currentSelected
+                        ? new Set([currentSelected.path])
+                        : batchSelectedRef.current;
+                const anchor =
+                    !inBatchMode && currentSelected
+                        ? currentSelected.path
+                        : (selectionAnchorRef.current ?? currentSelected?.path ?? null);
+                const update = selectionFromClick(
+                    filesRef.current,
+                    seed,
+                    anchor,
+                    file.path,
+                    modifiers,
+                );
+                if (!inBatchMode) {
+                    setBatchMode(true);
+                    setSelected(null);
+                }
+                commitSelection(update.selected);
+                setSelectionAnchor(update.anchor);
+                return;
             }
-            commitSelection(update.selected);
-            setSelectionAnchor(update.anchor);
-            return;
-        }
 
-        if (batchMode) {
-            // Plain click while in batchMode toggles the checkbox + moves
-            // the anchor onto the clicked row so a follow-up Shift-click
-            // ranges from there.
-            toggleBatch(file.path);
-            setSelectionAnchor(file.path);
-            return;
-        }
+            if (inBatchMode) {
+                toggleBatch(file.path);
+                setSelectionAnchor(file.path);
+                return;
+            }
 
-        // Default plain single-click — open the file in the work area.
-        // Clicking the already-selected file deselects.
-        setSelected(selected?.path === file.path ? null : file);
-    }
+            setSelected(currentSelected?.path === file.path ? null : file);
+        },
+        [commitSelection, toggleBatch],
+    );
 
     // File-list keyboard shortcuts (both tabs):
     //   • Ctrl/Cmd+A — select every visible row, engage batchMode
@@ -1247,18 +1262,8 @@ function FileList({
                         onRenameChange={onRenameChange}
                         onRenameSubmit={onRenameSubmit}
                         onRenameCancel={onRenameCancel}
-                        onClick={(modifiers) => {
-                            // batchMode without modifiers keeps the
-                            // original toggle-the-checkbox behaviour;
-                            // anything modifier-bearing falls through to
-                            // the parent's gesture-aware handler.
-                            if (batchMode && !modifiers.shift && !modifiers.toggle) {
-                                onBatchToggle(file.path);
-                                return;
-                            }
-                            onSelect(file, modifiers);
-                        }}
-                        onBatchToggle={() => onBatchToggle(file.path)}
+                        onClick={onSelect}
+                        onBatchToggle={onBatchToggle}
                     />
                 ))
             )}
