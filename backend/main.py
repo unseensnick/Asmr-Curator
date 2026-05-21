@@ -1,12 +1,9 @@
-"""FastAPI app construction + shared backend helpers.
+"""FastAPI app construction + shared helpers.
 
-This module assembles the app (lifespan, SPA fallback, router registration)
-and exposes the dependencies every route module pulls in: path validators
-(`validate_under_*`), env-resolved roots (`LIBRARY_PATH`, `DOWNLOAD_PATH`),
-metadata-writer (`_write_metadata`), audio-format tables, subprocess-timeout
-constants, and the small validation helpers (`require_non_empty`,
-`require_file`, `reject_if_exists`, `root_for`). Route handlers themselves
-live under `backend/routes/`.
+Owns app assembly (lifespan, SPA fallback, router registration), path
+validators, env-resolved roots, audio-format tables, and a few small
+validation helpers. Route handlers live under `backend/routes/`; audio
+metadata reads / writes live in `backend.audio_metadata`.
 """
 
 import logging
@@ -24,9 +21,6 @@ from fastapi.staticfiles import StaticFiles
 from backend import drive_fetch
 from backend.audio_utils import AUDIO_FORMATS_CONFIG
 
-# Audio format sets derived from the shared config in audio_utils. The
-# frontend reads the same audio-formats.json, so adding a new extension
-# in one place propagates to both halves automatically.
 _FORMATS_CONFIG = AUDIO_FORMATS_CONFIG
 
 log = logging.getLogger("asmr_curator")

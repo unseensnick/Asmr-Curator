@@ -1,23 +1,16 @@
-"""Headless-Chromium scrape of a Google Drive viewer URL → cleaned playback URL → download.
+"""Headless-Chromium scrape of a Drive viewer URL into the playback URL,
+then download the audio bytes.
 
 Drive's signed `videoplayback?...` URL only materialises once the player
-iframe initialises. Server-side requests with just the file ID don't work
-for view-only files — the player has to emit the URL. Once emitted, stripping
-`ump` + `range` returns the full file in one response.
+iframe loads. Downloads must run through the same Playwright
+BrowserContext that captured the URL — Drive's CDN fingerprints the
+cleaned URL against the originating session and silently returns zero
+bytes to anything else (so httpx reuse won't work).
 
-Downloads run through the **same Playwright BrowserContext** that captured
-the URL. Drive's CDN fingerprints the cleaned URL against its originating
-session (TLS, HTTP/2, cookies, request shape) and silently sends zero body
-bytes to anything that doesn't match — httpx-based reuse of the same URL
-returns nothing. `context.request.get(...)` reuses the live session.
-
-Playwright (~200 MB Chromium) is imported lazily inside `fetch_drive_audio`
-so the rest of the backend works when it's absent.
-
-`fetch_drive_audio(on_progress=cb)` emits state-transition events
-(`launching_browser` → `loading_page` → … → `done`) and ~500 ms heartbeats
-during download. The `/api/patreon/ingest-drive-link` handler in
-`backend/main.py` reshapes these into SSE.
+Playwright is imported lazily (~200 MB Chromium) so the rest of the
+backend boots without it. `fetch_drive_audio(on_progress=cb)` emits
+state-transition events that the patreon ingest-drive-link route
+reshapes into SSE.
 """
 
 from __future__ import annotations

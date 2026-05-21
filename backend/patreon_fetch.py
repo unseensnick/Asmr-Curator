@@ -32,10 +32,8 @@ AUDIO_EXTS = set(AUDIO_FORMATS_CONFIG["metadataCompatibleExts"]) | set(
     AUDIO_FORMATS_CONFIG["needsConversionExts"]
 )
 
-# patreon-dl's media-type vocabulary plus our synthetic `external` flag.
-# `external` signals `_write_config` to drop the `posts.with.media.type`
-# filter so posts whose only audio is a Drive URL still surface — patreon-dl
-# never sees the literal string.
+# patreon-dl media types + the synthetic `external` flag (which drops the
+# media-type filter so Drive-only posts still surface).
 ALLOWED_CONTENT_TYPES = ("audio", "video", "image", "attachment", "external")
 
 
@@ -43,10 +41,8 @@ class PatreonFetchError(RuntimeError):
     """Raised when patreon-dl fails or returns no usable content."""
 
 
-# File-host links surfaced on FetchedPost.external_links so the frontend
-# can flag the post for the per-link Download flow. Drive-only auto-capture
-# happens server-side via `backend.drive_fetch`; the others surface as
-# plain links the user opens manually.
+# Hosts whose URLs surface on FetchedPost.external_links. Drive scrapes
+# server-side; the rest surface as plain links the user opens manually.
 EXTERNAL_HOST_ALLOWLIST = (
     "drive.google.com",
     "mega.nz",
