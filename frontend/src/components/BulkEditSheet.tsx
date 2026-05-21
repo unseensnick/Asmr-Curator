@@ -671,6 +671,38 @@ export default function BulkEditSheet({
             <SheetContent
                 className="w-full sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl overflow-hidden"
                 showCloseButton={false}
+                onEscapeKeyDown={(e) => {
+                    // Cascading Esc, same pattern as LibraryExplorerSheet:
+                    // peel off one layer of transient state at a time
+                    // before letting Escape close the Sheet. Sequence is
+                    // ordered by destruction blast radius — feedback /
+                    // error banners go first (no work lost), then a full
+                    // Clear of in-flight edits (Clear-all semantics),
+                    // then the default close path.
+                    if (submitError) {
+                        e.preventDefault();
+                        setSubmitError(null);
+                        return;
+                    }
+                    if (loadFeedback.kind !== "none") {
+                        e.preventDefault();
+                        setLoadFeedback({ kind: "none" });
+                        return;
+                    }
+                    const hasState =
+                        Object.keys(edits).length > 0 ||
+                        Boolean(shared.artist || shared.album || shared.album_artist) ||
+                        clearFields.size > 0 ||
+                        mixedFields.size > 0 ||
+                        rename ||
+                        moveEnabled;
+                    if (hasState) {
+                        e.preventDefault();
+                        handleClearAll();
+                        return;
+                    }
+                    // Nothing transient to dismiss — let the Sheet close.
+                }}
             >
                 <SheetTitle className="sr-only">Bulk edit</SheetTitle>
                 <SheetDescription className="sr-only">

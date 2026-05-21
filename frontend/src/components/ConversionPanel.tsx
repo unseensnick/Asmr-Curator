@@ -62,19 +62,23 @@ export default function ConversionPanel({
                         Lossless (CD quality)
                     </span>
                 ) : (
+                    // Chip layout matching PatreonPanel's "Also include"
+                    // group — separated rounded pills with their own
+                    // borders, not a segmented control. The Conversion
+                    // surface uses the same filter-chip language so the
+                    // controls read as the same kind of toggle wherever
+                    // they appear.
                     <ToggleGroup
                         type="single"
                         value={quality}
                         onValueChange={(v) => v && onQualityChange(v as ConvertQuality)}
-                        className="border border-border rounded-md overflow-hidden gap-0"
+                        className="flex flex-wrap gap-1.5"
                     >
                         {QUALITY_VALUES.map((q) => (
                             <ToggleGroupItem
                                 key={q}
                                 value={q}
-                                className={
-                                    "text-sm px-3 py-1.5 h-auto rounded-none! border-r border-border last:border-r-0 bg-background text-muted-foreground hover:text-foreground data-[state=on]:bg-accent data-[state=on]:text-accent-foreground data-[state=on]:border-accent"
-                                }
+                                className="text-sm px-3 py-1.5 h-auto rounded-md border border-border bg-background text-muted-foreground hover:text-foreground hover:border-muted-foreground/30 data-[state=on]:bg-accent data-[state=on]:text-accent-foreground data-[state=on]:border-transparent"
                             >
                                 {QUALITY_LABELS[q]}
                             </ToggleGroupItem>

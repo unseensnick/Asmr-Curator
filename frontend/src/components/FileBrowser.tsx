@@ -15,13 +15,32 @@ import {
     FolderOpen,
     ListChecks,
     Loader2,
+    PenLine,
     RefreshCw,
     Repeat,
+    Trash2,
 } from "lucide-react";
 
 import ConversionPanel from "@/components/ConversionPanel";
 import FileBrowserItem from "@/components/FileBrowserItem";
 import SelectedFilePanel from "@/components/SelectedFilePanel";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+    ContextMenu,
+    ContextMenuContent,
+    ContextMenuItem,
+    ContextMenuSeparator,
+    ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 
 // LibraryExplorerSheet is the 2100-line Browse Sheet (drag-select grid +
 // keyboard nav + Cut/Paste + rename + delete). Only renders when the user
@@ -156,6 +175,25 @@ export default function FileBrowser({
     // both tabs — the Library list gets the same OS-file-manager idioms
     // the Downloads list does.
     const [selectionAnchor, setSelectionAnchor] = useState<string | null>(null);
+
+    // Context-menu state. `menuTarget` is the file the user right-clicked
+    // (resolved from the row's `data-entry-path`); the menu reads it to
+    // know whether to render bulk-context items or single-context ones.
+    // Mirrors the LibraryExplorerSheet pattern so right-click feels the
+    // same in both surfaces.
+    const [menuTarget, setMenuTarget] = useState<FileEntry | null>(null);
+    // Inline-rename state. The targeted row swaps its filename label for
+    // an Input; Enter commits via /api/rename-path, Escape aborts.
+    const [renamePath, setRenamePath] = useState<string | null>(null);
+    const [renameValue, setRenameValue] = useState("");
+    // Delete-confirm state. A single file gets a one-row prompt; a bulk
+    // delete shows the first few names + the count so the user can
+    // sanity-check before committing.
+    const [deleteCandidate, setDeleteCandidate] = useState<{
+        files: FileEntry[];
+        kind: "single" | "bulk";
+    } | null>(null);
+    const [deleteBusy, setDeleteBusy] = useState(false);
 
     // Commit a new selection (Set<string>) by mapping the paths back to
     // FileEntry shapes the parent can hand to the BulkEditSheet. Looks
@@ -529,186 +567,447 @@ export default function FileBrowser({
         setBatchProgress(null);
     }
 
+    // ── Context menu + inline rename + delete ─────────────────────────────────
+
+    /** Resolves the row the user right-clicked on by walking up from the
+     *  event target to the closest `data-entry-path` element — same
+     *  contract `useDragSelect` uses for hit-testing. Sets `menuTarget`
+     *  so the ContextMenuContent can pick the right items to render. */
+    const resolveMenuTarget = useCallback(
+        (e: React.MouseEvent) => {
+            const row = (e.target as HTMLElement | null)?.closest?.("[data-entry-path]");
+            if (!row) {
+                setMenuTarget(null);
+                return;
+            }
+            const path = row.getAttribute("data-entry-path");
+            setMenuTarget(files.find((f) => f.path === path) ?? null);
+        },
+        [files],
+    );
+
+    function startRename(file: FileEntry) {
+        setRenamePath(file.path);
+        setRenameValue(file.name);
+    }
+
+    function cancelRename() {
+        setRenamePath(null);
+        setRenameValue("");
+    }
+
+    async function commitRename() {
+        if (!renamePath) return;
+        const target = files.find((f) => f.path === renamePath);
+        if (!target) {
+            cancelRename();
+            return;
+        }
+        const next = renameValue.trim();
+        if (!next || next === target.name) {
+            cancelRename();
+            return;
+        }
+        try {
+            await apiPost(API.renamePath, {
+                path: target.path,
+                new_name: next,
+                root,
+            });
+            cancelRename();
+            await loadFiles(query, searchMode, root);
+            if (root === "downloads") refreshDownloadsCount();
+        } catch (e) {
+            setError("Rename failed. " + getErrorMessage(e));
+            cancelRename();
+        }
+    }
+
+    function requestDelete(file: FileEntry) {
+        setDeleteCandidate({ files: [file], kind: "single" });
+    }
+
+    function requestDeleteBulk() {
+        if (bulkSelected.length === 0) return;
+        setDeleteCandidate({ files: bulkSelected, kind: "bulk" });
+    }
+
+    async function confirmDelete() {
+        const candidate = deleteCandidate;
+        if (!candidate) return;
+        setDeleteBusy(true);
+        const failures: string[] = [];
+        for (const file of candidate.files) {
+            try {
+                await apiPost(API.delete, { path: file.path, root, recursive: false });
+            } catch (e) {
+                failures.push(`${file.name}: ${getErrorMessage(e)}`);
+            }
+        }
+        setDeleteBusy(false);
+        setDeleteCandidate(null);
+        if (candidate.kind === "bulk") {
+            // Drop the deleted paths from the controlled selection so the
+            // BulkEditSheet + the FileBrowser stop highlighting them.
+            const deletedPaths = new Set(candidate.files.map((f) => f.path));
+            const remaining = bulkSelected.filter((f) => !deletedPaths.has(f.path));
+            onBulkSelectedChange(remaining);
+        }
+        if (selected && candidate.files.some((f) => f.path === selected.path)) {
+            setSelected(null);
+        }
+        await loadFiles(query, searchMode, root);
+        if (root === "downloads") refreshDownloadsCount();
+        if (failures.length > 0) {
+            setError(`Couldn't delete ${failures.length} of ${candidate.files.length} files.`);
+        }
+    }
+
     // ── Render ────────────────────────────────────────────────────────────
 
     return (
-        <Collapsible open={open} onOpenChange={setOpen}>
-            <div
-                ref={rootRef}
-                className="bg-card border border-border rounded-xl p-6 sm:p-7 flex flex-col gap-5"
-            >
-                <CollapsibleTrigger asChild>
-                    <button
-                        type="button"
-                        className="group/trigger flex items-center gap-2.5 w-full text-left rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                    >
-                        <ChevronDown
-                            size={16}
-                            aria-hidden
-                            className="text-muted-foreground transition-transform motion-safe:duration-200 motion-safe:ease-out group-data-[state=closed]/trigger:-rotate-90"
-                        />
-                        <span className="text-sm font-medium tracking-wide text-muted-foreground">
-                            File library
-                        </span>
-                        {!loading && files.length > 0 && (
-                            <span className="font-mono text-xs tabular-nums text-muted-foreground/80">
-                                {files.length.toLocaleString()}
-                            </span>
-                        )}
-                        {downloadsCount !== null && downloadsCount > 0 && (
-                            <span
-                                className="ml-auto font-mono text-xs tabular-nums text-muted-foreground/80"
-                                title={`${downloadsCount} file${downloadsCount === 1 ? "" : "s"} waiting in Downloads`}
-                            >
-                                {downloadsCount} pending
-                            </span>
-                        )}
-                    </button>
-                </CollapsibleTrigger>
-
-                <CollapsibleContent className="overflow-hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0">
-                    <div className="flex flex-col gap-4">
-                        {error && <ErrorBanner message={error} />}
-
-                        <Tabs value={root} onValueChange={(v) => handleRootChange(v as FileRoot)}>
-                            <TabsList
-                                variant="line"
-                                className="h-auto p-0 gap-0 bg-transparent justify-start rounded-none border-b border-border w-full"
-                            >
-                                <TabsTrigger
-                                    value="library"
-                                    className="px-4 py-2.5 text-xs font-medium tracking-[0.04em] whitespace-nowrap rounded-none"
-                                >
-                                    Library
-                                </TabsTrigger>
-                                <TabsTrigger
-                                    value="downloads"
-                                    className="px-4 py-2.5 text-xs font-medium tracking-[0.04em] whitespace-nowrap rounded-none"
-                                >
-                                    Downloads
-                                    {downloadsCount !== null && downloadsCount > 0 && (
-                                        <span className="ml-1.5 font-mono tabular-nums text-muted-foreground/80">
-                                            · {downloadsCount}
-                                        </span>
-                                    )}
-                                </TabsTrigger>
-                            </TabsList>
-                        </Tabs>
-
-                        <SearchRow
-                            query={query}
-                            onQueryChange={handleQueryChange}
-                            searchMode={searchMode}
-                            onSearchModeChange={handleModeChange}
-                            loading={loading}
-                            batchMode={batchMode}
-                            onToggleBatchMode={toggleBatchMode}
-                            onRefresh={() => loadFiles(query, searchMode, root)}
-                            onOpenExplorer={() => setExplorerOpen(true)}
-                        />
-
-                        <div className="grid grid-cols-1 lg:grid-cols-[3fr_4fr] gap-4 items-start">
-                            <FileList
-                                files={files}
-                                loading={loading}
-                                selected={selected}
-                                batchMode={batchMode}
-                                batchSelected={batchSelected}
-                                emptyText={
-                                    root === "library"
-                                        ? query
-                                            ? "No matching files."
-                                            : "Library is empty. Fetch some posts and use Move to library to file them here."
-                                        : query
-                                          ? "No matching downloads."
-                                          : "No pending downloads."
-                                }
-                                onSelect={handleListClick}
-                                onBatchToggle={toggleBatch}
-                                scrollContainerRef={listScrollRef}
-                                onContainerMouseDown={handleListMouseDown}
-                                dragRect={dragRect}
+        <>
+            <Collapsible open={open} onOpenChange={setOpen}>
+                <div
+                    ref={rootRef}
+                    className="bg-card border border-border rounded-xl p-6 sm:p-7 flex flex-col gap-5"
+                >
+                    <CollapsibleTrigger asChild>
+                        <button
+                            type="button"
+                            className="group/trigger flex items-center gap-2.5 w-full text-left rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                        >
+                            <ChevronDown
+                                size={16}
+                                aria-hidden
+                                className="text-muted-foreground transition-transform motion-safe:duration-200 motion-safe:ease-out group-data-[state=closed]/trigger:-rotate-90"
                             />
-                            <WorkArea
-                                root={root}
+                            <span className="text-sm font-medium tracking-wide text-muted-foreground">
+                                File library
+                            </span>
+                            {!loading && files.length > 0 && (
+                                <span className="font-mono text-xs tabular-nums text-muted-foreground/80">
+                                    {files.length.toLocaleString()}
+                                </span>
+                            )}
+                            {downloadsCount !== null && downloadsCount > 0 && (
+                                <span
+                                    className="ml-auto font-mono text-xs tabular-nums text-muted-foreground/80"
+                                    title={`${downloadsCount} file${downloadsCount === 1 ? "" : "s"} waiting in Downloads`}
+                                >
+                                    {downloadsCount} pending
+                                </span>
+                            )}
+                        </button>
+                    </CollapsibleTrigger>
+
+                    <CollapsibleContent className="overflow-hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0">
+                        <div className="flex flex-col gap-4">
+                            {error && <ErrorBanner message={error} />}
+
+                            <Tabs
+                                value={root}
+                                onValueChange={(v) => handleRootChange(v as FileRoot)}
+                            >
+                                <TabsList
+                                    variant="line"
+                                    className="h-auto p-0 gap-0 bg-transparent justify-start rounded-none border-b border-border w-full"
+                                >
+                                    <TabsTrigger
+                                        value="library"
+                                        className="px-4 py-2.5 text-xs font-medium tracking-[0.04em] whitespace-nowrap rounded-none"
+                                    >
+                                        Library
+                                    </TabsTrigger>
+                                    <TabsTrigger
+                                        value="downloads"
+                                        className="px-4 py-2.5 text-xs font-medium tracking-[0.04em] whitespace-nowrap rounded-none"
+                                    >
+                                        Downloads
+                                        {downloadsCount !== null && downloadsCount > 0 && (
+                                            <span className="ml-1.5 font-mono tabular-nums text-muted-foreground/80">
+                                                · {downloadsCount}
+                                            </span>
+                                        )}
+                                    </TabsTrigger>
+                                </TabsList>
+                            </Tabs>
+
+                            <SearchRow
+                                query={query}
+                                onQueryChange={handleQueryChange}
+                                searchMode={searchMode}
+                                onSearchModeChange={handleModeChange}
+                                loading={loading}
                                 batchMode={batchMode}
-                                batchSelected={batchSelected}
-                                batchProgress={batchProgress}
-                                convertFormat={convertFormat}
-                                convertQuality={convertQuality}
-                                deleteOriginal={deleteOriginal}
-                                onConvertFormatChange={setConvertFormat}
-                                onConvertQualityChange={setConvertQuality}
-                                onDeleteOriginalChange={setDeleteOriginal}
-                                onSelectAllConvertible={selectAllConvertible}
-                                onClearBatch={() => {
+                                onToggleBatchMode={toggleBatchMode}
+                                onRefresh={() => loadFiles(query, searchMode, root)}
+                                onOpenExplorer={() => setExplorerOpen(true)}
+                            />
+
+                            <div className="grid grid-cols-1 lg:grid-cols-[3fr_4fr] gap-4 items-start">
+                                <ContextMenu>
+                                    <ContextMenuTrigger asChild>
+                                        <div onContextMenu={resolveMenuTarget}>
+                                            <FileList
+                                                files={files}
+                                                loading={loading}
+                                                selected={selected}
+                                                batchMode={batchMode}
+                                                batchSelected={batchSelected}
+                                                renamePath={renamePath}
+                                                renameValue={renameValue}
+                                                onRenameChange={setRenameValue}
+                                                onRenameSubmit={commitRename}
+                                                onRenameCancel={cancelRename}
+                                                emptyText={
+                                                    root === "library"
+                                                        ? query
+                                                            ? "No matching files."
+                                                            : "Library is empty. Fetch some posts and use Move to library to file them here."
+                                                        : query
+                                                          ? "No matching downloads."
+                                                          : "No pending downloads."
+                                                }
+                                                onSelect={handleListClick}
+                                                onBatchToggle={toggleBatch}
+                                                scrollContainerRef={listScrollRef}
+                                                onContainerMouseDown={handleListMouseDown}
+                                                dragRect={dragRect}
+                                            />
+                                        </div>
+                                    </ContextMenuTrigger>
+                                    <ContextMenuContent>
+                                        {menuTarget &&
+                                            (() => {
+                                                // Right-click on a row inside an active
+                                                // multi-selection acts on the whole
+                                                // selection (matches Finder / Explorer);
+                                                // otherwise it's a single-target menu.
+                                                const isBulk =
+                                                    bulkSelected.length > 1 &&
+                                                    bulkSelected.some(
+                                                        (f) => f.path === menuTarget.path,
+                                                    );
+                                                return (
+                                                    <>
+                                                        {isBulk && onOpenBulkEdit && (
+                                                            <ContextMenuItem
+                                                                onSelect={() => {
+                                                                    onOpenBulkEdit(root);
+                                                                }}
+                                                            >
+                                                                <FilePen aria-hidden />
+                                                                Bulk edit {bulkSelected.length}{" "}
+                                                                files
+                                                            </ContextMenuItem>
+                                                        )}
+                                                        {!isBulk && (
+                                                            <ContextMenuItem
+                                                                onSelect={() => {
+                                                                    const target = menuTarget;
+                                                                    requestAnimationFrame(() =>
+                                                                        startRename(target),
+                                                                    );
+                                                                }}
+                                                            >
+                                                                <PenLine aria-hidden />
+                                                                Rename
+                                                            </ContextMenuItem>
+                                                        )}
+                                                        {(isBulk || !isBulk) && (
+                                                            <ContextMenuSeparator />
+                                                        )}
+                                                        <ContextMenuItem
+                                                            variant="destructive"
+                                                            onSelect={() => {
+                                                                // rAF lets the menu close
+                                                                // before the AlertDialog
+                                                                // mounts — without it
+                                                                // Radix's focus scopes
+                                                                // fight and the dialog
+                                                                // can't take focus.
+                                                                const target = menuTarget;
+                                                                if (isBulk) {
+                                                                    requestAnimationFrame(() =>
+                                                                        requestDeleteBulk(),
+                                                                    );
+                                                                } else {
+                                                                    requestAnimationFrame(() =>
+                                                                        requestDelete(target),
+                                                                    );
+                                                                }
+                                                            }}
+                                                        >
+                                                            <Trash2 aria-hidden />
+                                                            {isBulk
+                                                                ? `Delete ${bulkSelected.length} files`
+                                                                : "Delete file"}
+                                                        </ContextMenuItem>
+                                                    </>
+                                                );
+                                            })()}
+                                    </ContextMenuContent>
+                                </ContextMenu>
+                                <WorkArea
+                                    root={root}
+                                    batchMode={batchMode}
+                                    batchSelected={batchSelected}
+                                    batchProgress={batchProgress}
+                                    convertFormat={convertFormat}
+                                    convertQuality={convertQuality}
+                                    deleteOriginal={deleteOriginal}
+                                    onConvertFormatChange={setConvertFormat}
+                                    onConvertQualityChange={setConvertQuality}
+                                    onDeleteOriginalChange={setDeleteOriginal}
+                                    onSelectAllConvertible={selectAllConvertible}
+                                    onClearBatch={() => {
+                                        commitSelection(new Set());
+                                        setSelectionAnchor(null);
+                                    }}
+                                    onBatchConvert={handleBatchConvert}
+                                    onClearBatchResults={() => setBatchProgress(null)}
+                                    onOpenBulkEdit={
+                                        onOpenBulkEdit ? () => onOpenBulkEdit(root) : undefined
+                                    }
+                                    selected={selected}
+                                    outputDash={outputDash}
+                                    outputPipe={outputPipe}
+                                    extractedArtist={extractedArtist}
+                                    librarySubdir={librarySubdir}
+                                    onLibrarySubdirChange={setLibrarySubdir}
+                                    onDeselect={() => setSelected(null)}
+                                    onSelectedChange={setSelected}
+                                    onListReload={() => {
+                                        loadFiles(query, searchMode, root);
+                                        refreshDownloadsCount();
+                                    }}
+                                    onMovedToLibrary={() => {
+                                        // User stays on whichever tab they
+                                        // were on — when batching multiple
+                                        // files out of Downloads, auto-
+                                        // switching to Library every time
+                                        // forced the user to re-switch back
+                                        // for each file. onListReload (one
+                                        // prop above) already refreshes the
+                                        // current list + the Downloads
+                                        // badge, so the moved file just
+                                        // vanishes from where it was.
+                                        setSelected(null);
+                                    }}
+                                    onError={setError}
+                                />
+                            </div>
+                        </div>
+                    </CollapsibleContent>
+                </div>
+
+                <Suspense fallback={null}>
+                    {explorerOpen && (
+                        <LibraryExplorerSheet
+                            open={explorerOpen}
+                            onOpenChange={setExplorerOpen}
+                            librarySubdir={librarySubdir}
+                            onLibrarySubdirChange={setLibrarySubdir}
+                            onSelectFile={(file, pickedRoot) => {
+                                // Drop the user onto the tab matching the root they
+                                // picked from so the existing work-area flows take
+                                // over. Mirrors the Patreon-bridge handoff.
+                                if (root !== pickedRoot) {
+                                    setRoot(pickedRoot);
                                     commitSelection(new Set());
                                     setSelectionAnchor(null);
-                                }}
-                                onBatchConvert={handleBatchConvert}
-                                onClearBatchResults={() => setBatchProgress(null)}
-                                onOpenBulkEdit={
-                                    onOpenBulkEdit ? () => onOpenBulkEdit(root) : undefined
+                                    loadFiles(query, searchMode, pickedRoot);
                                 }
-                                selected={selected}
-                                outputDash={outputDash}
-                                outputPipe={outputPipe}
-                                extractedArtist={extractedArtist}
-                                librarySubdir={librarySubdir}
-                                onLibrarySubdirChange={setLibrarySubdir}
-                                onDeselect={() => setSelected(null)}
-                                onSelectedChange={setSelected}
-                                onListReload={() => {
-                                    loadFiles(query, searchMode, root);
-                                    refreshDownloadsCount();
-                                }}
-                                onMovedToLibrary={() => {
-                                    // User stays on whichever tab they
-                                    // were on — when batching multiple
-                                    // files out of Downloads, auto-
-                                    // switching to Library every time
-                                    // forced the user to re-switch back
-                                    // for each file. onListReload (one
-                                    // prop above) already refreshes the
-                                    // current list + the Downloads
-                                    // badge, so the moved file just
-                                    // vanishes from where it was.
-                                    setSelected(null);
-                                }}
-                                onError={setError}
-                            />
-                        </div>
-                    </div>
-                </CollapsibleContent>
-            </div>
+                                setSelected(file);
+                                rootRef.current?.scrollIntoView({
+                                    behavior: "smooth",
+                                    block: "start",
+                                });
+                            }}
+                        />
+                    )}
+                </Suspense>
+            </Collapsible>
 
-            <Suspense fallback={null}>
-                {explorerOpen && (
-                    <LibraryExplorerSheet
-                        open={explorerOpen}
-                        onOpenChange={setExplorerOpen}
-                        librarySubdir={librarySubdir}
-                        onLibrarySubdirChange={setLibrarySubdir}
-                        onSelectFile={(file, pickedRoot) => {
-                            // Drop the user onto the tab matching the root they
-                            // picked from so the existing work-area flows take
-                            // over. Mirrors the Patreon-bridge handoff.
-                            if (root !== pickedRoot) {
-                                setRoot(pickedRoot);
-                                commitSelection(new Set());
-                                setSelectionAnchor(null);
-                                loadFiles(query, searchMode, pickedRoot);
-                            }
-                            setSelected(file);
-                            rootRef.current?.scrollIntoView({
-                                behavior: "smooth",
-                                block: "start",
-                            });
-                        }}
-                    />
+            {/* Sibling to the Collapsible so the AlertDialog's portal isn't
+            nested under the file-list's ContextMenu — keeps Radix's focus
+            scopes from fighting when the menu closes and the dialog
+            mounts in the same tick. */}
+            <AlertDialog
+                open={!!deleteCandidate}
+                onOpenChange={(v) => {
+                    if (!v && !deleteBusy) setDeleteCandidate(null);
+                }}
+            >
+                {deleteCandidate && (
+                    <AlertDialogContent>
+                        <AlertDialogHeader>
+                            <AlertDialogTitle>
+                                {deleteCandidate.kind === "single"
+                                    ? "Delete file?"
+                                    : `Delete ${deleteCandidate.files.length} files?`}
+                            </AlertDialogTitle>
+                            <AlertDialogDescription>
+                                {deleteCandidate.kind === "single" ? (
+                                    <>
+                                        Removes{" "}
+                                        <span className="font-mono break-all">
+                                            {deleteCandidate.files[0]?.name}
+                                        </span>{" "}
+                                        from {root === "library" ? "the library" : "downloads"}.
+                                        This can't be undone.
+                                    </>
+                                ) : (
+                                    <>
+                                        {deleteCandidate.files.length} files will be removed from{" "}
+                                        {root === "library" ? "the library" : "downloads"}. This
+                                        can't be undone.
+                                    </>
+                                )}
+                            </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        {deleteCandidate.kind === "bulk" && deleteCandidate.files.length <= 6 && (
+                            <ul className="text-xs font-mono text-muted-foreground space-y-0.5 max-h-32 overflow-y-auto">
+                                {deleteCandidate.files.map((f) => (
+                                    <li key={f.path} className="break-all">
+                                        {f.name}
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                        {deleteCandidate.kind === "bulk" && deleteCandidate.files.length > 6 && (
+                            <ul className="text-xs font-mono text-muted-foreground space-y-0.5">
+                                {deleteCandidate.files.slice(0, 5).map((f) => (
+                                    <li key={f.path} className="break-all">
+                                        {f.name}
+                                    </li>
+                                ))}
+                                <li className="italic">
+                                    …and {deleteCandidate.files.length - 5} more.
+                                </li>
+                            </ul>
+                        )}
+                        <AlertDialogFooter>
+                            <AlertDialogCancel disabled={deleteBusy}>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    confirmDelete();
+                                }}
+                                disabled={deleteBusy}
+                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            >
+                                {deleteBusy ? (
+                                    <Loader2 size={14} aria-hidden className="animate-spin" />
+                                ) : null}
+                                {deleteBusy ? "Deleting…" : "Delete"}
+                            </AlertDialogAction>
+                        </AlertDialogFooter>
+                    </AlertDialogContent>
                 )}
-            </Suspense>
-        </Collapsible>
+            </AlertDialog>
+        </>
     );
 }
 
@@ -837,6 +1136,14 @@ interface FileListProps {
     scrollContainerRef: React.MutableRefObject<HTMLDivElement | null>;
     onContainerMouseDown: (e: React.MouseEvent<HTMLDivElement>) => void;
     dragRect: DragRect | null;
+    /** Inline-rename state, passed straight to the matching FileBrowserItem.
+     *  Single shared input (only one row can be in rename mode at a time)
+     *  so we can leave the dedupe / focus logic to the row component. */
+    renamePath: string | null;
+    renameValue: string;
+    onRenameChange: (next: string) => void;
+    onRenameSubmit: () => void;
+    onRenameCancel: () => void;
 }
 
 function FileList({
@@ -851,6 +1158,11 @@ function FileList({
     scrollContainerRef,
     onContainerMouseDown,
     dragRect,
+    renamePath,
+    renameValue,
+    onRenameChange,
+    onRenameSubmit,
+    onRenameCancel,
 }: FileListProps) {
     return (
         // The list shell receives drag-select's mousedown directly so
@@ -887,6 +1199,11 @@ function FileList({
                         isSelected={selected?.path === file.path}
                         batchMode={batchMode}
                         isBatchSelected={batchSelected.has(file.path)}
+                        renaming={renamePath === file.path}
+                        renameValue={renamePath === file.path ? renameValue : ""}
+                        onRenameChange={onRenameChange}
+                        onRenameSubmit={onRenameSubmit}
+                        onRenameCancel={onRenameCancel}
                         onClick={(modifiers) => {
                             // batchMode without modifiers keeps the
                             // original toggle-the-checkbox behaviour;

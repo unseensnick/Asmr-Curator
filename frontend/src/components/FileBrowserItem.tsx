@@ -1,6 +1,8 @@
+import { useEffect, useRef } from "react";
 import { AlertTriangle, File, Music2 } from "lucide-react";
 
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { METADATA_COMPATIBLE_EXTS, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
 import type { FileEntry } from "@/lib/types";
@@ -15,6 +17,15 @@ interface FileBrowserItemProps {
      *  toggle individual on Ctrl/Cmd, plain single-select otherwise). */
     onClick: (modifiers: { shift: boolean; toggle: boolean }) => void;
     onBatchToggle: () => void;
+    /** Inline-rename state. When `renaming` is true the row swaps the
+     *  filename label for an Input — Enter commits via `onRenameSubmit`,
+     *  Escape aborts via `onRenameCancel`, blur commits like Enter
+     *  (matches the LibraryExplorerSheet convention). */
+    renaming?: boolean;
+    renameValue?: string;
+    onRenameChange?: (next: string) => void;
+    onRenameSubmit?: () => void;
+    onRenameCancel?: () => void;
 }
 
 /**
@@ -33,6 +44,10 @@ interface FileBrowserItemProps {
  * that the row truncates stay legible without a selection or right-click.
  * The delay (`delayDuration={500}`) keeps the tooltip from popping on
  * every pointer fly-over.
+ *
+ * Inline rename mode swaps the filename label for an Input — same shape
+ * the LibraryExplorerSheet uses, just inline in this row template so
+ * right-click → Rename in the FileBrowser feels identical.
  */
 export default function FileBrowserItem({
     file,
@@ -41,6 +56,11 @@ export default function FileBrowserItem({
     isBatchSelected,
     onClick,
     onBatchToggle,
+    renaming = false,
+    renameValue = "",
+    onRenameChange,
+    onRenameSubmit,
+    onRenameCancel,
 }: FileBrowserItemProps) {
     const fileNeedsConversion = !!file.needs_conversion || NEEDS_CONVERSION_EXTS.has(file.ext);
 
@@ -48,6 +68,48 @@ export default function FileBrowserItem({
     const rowClass = highlight
         ? "flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-border last:border-b-0 transition-colors bg-accent/40 text-foreground"
         : "flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-border last:border-b-0 transition-colors hover:bg-muted/60";
+
+    const renameInputRef = useRef<HTMLInputElement | null>(null);
+    useEffect(() => {
+        if (!renaming) return;
+        // Focus + select the basename (everything up to the last dot)
+        // so the user can type a new title without clobbering the
+        // extension. Matches the inline-rename UX in the Browse sheet.
+        const el = renameInputRef.current;
+        if (!el) return;
+        el.focus();
+        const dot = el.value.lastIndexOf(".");
+        if (dot > 0) el.setSelectionRange(0, dot);
+        else el.select();
+    }, [renaming]);
+
+    if (renaming) {
+        return (
+            <div
+                className={rowClass.replace("cursor-pointer", "cursor-text")}
+                data-entry-path={file.path}
+            >
+                <FileIcon ext={file.ext} />
+                <Input
+                    ref={renameInputRef}
+                    value={renameValue}
+                    onChange={(e) => onRenameChange?.(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                            e.preventDefault();
+                            onRenameSubmit?.();
+                        } else if (e.key === "Escape") {
+                            e.preventDefault();
+                            onRenameCancel?.();
+                        }
+                    }}
+                    onBlur={() => onRenameSubmit?.()}
+                    aria-label={`Rename ${file.name}`}
+                    className="flex-1 h-8 font-mono text-sm"
+                />
+            </div>
+        );
+    }
 
     return (
         <TooltipProvider delayDuration={500}>
