@@ -375,7 +375,7 @@ function PatreonTopic() {
         <article className="flex flex-col gap-5">
             <TopicHeader
                 title="Patreon URL"
-                lede="The primary path. Paste a URL, the backend fetches the post, the app pre-fills everything you need to confirm and ship."
+                lede="The primary path. Paste a URL, press Enter (or click Fetch), the backend pulls the post, the app pre-fills everything you need to confirm and ship."
             />
             <section className="flex flex-col gap-3">
                 <h3 className="text-sm font-medium text-foreground">Two URL shapes</h3>
@@ -388,14 +388,19 @@ function PatreonTopic() {
                     <HelpCard
                         icon={<Globe size={14} aria-hidden />}
                         title="A creator URL"
-                        body="Downloads the creator's full archive in the background. Progress narrates phase by phase; you can keep working while it runs."
+                        body="Downloads the creator's full archive. Can take a while for a large back catalogue; you can keep working in the rest of the app while it runs."
                     />
                 </div>
             </section>
             <HelpCard
+                icon={<Sparkles size={14} aria-hidden />}
+                title="Live progress while it runs"
+                body="A small status line under the URL narrates what's happening: looking up the post, downloading X of Y MB, saving the file, moving on. A creator pull may scroll through many of these — that's normal, the app isn't stuck."
+            />
+            <HelpCard
                 icon={<Cloud size={14} aria-hidden />}
                 title="Drive-hosted audio still works"
-                body="When a creator links to Google Drive instead of uploading to Patreon, the External links section appears under the post. Click Download next to the link and the backend scrapes it server-side through a headless browser, using the Google cookie the extension synced. No in-browser download is triggered."
+                body="When a creator links to Google Drive instead of uploading to Patreon, an External links section appears under the post. Click Download next to the link and the app opens the link in the background using your Google sign-in and pulls the file down for you. Nothing downloads in your browser tab."
             />
         </article>
     );
@@ -492,12 +497,12 @@ function BulkTopic() {
                     <HelpCard
                         icon={<FileAudio size={14} aria-hidden />}
                         title="Load from file"
-                        body="Re-reads the ID3 / FLAC / MP4 tags already on disk into the per-row inputs. Auto-runs on open; the button is for re-syncing after edits land elsewhere."
+                        body="Re-reads the tags already stored inside each audio file into the per-row inputs. Auto-runs on open; the button is for re-syncing after edits land elsewhere."
                     />
                     <HelpCard
                         icon={<Cloud size={14} aria-hidden />}
                         title="Load from cached post info"
-                        body="Pulls title and tags from the Patreon post info saved alongside each file. Useful when ingest saved post metadata and you want to re-apply it as the source of truth."
+                        body="Pulls title and tags from the post details the app saved next to each file when it was downloaded. Useful when you want the Patreon info back as the source of truth."
                     />
                 </div>
             </section>
@@ -525,6 +530,21 @@ function BulkTopic() {
                     </li>
                 </ul>
             </section>
+            <section className="flex flex-col gap-3">
+                <h3 className="text-sm font-medium text-foreground">Rename and move</h3>
+                <div className="flex flex-col gap-2.5">
+                    <HelpCard
+                        icon={<FileAudio size={14} aria-hidden />}
+                        title="Rename to canonical filenames"
+                        body="Toggle Rename on to write each file's new filename when the commit lands. Each per-row preview shows the proposed name with a small byte count next to it; the count goes amber past 200 bytes and red past 255 (the filesystem cap) so you can shorten tags before committing."
+                    />
+                    <HelpCard
+                        icon={<FolderOpen size={14} aria-hidden />}
+                        title="Move to library"
+                        body="When the selection lives in Downloads, an extra Move-to-library checkbox lets the same commit file every selected row into a Library subfolder you pick. The checkbox is hidden for Library-tab selections — they're already filed."
+                    />
+                </div>
+            </section>
             <HelpCard
                 icon={<MousePointerClick size={14} aria-hidden />}
                 title="Open the dictionary while you work"
@@ -539,7 +559,7 @@ function DictionaryTopic() {
         <article className="flex flex-col gap-5">
             <TopicHeader
                 title="Tag dictionary"
-                lede="One vocabulary the whole app reads from. Canonical tags are the names that end up in filenames; aliases are typo / casing variants you've taught it; suppressed terms are words the extractor should always drop."
+                lede="One vocabulary the whole app reads from. A canonical tag is the one official spelling that ends up in filenames; aliases are the typo / casing variants that all map back to it; suppressed terms are words the extractor should always drop."
             />
             <section className="flex flex-col gap-3">
                 <h3 className="text-sm font-medium text-foreground">Three lists</h3>
@@ -565,6 +585,11 @@ function DictionaryTopic() {
                 icon={<MousePointerClick size={14} aria-hidden />}
                 title="Right-click a novel tag chip"
                 body="Promote it to a new canonical, or add it as an alias of an existing one. Novel chips are the warm-amber ones; the dictionary doesn't recognise them yet."
+            />
+            <HelpCard
+                icon={<BookOpen size={14} aria-hidden />}
+                title="Empty dictionary on first run?"
+                body="The Vocabulary and Suppressed lists each show their own empty-state with the next step. You can also use Import (top of the Dictionary sheet) to load a JSON file, or Reset to defaults to seed a starter vocabulary."
             />
         </article>
     );
