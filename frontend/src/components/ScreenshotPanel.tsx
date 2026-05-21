@@ -139,7 +139,7 @@ export default function ScreenshotPanel({
     async function handleExtract() {
         if (!imageBase64) return;
         setExtracting(true);
-        setStatus({ type: "info", msg: "Extracting metadata." });
+        setStatus({ type: "info", msg: "Reading the screenshot." });
         try {
             const { raw_text } = await apiPost<ExtractResponse>(API.extract, {
                 image_b64: imageBase64,

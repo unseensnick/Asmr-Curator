@@ -235,8 +235,8 @@ export default function PatreonPanel({
                     </div>
                 ) : !hasResult ? (
                     <p className="text-sm text-muted-foreground leading-relaxed">
-                        A single post URL fetches one file. A creator URL pulls their
-                        back-catalogue.
+                        A single post URL fetches one file. A creator URL downloads their full
+                        archive.
                     </p>
                 ) : null}
             </div>
