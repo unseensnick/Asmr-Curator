@@ -249,11 +249,19 @@ export default function LibraryExplorerSheet({
     }, [menuTarget]);
     useEffect(() => {
         newFolderOpenRef.current = newFolderOpen;
+        if (!newFolderOpen) return;
         // Auto-focus the inline input when the new-folder row opens.
-        // Replaces `<Input autoFocus />` (jsx-a11y/no-autofocus); the
-        // behaviour — type immediately after clicking "New folder" — is
-        // preserved.
-        if (newFolderOpen) newFolderInputRef.current?.focus();
+        // Replaces `<Input autoFocus />` (jsx-a11y/no-autofocus). The rAF
+        // defers past Radix's focus management — for the toolbar button
+        // path the click's default focus settles on the button after
+        // commit, and for the ContextMenu path Radix returns focus to the
+        // trigger when the menu closes. Either way, the synchronous focus
+        // call inside the effect was getting clobbered. Waiting one frame
+        // lets that settle so our focus() wins.
+        const id = requestAnimationFrame(() => {
+            newFolderInputRef.current?.focus();
+        });
+        return () => cancelAnimationFrame(id);
     }, [newFolderOpen]);
     useEffect(() => {
         rootRef.current = root;
@@ -1148,7 +1156,12 @@ export default function LibraryExplorerSheet({
                             />
                         </aside>
 
-                        <ContextMenu>
+                        {/* modal={false}: skip Radix's aria-hide-siblings + focus-trap
+                            so the menu's open state doesn't race the New folder
+                            input's focus and trip the "Blocked aria-hidden on
+                            a focused ancestor" warning on the Sheet content.
+                            Outside-click dismiss still works via DismissableLayer. */}
+                        <ContextMenu modal={false}>
                             <ContextMenuTrigger asChild>
                                 <div
                                     className="flex flex-col flex-1 min-w-0"

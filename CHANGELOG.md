@@ -31,6 +31,7 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 - **Bumps `idna` 3.11 → 3.15**, closing the `idna.encode()` resource-exhaustion advisory (GHSA-65pc-fj4g-8rjx).
 - **Frontend deps bumped to latest across majors** (vite 8.0.x, vitest 4.x), which transitively retires the vulnerable nested `esbuild` 0.21.5 (GHSA-67mh-4wv8-2f99). One properties test was adjusted for a vitest 4 API change.
 - **File-API path validators now return a clean 403 on malformed input** (null bytes, paths the OS refuses to resolve). Previously these surfaced as a 500 with a Python stack trace — defence-in-depth tightening, not a known exploit.
+- **Clicking "New folder" in the Browse sheet now lands focus in the input on the first try, with no console warning.** Both routes — the toolbar button and the right-click → New folder action — were racing Radix's focus management and either leaving the input unfocused or briefly marking the Sheet content `aria-hidden` while focus was inside it.
 
 ## [2.0.4]
 
