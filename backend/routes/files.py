@@ -3,6 +3,7 @@ delete, rename (file-only + path-general)."""
 
 import asyncio
 import errno
+import itertools
 import json
 import os
 import re
@@ -972,10 +973,15 @@ def delete_path(body: DeleteIn):
         pass  # non-empty; fall through
 
     if not body.recursive:
+        # Cap the walk so deep library subtrees don't stat thousands of
+        # descendants just to drive the "are you sure?" prompt. The UI shows
+        # at most "100+"; anything beyond that is the same prompt either way.
+        _PROBE_CAP = 100
         try:
-            count = sum(1 for _ in target.rglob("*"))
+            walked = list(itertools.islice(target.rglob("*"), _PROBE_CAP + 1))
+            count = len(walked) if len(walked) <= _PROBE_CAP else _PROBE_CAP + 1
         except OSError:
-            count = -1  # best effort — non-zero is enough to drive the prompt
+            count = -1  # best effort; the prompt just needs a non-zero
         raise HTTPException(
             status_code=409,
             detail={
