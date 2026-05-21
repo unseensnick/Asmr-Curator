@@ -12,9 +12,19 @@ import TagsEditor from "@/components/TagsEditor";
 // LibrarySettingsSheet is heavy (Dictionary modal + Vocabulary/Suppressed
 // panes + DictionaryTester) and only renders when the user opens it via
 // the Header. React.lazy moves it out of the initial chunk; Suspense
-// fallback is null because the Sheet's open animation already covers
-// the brief load.
-const LibrarySettingsSheet = lazy(() => import("@/components/LibrarySettingsSheet"));
+// fallback is null because the Sheet's open animation covers the brief
+// load — but only when the chunk has already been fetched. The factory
+// is exported so `prefetchLibrarySettings` can warm the chunk before
+// the user clicks (hover-prefetch from the Dictionary buttons), so the
+// slide-in animation starts on click rather than waiting for the chunk
+// to arrive.
+const loadLibrarySettings = () => import("@/components/LibrarySettingsSheet");
+const LibrarySettingsSheet = lazy(loadLibrarySettings);
+/** Kick off the LibrarySettingsSheet chunk fetch without rendering anything.
+ *  Idempotent — Vite's dynamic-import cache de-dupes follow-up calls. */
+function prefetchLibrarySettings() {
+    void loadLibrarySettings();
+}
 // BulkEditSheet will grow heavy as phases 4-7 land the per-file table,
 // shared form, and rename-preview pane. Lazy from the start so the
 // initial chunk doesn't carry it.
@@ -203,6 +213,7 @@ export default function App() {
             <div className="max-w-[160rem] 2xl:max-w-none mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 py-8 lg:py-10">
                 <Header
                     dictTagCount={dict.vocabulary.length}
+                    onPrefetchLibrarySettings={prefetchLibrarySettings}
                     onOpenLibrarySettings={() => {
                         // Mutually exclusive — having more than one right-side
                         // sheet open at once is undefined stacking and the
@@ -372,6 +383,15 @@ export default function App() {
                     />
                 </section>
 
+                {/* Each lazy-loaded sheet sits in its OWN Suspense boundary.
+                    Sharing one boundary across both meant that opening
+                    Dictionary while BulkEdit was already open suspended
+                    the WHOLE boundary on the Dictionary chunk fetch,
+                    which unmounted BulkEdit mid-animation — the user
+                    saw BulkEdit blink out, the Dictionary flash in, and
+                    then the slide-in animation only after the chunk
+                    arrived. Per-sheet boundaries isolate the suspend so
+                    BulkEdit stays painted while its sibling loads. */}
                 <Suspense fallback={null}>
                     {libraryOpen && (
                         <LibrarySettingsSheet
@@ -381,6 +401,8 @@ export default function App() {
                             onDictChange={setDict}
                         />
                     )}
+                </Suspense>
+                <Suspense fallback={null}>
                     {/* Always-mounted, no `key` reset. Per-file edits + shared
                     values + load-from-cache results all live inside the
                     sheet; keying on the selection would wipe them every
@@ -402,6 +424,7 @@ export default function App() {
                         librarySubdir={librarySubdir}
                         onLibrarySubdirChange={setLibrarySubdir}
                         onOpenDictionary={() => setLibraryOpen(true)}
+                        onPrefetchDictionary={prefetchLibrarySettings}
                     />
                 </Suspense>
                 <CookiesSheet open={cookiesOpen} onClose={() => setCookiesOpen(false)} />

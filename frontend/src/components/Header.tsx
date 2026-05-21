@@ -25,6 +25,10 @@ interface HeaderProps {
     dictTagCount: number;
     /** Open the Library settings modal (vocabulary, suppressed, test). */
     onOpenLibrarySettings: () => void;
+    /** Optional pre-warm: kick off the Dictionary chunk fetch on hover /
+     *  focus of the Dictionary button so the slide-in animation starts
+     *  immediately on click instead of waiting for the lazy chunk. */
+    onPrefetchLibrarySettings?: () => void;
     /** Open the standalone Cookies modal. */
     onOpenCookies: () => void;
     /** Open the Help reference sheet. */
@@ -49,6 +53,7 @@ const HELP_SEEN_KEY = "app.helpSeen";
 export default function Header({
     dictTagCount,
     onOpenLibrarySettings,
+    onPrefetchLibrarySettings,
     onOpenCookies,
     onOpenHelp,
     powerMode,
@@ -140,6 +145,8 @@ export default function Header({
                 <Button
                     variant="outline"
                     onClick={onOpenLibrarySettings}
+                    onMouseEnter={onPrefetchLibrarySettings}
+                    onFocus={onPrefetchLibrarySettings}
                     className="gap-2"
                     aria-label="Open dictionary"
                 >

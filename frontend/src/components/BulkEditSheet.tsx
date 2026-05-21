@@ -157,6 +157,11 @@ interface BulkEditSheetProps {
      * — closing it returns the user here, with all state intact.
      */
     onOpenDictionary: () => void;
+    /** Optional pre-warm. Called on hover / focus of the Dictionary
+     *  button so the lazy LibrarySettingsSheet chunk fetches before the
+     *  click, and the slide-in animation runs without a chunk-load gap
+     *  on first open. */
+    onPrefetchDictionary?: () => void;
 }
 
 /**
@@ -194,6 +199,7 @@ export default function BulkEditSheet({
     librarySubdir,
     onLibrarySubdirChange,
     onOpenDictionary,
+    onPrefetchDictionary,
 }: BulkEditSheetProps) {
     // Keyed by `FileEntry.path` (relative to the chosen root). Paths the
     // user hasn't touched aren't in the map — `editFor` falls back to
@@ -437,6 +443,12 @@ export default function BulkEditSheet({
             autoLoadedForFilesRef.current = "";
             return;
         }
+        // Warm the Dictionary chunk on every BulkEdit open. The button
+        // is in the header so the user might click it immediately, and
+        // the lazy chunk hasn't necessarily loaded yet — without this
+        // the first click stalls until the chunk lands, and the slide-in
+        // animation only starts after that gap. Idempotent.
+        onPrefetchDictionary?.();
         if (autoLoadedForFilesRef.current === filesKey) return;
         const hasState =
             Object.keys(edits).length > 0 ||
@@ -448,7 +460,7 @@ export default function BulkEditSheet({
         // eslint-disable-next-line react-hooks/set-state-in-effect -- data-fetching kickoff
         handleLoadCurrentMetadata();
         // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
-    }, [open, filesKey, handleLoadCurrentMetadata]);
+    }, [open, filesKey, handleLoadCurrentMetadata, onPrefetchDictionary]);
 
     function toggleClear(field: SharedIdField) {
         const willClear = !clearFields.has(field);
@@ -741,6 +753,8 @@ export default function BulkEditSheet({
                         variant="ghost"
                         size="sm"
                         onClick={onOpenDictionary}
+                        onMouseEnter={onPrefetchDictionary}
+                        onFocus={onPrefetchDictionary}
                         className="ml-auto gap-1.5"
                         aria-label="Open dictionary"
                     >
