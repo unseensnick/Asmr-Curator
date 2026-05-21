@@ -492,7 +492,6 @@ export default function LibraryExplorerSheet({
                     }
                 });
         });
-         
     }, [open, menuTarget, cutPaths, moveNotice, deleteCandidate, moveBusy]);
 
     // File-explorer hotkeys: N / F2 / Del.
@@ -1391,9 +1390,11 @@ export default function LibraryExplorerSheet({
                                         </div>
                                     )}
 
-                                    {/* Error */}
+                                    {/* Error — recoverable shape (warning, not destructive)
+                                     *  since this is "load / save / move didn't work" not
+                                     *  "you triggered a dangerous action." */}
                                     {error && (
-                                        <p className="px-5 py-2 text-sm text-destructive bg-destructive/10 border-b border-border shrink-0">
+                                        <p className="px-5 py-2 text-sm text-foreground/90 bg-warning/10 border-b border-warning/30 shrink-0">
                                             {error}
                                         </p>
                                     )}

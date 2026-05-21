@@ -4,6 +4,7 @@ import FileBrowser from "@/components/FileBrowser";
 import Header from "@/components/Header";
 import OutputPanel from "@/components/OutputPanel";
 import PatreonPanel from "@/components/PatreonPanel";
+import RecoverableErrorBanner from "@/components/RecoverableErrorBanner";
 import ScreenshotPanel from "@/components/ScreenshotPanel";
 import TagsEditor from "@/components/TagsEditor";
 
@@ -239,30 +240,16 @@ export default function App() {
                     onPowerModeChange={setPowerMode}
                 />
 
-                {/* Cold-load dictionary error. Shows once if the initial
-                 *  /api/dictionary fetch fails; clears on successful retry.
-                 *  Quiet warning surface — destructive color is reserved
-                 *  for dangerous actions, not "thing didn't load." */}
                 {dictLoadError && (
-                    <div className="mt-6 flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground/90">
-                        <span className="flex-1 leading-relaxed">
-                            {dictLoadError} Tags won&apos;t match canonical forms until this
-                            resolves.
-                        </span>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                // Clear the banner immediately for feedback;
-                                // .then will set it back to null on success
-                                // and .catch will re-populate on failure.
-                                setDictLoadError(null);
-                                fetchDictionary();
-                            }}
-                            className="font-medium text-foreground hover:text-primary transition-colors underline-offset-4 hover:underline"
-                        >
-                            Retry
-                        </button>
-                    </div>
+                    <RecoverableErrorBanner
+                        className="mt-6"
+                        message={`${dictLoadError} Tags won't match canonical forms until this resolves.`}
+                        actionLabel="Retry"
+                        onAction={() => {
+                            setDictLoadError(null);
+                            fetchDictionary();
+                        }}
+                    />
                 )}
 
                 {/* Top trio: 1-col mobile → 2-col lg → 3-col dashboard at xl+.

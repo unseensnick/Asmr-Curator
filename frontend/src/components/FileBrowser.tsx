@@ -9,7 +9,6 @@ import {
     useState,
 } from "react";
 import {
-    AlertTriangle,
     ChevronDown,
     FilePen,
     FolderOpen,
@@ -23,6 +22,7 @@ import {
 
 import ConversionPanel from "@/components/ConversionPanel";
 import FileBrowserItem from "@/components/FileBrowserItem";
+import RecoverableErrorBanner from "@/components/RecoverableErrorBanner";
 import SelectedFilePanel from "@/components/SelectedFilePanel";
 import {
     AlertDialog,
@@ -1054,12 +1054,7 @@ export default function FileBrowser({
 // ─────────────────────────────────────────────────────────────────────────
 
 function ErrorBanner({ message }: { message: string }) {
-    return (
-        <div className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 border border-destructive/25 rounded-md px-3 py-2.5 leading-relaxed">
-            <AlertTriangle size={16} aria-hidden className="shrink-0 mt-0.5" />
-            <span>{message}</span>
-        </div>
-    );
+    return <RecoverableErrorBanner message={message} />;
 }
 
 interface SearchRowProps {
