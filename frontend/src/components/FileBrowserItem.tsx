@@ -90,23 +90,30 @@ export default function FileBrowserItem({
                 data-entry-path={file.path}
             >
                 <FileIcon ext={file.ext} />
-                <Input
-                    ref={renameInputRef}
-                    value={renameValue}
-                    onChange={(e) => onRenameChange?.(e.target.value)}
-                    onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                            e.preventDefault();
-                            onRenameSubmit?.();
-                        } else if (e.key === "Escape") {
-                            e.preventDefault();
-                            onRenameCancel?.();
-                        }
-                    }}
-                    onBlur={() => onRenameSubmit?.()}
-                    aria-label={`Rename ${file.name}`}
-                    className="flex-1 h-8 font-mono text-sm"
-                />
+                {/* Wrapper carries min-w-0 the same way the read-mode row
+                    constrains its filename column, so a long pre-filled
+                    value can't push the row's intrinsic width past the
+                    file-list column and reflow the list grid. */}
+                <div className="flex-1 min-w-0">
+                    <Input
+                        ref={renameInputRef}
+                        value={renameValue}
+                        onChange={(e) => onRenameChange?.(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                                e.preventDefault();
+                                onRenameSubmit?.();
+                            } else if (e.key === "Escape") {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                onRenameCancel?.();
+                            }
+                        }}
+                        onBlur={() => onRenameSubmit?.()}
+                        aria-label={`Rename ${file.name}`}
+                        className="w-full h-8 font-mono text-sm"
+                    />
+                </div>
             </div>
         );
     }

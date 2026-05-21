@@ -672,6 +672,24 @@ export default function BulkEditSheet({
                 className="w-full sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl overflow-hidden"
                 showCloseButton={false}
                 onEscapeKeyDown={(e) => {
+                    // Esc inside a text input belongs to the input — blur
+                    // it (so the user can hit Esc again to escalate to
+                    // the Sheet-level cascade) and otherwise leave the
+                    // sheet alone. Without this guard the cascade would
+                    // steal Esc from anyone typing in Title / Tags /
+                    // shared / suffix and feel jumpy: one Esc could wipe
+                    // a "Loaded N of N" banner the user wanted to read.
+                    const active = document.activeElement as HTMLElement | null;
+                    if (
+                        active &&
+                        (active.tagName === "INPUT" ||
+                            active.tagName === "TEXTAREA" ||
+                            active.isContentEditable)
+                    ) {
+                        e.preventDefault();
+                        active.blur();
+                        return;
+                    }
                     // Cascading Esc, same pattern as LibraryExplorerSheet:
                     // peel off one layer of transient state at a time
                     // before letting Escape close the Sheet. Sequence is

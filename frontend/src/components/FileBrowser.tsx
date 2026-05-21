@@ -746,7 +746,17 @@ export default function FileBrowser({
                             />
 
                             <div className="grid grid-cols-1 lg:grid-cols-[3fr_4fr] gap-4 items-start">
-                                <ContextMenu>
+                                {/* modal={false}: skips Radix's
+                                    aria-hide-siblings + focus-trap step
+                                    that's reserved for true modals.
+                                    Without this, the menu's open state
+                                    races against the rename input's
+                                    focus and trips Chrome's "Blocked
+                                    aria-hidden on a focused ancestor"
+                                    warning. The menu still closes on
+                                    outside click via Radix's
+                                    DismissableLayer. */}
+                                <ContextMenu modal={false}>
                                     <ContextMenuTrigger asChild>
                                         <div onContextMenu={resolveMenuTarget}>
                                             <FileList

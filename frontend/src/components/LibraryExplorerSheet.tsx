@@ -1533,8 +1533,21 @@ export default function LibraryExplorerSheet({
                                     <>
                                         <ContextMenuItem
                                             onSelect={() => {
-                                                setNewFolderOpen(true);
-                                                setNewFolderName("");
+                                                // rAF defers past Radix
+                                                // ContextMenu's focus-return
+                                                // step, which otherwise lands
+                                                // focus on the trigger area
+                                                // AFTER our newFolderInputRef
+                                                // focus effect runs — leaving
+                                                // the input mounted but
+                                                // unfocused. Same pattern the
+                                                // Rename / Cut / Paste items
+                                                // already use for the same
+                                                // reason.
+                                                requestAnimationFrame(() => {
+                                                    setNewFolderOpen(true);
+                                                    setNewFolderName("");
+                                                });
                                             }}
                                         >
                                             <FolderPlus aria-hidden />
