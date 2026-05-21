@@ -66,7 +66,24 @@ export default function LibrarySettingsSheet({
     dict,
     onDictChange,
 }: LibrarySettingsSheetProps) {
-    const [tab, setTab] = useState<DictTab>("vocabulary");
+    const [tab, setTabState] = useState<DictTab>("vocabulary");
+    // Only render a pane after the user has visited that tab at least
+    // once. Without this, all three panes (Vocabulary, Suppressed,
+    // DictionaryTester) render up-front because the project overrides
+    // Radix's default unmount with `data-[state=inactive]:hidden` to
+    // preserve per-pane state. That gave a snappy tab switch at the
+    // cost of a heavy first paint on open — for a multi-hundred-entry
+    // vocabulary the click-to-visible delay was noticeable.
+    //
+    // With this set, only the active pane (default "vocabulary") mounts
+    // on open. Other panes mount on first visit and stay mounted, so
+    // tab switches after that point still preserve scroll / filter /
+    // edit state.
+    const [visited, setVisited] = useState<Set<DictTab>>(() => new Set(["vocabulary"]));
+    function setTab(next: DictTab) {
+        setTabState(next);
+        setVisited((prev) => (prev.has(next) ? prev : new Set(prev).add(next)));
+    }
     // Quick-fill: jump to a tab and pre-populate its add input
     const [quickFill, setQuickFill] = useState<{
         tab: DictTab;
@@ -246,46 +263,56 @@ export default function LibrarySettingsSheet({
                             value="vocabulary"
                             className="flex-1 min-h-0 mt-0 flex flex-col data-[state=inactive]:hidden"
                         >
-                            <VocabularyPane
-                                vocabulary={dict.vocabulary}
-                                quickFill={
-                                    quickFill?.tab === "vocabulary" ? quickFill.value : undefined
-                                }
-                                onQuickFillConsumed={() => setQuickFill(null)}
-                                onChange={(vocabulary) => {
-                                    onDictChange({
-                                        ...dict,
-                                        vocabulary,
-                                        ...buildDictDerived(vocabulary, dict.suppressed),
-                                    });
-                                }}
-                                onReorder={handleVocabReorder}
-                            />
+                            {visited.has("vocabulary") && (
+                                <VocabularyPane
+                                    vocabulary={dict.vocabulary}
+                                    quickFill={
+                                        quickFill?.tab === "vocabulary"
+                                            ? quickFill.value
+                                            : undefined
+                                    }
+                                    onQuickFillConsumed={() => setQuickFill(null)}
+                                    onChange={(vocabulary) => {
+                                        onDictChange({
+                                            ...dict,
+                                            vocabulary,
+                                            ...buildDictDerived(vocabulary, dict.suppressed),
+                                        });
+                                    }}
+                                    onReorder={handleVocabReorder}
+                                />
+                            )}
                         </TabsContent>
                         <TabsContent
                             value="suppressed"
                             className="flex-1 min-h-0 mt-0 flex flex-col data-[state=inactive]:hidden"
                         >
-                            <SuppressedPane
-                                suppressed={dict.suppressed}
-                                quickFill={
-                                    quickFill?.tab === "suppressed" ? quickFill.value : undefined
-                                }
-                                onQuickFillConsumed={() => setQuickFill(null)}
-                                onChange={(suppressed) => {
-                                    onDictChange({
-                                        ...dict,
-                                        suppressed,
-                                        ...buildDictDerived(dict.vocabulary, suppressed),
-                                    });
-                                }}
-                            />
+                            {visited.has("suppressed") && (
+                                <SuppressedPane
+                                    suppressed={dict.suppressed}
+                                    quickFill={
+                                        quickFill?.tab === "suppressed"
+                                            ? quickFill.value
+                                            : undefined
+                                    }
+                                    onQuickFillConsumed={() => setQuickFill(null)}
+                                    onChange={(suppressed) => {
+                                        onDictChange({
+                                            ...dict,
+                                            suppressed,
+                                            ...buildDictDerived(dict.vocabulary, suppressed),
+                                        });
+                                    }}
+                                />
+                            )}
                         </TabsContent>
                         <TabsContent
                             value="test"
                             className="flex-1 min-h-0 mt-0 flex flex-col data-[state=inactive]:hidden"
                         >
-                            <DictionaryTester dict={dict} onQuickFix={handleQuickFix} />
+                            {visited.has("test") && (
+                                <DictionaryTester dict={dict} onQuickFix={handleQuickFix} />
+                            )}
                         </TabsContent>
                     </div>
                 </Tabs>
