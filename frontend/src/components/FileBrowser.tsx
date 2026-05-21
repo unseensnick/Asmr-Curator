@@ -488,11 +488,10 @@ export default function FileBrowser({
         [commitSelection, toggleBatch],
     );
 
-    // File-list keyboard shortcuts (both tabs):
-    //   • Ctrl/Cmd+A — select every visible row, engage batchMode
-    //   • Esc       — deselect everything (matches OS file-manager idiom)
-    // Bails when the user is typing inside an input so the search box
-    // doesn't lose its own Esc-to-clear behaviour.
+    // File-list keyboard shortcuts (both tabs): Ctrl/Cmd+A selects all
+    // visible rows; Esc clears the selection. Bound once via ref-mirrored
+    // state — listing batchSelected / selected / etc. in deps would re-bind
+    // the document listener on every keystroke and drag-mousemove.
     useEffect(() => {
         const handler = (e: KeyboardEvent) => {
             const target = e.target as HTMLElement | null;
@@ -501,11 +500,12 @@ export default function FileBrowser({
 
             if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
                 if (e.key === "a" || e.key === "A") {
-                    if (files.length === 0) return;
-                    const update = selectAll(files);
+                    const currentFiles = filesRef.current;
+                    if (currentFiles.length === 0) return;
+                    const update = selectAll(currentFiles);
                     if (!update) return;
                     e.preventDefault();
-                    if (!batchMode) {
+                    if (!batchModeRef.current) {
                         setBatchMode(true);
                         setSelected(null);
                     }
@@ -516,34 +516,25 @@ export default function FileBrowser({
             }
 
             if (e.key === "Escape") {
-                // Bail when any Radix dialog / sheet / alertdialog is open
-                // (BulkEditSheet, LibrarySettingsSheet, the Browse sheet,
-                // the delete confirm, etc.). The listener is bound to
-                // `document` so it fires regardless of focus — without
-                // this guard, an Esc inside an open sheet would clear
-                // the FileBrowser's bulkSelected in the same keypress,
-                // and since bulkSelected IS the BulkEditSheet's files
-                // prop, the rows would vanish out from under the user.
-                // The overlay layer owns Esc while it's open; only the
-                // root view (no overlay) gets the clear-selection shortcut.
+                // Bail when any Radix dialog / sheet / alertdialog is open;
+                // the overlay layer owns Esc and clearing FileBrowser's
+                // selection would yank the open BulkEditSheet's files prop.
                 if (
                     document.querySelector(
                         '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
                     )
                 )
                     return;
-                // No-op when nothing is selected — let the keypress fall
-                // through to any ancestor (Sheet close, dialog dismiss).
-                if (batchSelected.size === 0 && !selected) return;
+                if (batchSelectedRef.current.size === 0 && !selectedRef.current) return;
                 e.preventDefault();
-                if (batchSelected.size > 0) commitSelection(new Set());
-                if (selectionAnchor) setSelectionAnchor(null);
-                if (selected) setSelected(null);
+                if (batchSelectedRef.current.size > 0) commitSelection(new Set());
+                if (selectionAnchorRef.current) setSelectionAnchor(null);
+                if (selectedRef.current) setSelected(null);
             }
         };
         document.addEventListener("keydown", handler);
         return () => document.removeEventListener("keydown", handler);
-    }, [files, batchMode, batchSelected, selected, selectionAnchor, commitSelection]);
+    }, [commitSelection]);
 
     async function handleBatchConvert() {
         const filesToConvert = files.filter((f) => batchSelected.has(f.path));
