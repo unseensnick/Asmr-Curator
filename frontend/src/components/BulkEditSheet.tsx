@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, BookOpen, Eraser, Loader2, RefreshCw, X } from "lucide-react";
 
+import ConversionPanel from "@/components/ConversionPanel";
 import LibrarySubdirPicker from "@/components/LibrarySubdirPicker";
 import SectionLabel from "@/components/SectionLabel";
 import SheetHeaderBar from "@/components/SheetHeaderBar";
@@ -11,13 +12,16 @@ import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
+    API,
+    apiPost,
     bulkWrite,
     BulkWriteValidationError,
     loadCachedMetadata,
     loadCurrentMetadata,
 } from "@/lib/api";
+import { FORMAT_EXT } from "@/lib/audioFormats";
 import { parseTitleLine } from "@/lib/parser";
-import type { AppDict, FileEntry, VocabEntry } from "@/lib/types";
+import type { AppDict, ConvertFormat, ConvertQuality, FileEntry, VocabEntry } from "@/lib/types";
 import {
     getErrorMessage,
     normaliseAndDedupeTags,
@@ -189,6 +193,31 @@ export default function BulkEditSheet({
     const [moveEnabled, setMoveEnabled] = useState(false);
     const moveAvailable = root === "downloads";
 
+    // Convert section. Off by default — the common bulk-edit case is
+    // metadata only on already-compatible files. When on, the commit
+    // runs `/api/convert` per file BEFORE the bulk-write so the metadata
+    // write + rename + move act on the new (post-convert) paths. Format
+    // / quality defaults come from localStorage so the user's previous
+    // choice carries over the way it used to in the FileBrowser's
+    // standalone batch-convert mode.
+    const [convertEnabled, setConvertEnabled] = useState(false);
+    const [convertFormat, setConvertFormat] = useState<ConvertFormat>(() => {
+        const stored = localStorage.getItem("convertFormat") as ConvertFormat;
+        return stored && stored in FORMAT_EXT ? stored : "mp3";
+    });
+    const [convertQuality, setConvertQuality] = useState<ConvertQuality>(
+        () => (localStorage.getItem("convertQuality") as ConvertQuality) || "high",
+    );
+    const [deleteOriginal, setDeleteOriginal] = useState(false);
+    // Per-file progress during the convert phase of a commit. `null` when
+    // not converting (either convert is off, or we're in the bulk-write
+    // phase that follows).
+    const [convertProgress, setConvertProgress] = useState<{
+        current: number;
+        total: number;
+        currentFile: string;
+    } | null>(null);
+
     // Persistent link between Artist and Album artist (the common case —
     // anything that isn't a compilation). When on, the album_artist
     // input mirrors `shared.artist` live and is disabled; the commit
@@ -358,6 +387,7 @@ export default function BulkEditSheet({
         setLinkArtists(true);
         setRename(false);
         setMoveEnabled(false);
+        setConvertEnabled(false);
         setLoadFeedback({ kind: "none" });
         setSubmitError(null);
         // Mark this file set as handled so the auto-load effect doesn't
@@ -527,7 +557,9 @@ export default function BulkEditSheet({
     // the user can toggle freely without typing.
     const effectiveMoveSubdir = moveEnabled && moveAvailable ? librarySubdir.trim() : "";
     const hasMove = effectiveMoveSubdir !== "";
-    const canCommit = hasPerFileEdit || hasSharedEdit || hasClear || hasRename || hasMove;
+    const hasConvert = convertEnabled;
+    const canCommit =
+        hasPerFileEdit || hasSharedEdit || hasClear || hasRename || hasMove || hasConvert;
     const anyTooLong = rename && previewRows.some((r) => r.tooLong);
 
     async function handleSubmit() {
@@ -535,11 +567,61 @@ export default function BulkEditSheet({
         setIsSubmitting(true);
         setSubmitError(null);
         try {
+            // Phase 0 (optional): convert each file via /api/convert.
+            // Runs FIRST so the bulk-write below operates on the new
+            // (post-convert) paths + extensions. Failures here don't
+            // abort the batch — we fall back to the original file so
+            // metadata writes still apply where they can.
+            const workingFiles: FileEntry[] = [];
+            if (convertEnabled) {
+                const quality = convertFormat === "flac" ? "lossless" : convertQuality;
+                setConvertProgress({
+                    current: 0,
+                    total: files.length,
+                    currentFile: "",
+                });
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    if (!file) continue;
+                    setConvertProgress({
+                        current: i + 1,
+                        total: files.length,
+                        currentFile: file.name,
+                    });
+                    try {
+                        const res = await apiPost<{ path: string; new_name: string }>(API.convert, {
+                            path: file.path,
+                            output_format: convertFormat,
+                            quality,
+                            root,
+                            delete_original: deleteOriginal,
+                        });
+                        const newExt = "." + (res.new_name.split(".").pop() ?? "");
+                        workingFiles.push({
+                            ...file,
+                            path: res.path,
+                            name: res.new_name,
+                            ext: newExt,
+                        });
+                    } catch {
+                        // Convert failed for this file; keep the original
+                        // so bulk-write still applies what it can.
+                        workingFiles.push(file);
+                    }
+                }
+                setConvertProgress(null);
+            } else {
+                workingFiles.push(...files);
+            }
+
             // Build the per-item payload. ID3 title gets brackets stripped
             // (the ID3-vs-filename rule); new_name keeps brackets via
             // composeProposedName already running on the raw edit.title.
-            const items = files.map((file) => {
-                const edit = edits[file.path] ?? EMPTY_EDIT;
+            // edits are keyed by the ORIGINAL path (typed before convert),
+            // but the bulk-write items reference the post-convert path.
+            const items = workingFiles.map((file, i) => {
+                const originalPath = files[i]?.path ?? file.path;
+                const edit = edits[originalPath] ?? EMPTY_EDIT;
                 const proposed = rename ? composeProposedName(edit, file.ext) : null;
                 return {
                     path: file.path,
@@ -576,6 +658,7 @@ export default function BulkEditSheet({
             setLinkArtists(true); // matches the default — see useState init
             setRename(false);
             setMoveEnabled(false);
+            setConvertEnabled(false);
             // librarySubdir is app-wide navigation state — leave it
             // where the user landed it so a follow-up Browse / Move
             // opens at the same spot they just filed files into.
@@ -598,8 +681,27 @@ export default function BulkEditSheet({
             }
         } finally {
             setIsSubmitting(false);
+            setConvertProgress(null);
         }
     }
+
+    // Persist convert preferences so the user's previous choice carries
+    // across sessions (matches the standalone batch-convert mode that
+    // used to live in the FileBrowser before this surface absorbed it).
+    useEffect(() => {
+        try {
+            localStorage.setItem("convertFormat", convertFormat);
+        } catch {
+            // non-fatal
+        }
+    }, [convertFormat]);
+    useEffect(() => {
+        try {
+            localStorage.setItem("convertQuality", convertQuality);
+        } catch {
+            // non-fatal
+        }
+    }, [convertQuality]);
 
     const count = files.length;
     const fileWord = count === 1 ? "file" : "files";
@@ -1073,6 +1175,48 @@ export default function BulkEditSheet({
                         </section>
                     )}
 
+                    <section aria-label="Convert" className="flex flex-col gap-3">
+                        <SectionLabel>Convert</SectionLabel>
+                        <label
+                            htmlFor="bulk-convert-toggle"
+                            className="flex items-start gap-3 cursor-pointer"
+                        >
+                            <Checkbox
+                                id="bulk-convert-toggle"
+                                checked={convertEnabled}
+                                onCheckedChange={(v) => setConvertEnabled(v === true)}
+                                className="mt-0.5"
+                            />
+                            <span className="flex flex-col gap-1 min-w-0">
+                                <span className="text-sm text-foreground">
+                                    Also convert these files
+                                </span>
+                                <span className="text-xs text-muted-foreground leading-relaxed">
+                                    Re-encodes each file with ffmpeg before the metadata write +
+                                    rename + move runs, so the rest of the commit operates on the
+                                    converted files. Formats that already support the tag fields
+                                    will just be re-encoded; formats that don&apos;t (WAV, M4A,
+                                    etc.) become writable for the metadata step that follows.
+                                </span>
+                            </span>
+                        </label>
+
+                        {convertEnabled && (
+                            <div className="flex flex-col gap-3 pl-7">
+                                <ConversionPanel
+                                    formats={["mp3", "flac", "ogg"]}
+                                    format={convertFormat}
+                                    quality={convertQuality}
+                                    deleteOriginal={deleteOriginal}
+                                    onFormatChange={setConvertFormat}
+                                    onQualityChange={setConvertQuality}
+                                    onDeleteChange={setDeleteOriginal}
+                                    checkboxId="bulk-convert-delete-original"
+                                />
+                            </div>
+                        )}
+                    </section>
+
                     <section aria-label="Rename" className="flex flex-col gap-3">
                         <SectionLabel>Rename</SectionLabel>
                         <label
@@ -1200,7 +1344,11 @@ export default function BulkEditSheet({
                         {isSubmitting ? (
                             <Loader2 size={14} aria-hidden className="animate-spin" />
                         ) : null}
-                        {isSubmitting ? "Applying…" : "Apply changes"}
+                        {isSubmitting
+                            ? convertProgress
+                                ? `Converting (${convertProgress.current} of ${convertProgress.total})…`
+                                : "Applying…"
+                            : "Apply changes"}
                     </Button>
                 </div>
             </SheetContent>

@@ -14,15 +14,12 @@ import {
     FilePen,
     Folder,
     FolderOpen,
-    ListChecks,
     Loader2,
     PenLine,
     RefreshCw,
-    Repeat,
     Trash2,
 } from "lucide-react";
 
-import ConversionPanel from "@/components/ConversionPanel";
 import FileBrowserItem from "@/components/FileBrowserItem";
 import RecoverableErrorBanner from "@/components/RecoverableErrorBanner";
 import SelectedFilePanel from "@/components/SelectedFilePanel";
@@ -92,18 +89,6 @@ interface SearchResponse {
     files: FileEntry[];
 }
 
-interface ConvertResponse {
-    path: string;
-    new_name: string;
-}
-
-interface BatchProgress {
-    current: number;
-    total: number;
-    currentFile: string;
-    results: Array<{ name: string; ok: boolean; error?: string }>;
-}
-
 /**
  * File library shell. Two tabs (Library = LIBRARY_PATH archive, Downloads =
  * DOWNLOAD_PATH staging) share one right-hand SelectedFilePanel for rename
@@ -162,13 +147,13 @@ export default function FileBrowser({
     );
     const [deleteOriginal, setDeleteOriginal] = useState(false);
 
-    // Batch state. `batchSelected` is now a DERIVED view of the
-    // controlled `bulkSelected` prop — the canonical multi-selection
-    // lives in App.tsx so the BulkEditSheet's X button can deselect a
-    // file here just by trimming the array (no separate notification).
-    const [batchMode, setBatchMode] = useState(false);
+    // Multi-select state. `batchSelected` is a derived view of the
+    // controlled `bulkSelected` prop (lifted to App.tsx). `batchMode` is
+    // derived: any non-empty selection shows row checkboxes and the
+    // SelectionActionBar. Explicit "Batch convert mode" toggle is gone;
+    // conversion lives inside BulkEditSheet's Convert section now.
     const batchSelected = useMemo(() => new Set(bulkSelected.map((f) => f.path)), [bulkSelected]);
-    const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null);
+    const batchMode = bulkSelected.length > 0;
     // Anchor for Shift-click range selection. Tracks the row a future
     // Shift-click should extend FROM. Plain and toggle clicks move the
     // anchor onto themselves; the empty-area drag-clear path zeroes it
@@ -230,16 +215,13 @@ export default function FileBrowser({
     // ref. A constant null means "never block dragging on a rename".
     const renamePathRef = useRef<string | null>(null);
 
-    // Wrapped setter that enters batch mode + clears the single-select
-    // anchor whenever a multi-select drag yields any rows. Plain empty
-    // drags fall through to `commitSelection(new Set())` which leaves
-    // batchMode alone.
+    // Drag-select wrapper. Clears the single-select anchor whenever a
+    // multi-select drag yields any rows; batch mode is derived from the
+    // committed selection, so we only have to flip `selected` to null
+    // explicitly.
     const setBatchSelectedFromDrag = useCallback(
         (next: Set<string>) => {
-            if (next.size > 0) {
-                setBatchMode(true);
-                setSelected(null);
-            }
+            if (next.size > 0) setSelected(null);
             commitSelection(next);
         },
         [commitSelection],
@@ -459,8 +441,10 @@ export default function FileBrowser({
         loadFiles(query, searchMode, next);
     }
 
-    // ── Batch convert ─────────────────────────────────────────────────────
-
+    // "Select all convertible" — used to live in the standalone batch-
+    // convert mode; now surfaces as a button in the SelectionActionBar
+    // (and as a no-op when there's nothing convertible). Same as the
+    // previous behaviour without the explicit batch-mode entry gate.
     function selectAllConvertible() {
         const paths = files
             .filter((f) => NEEDS_CONVERSION_EXTS.has(f.ext) || !!f.needs_conversion)
@@ -471,17 +455,14 @@ export default function FileBrowser({
     // Live mirrors so the click handlers below stay reference-stable
     // (useCallback with empty deps). Without this, every parent re-render
     // would mint fresh handler identities, blowing the FileBrowserItem
-    // memoization on every drag-mousemove / batch state churn.
+    // memoization on every drag-mousemove. `batchMode` is derived from
+    // `bulkSelected.length` and gets read off `batchSelectedRef` instead.
     const selectedRef = useRef<FileEntry | null>(selected);
-    const batchModeRef = useRef<boolean>(batchMode);
     const selectionAnchorRef = useRef<string | null>(selectionAnchor);
     const filesRef = useRef<FileEntry[]>(files);
     useEffect(() => {
         selectedRef.current = selected;
     }, [selected]);
-    useEffect(() => {
-        batchModeRef.current = batchMode;
-    }, [batchMode]);
     useEffect(() => {
         selectionAnchorRef.current = selectionAnchor;
     }, [selectionAnchor]);
@@ -502,7 +483,9 @@ export default function FileBrowser({
     const handleListClick = useCallback(
         (file: FileEntry, modifiers: { shift: boolean; toggle: boolean }) => {
             const isMulti = modifiers.shift || modifiers.toggle;
-            const inBatchMode = batchModeRef.current;
+            // batch mode is derived from `bulkSelected.length > 0`; the live
+            // selection size is the source of truth here.
+            const inBatchMode = batchSelectedRef.current.size > 0;
             const currentSelected = selectedRef.current;
 
             if (isMulti) {
@@ -521,10 +504,7 @@ export default function FileBrowser({
                     file.path,
                     modifiers,
                 );
-                if (!inBatchMode) {
-                    setBatchMode(true);
-                    setSelected(null);
-                }
+                if (!inBatchMode) setSelected(null);
                 commitSelection(update.selected);
                 setSelectionAnchor(update.anchor);
                 return;
@@ -558,10 +538,7 @@ export default function FileBrowser({
                     const update = selectAll(currentFiles);
                     if (!update) return;
                     e.preventDefault();
-                    if (!batchModeRef.current) {
-                        setBatchMode(true);
-                        setSelected(null);
-                    }
+                    if (batchSelectedRef.current.size === 0) setSelected(null);
                     commitSelection(update.selected);
                     setSelectionAnchor(update.anchor);
                     return;
@@ -589,58 +566,9 @@ export default function FileBrowser({
         return () => document.removeEventListener("keydown", handler);
     }, [commitSelection]);
 
-    async function handleBatchConvert() {
-        const filesToConvert = files.filter((f) => batchSelected.has(f.path));
-        if (!filesToConvert.length) return;
-        const quality = convertFormat === "flac" ? "lossless" : convertQuality;
-        const results: BatchProgress["results"] = [];
-        setBatchProgress({
-            current: 0,
-            total: filesToConvert.length,
-            currentFile: "",
-            results: [],
-        });
-        for (let i = 0; i < filesToConvert.length; i++) {
-            const file = filesToConvert[i];
-            if (!file) continue;
-            setBatchProgress({
-                current: i + 1,
-                total: filesToConvert.length,
-                currentFile: file.name,
-                results: [...results],
-            });
-            try {
-                await apiPost<ConvertResponse>(API.convert, {
-                    path: file.path,
-                    output_format: convertFormat,
-                    quality,
-                    root,
-                    delete_original: deleteOriginal,
-                });
-                results.push({ name: file.name, ok: true });
-            } catch (e) {
-                results.push({
-                    name: file.name,
-                    ok: false,
-                    error: getErrorMessage(e),
-                });
-            }
-        }
-        setBatchProgress({
-            current: filesToConvert.length,
-            total: filesToConvert.length,
-            currentFile: "",
-            results: [...results],
-        });
-        commitSelection(new Set());
-        await loadFiles(query, searchMode, root);
-    }
-
-    function toggleBatchMode() {
-        setBatchMode((v) => !v);
+    function clearBatchSelection() {
         commitSelection(new Set());
         setSelectionAnchor(null);
-        setBatchProgress(null);
     }
 
     // ── Context menu + inline rename + delete ─────────────────────────────────
@@ -820,11 +748,21 @@ export default function FileBrowser({
                                 searchMode={searchMode}
                                 onSearchModeChange={handleModeChange}
                                 loading={loading}
-                                batchMode={batchMode}
-                                onToggleBatchMode={toggleBatchMode}
                                 onRefresh={() => loadFiles(query, searchMode, root)}
                                 onOpenExplorer={() => setExplorerOpen(true)}
                             />
+
+                            {batchMode && (
+                                <SelectionActionBar
+                                    count={bulkSelected.length}
+                                    onBulkEdit={
+                                        onOpenBulkEdit ? () => onOpenBulkEdit(root) : undefined
+                                    }
+                                    onDelete={requestDeleteBulk}
+                                    onSelectAllConvertible={selectAllConvertible}
+                                    onClear={clearBatchSelection}
+                                />
+                            )}
 
                             <div className="grid grid-cols-1 lg:grid-cols-[3fr_4fr] gap-4 items-start">
                                 {/* modal={false}: skips Radix's
@@ -962,25 +900,13 @@ export default function FileBrowser({
                                 </ContextMenu>
                                 <WorkArea
                                     root={root}
-                                    batchMode={batchMode}
                                     batchSelected={batchSelected}
-                                    batchProgress={batchProgress}
                                     convertFormat={convertFormat}
                                     convertQuality={convertQuality}
                                     deleteOriginal={deleteOriginal}
                                     onConvertFormatChange={setConvertFormat}
                                     onConvertQualityChange={setConvertQuality}
                                     onDeleteOriginalChange={setDeleteOriginal}
-                                    onSelectAllConvertible={selectAllConvertible}
-                                    onClearBatch={() => {
-                                        commitSelection(new Set());
-                                        setSelectionAnchor(null);
-                                    }}
-                                    onBatchConvert={handleBatchConvert}
-                                    onClearBatchResults={() => setBatchProgress(null)}
-                                    onOpenBulkEdit={
-                                        onOpenBulkEdit ? () => onOpenBulkEdit(root) : undefined
-                                    }
                                     selected={selected}
                                     outputDash={outputDash}
                                     outputPipe={outputPipe}
@@ -1136,8 +1062,6 @@ interface SearchRowProps {
     searchMode: SearchMode;
     onSearchModeChange: (m: SearchMode) => void;
     loading: boolean;
-    batchMode: boolean;
-    onToggleBatchMode: () => void;
     onRefresh: () => void;
     /** Opens the LibraryExplorerSheet for folder-tree navigation. The
      *  sheet has its own root selector (Library / Downloads), so it
@@ -1152,8 +1076,6 @@ function SearchRow({
     searchMode,
     onSearchModeChange,
     loading,
-    batchMode,
-    onToggleBatchMode,
     onRefresh,
     onOpenExplorer,
 }: SearchRowProps) {
@@ -1200,21 +1122,6 @@ function SearchRow({
                 <TooltipContent side="bottom" className="max-w-xs">
                     Browse the library folder tree, create folders, delete entries
                 </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-                <TooltipTrigger asChild>
-                    <Button
-                        size="sm"
-                        variant={batchMode ? "default" : "outline"}
-                        onClick={onToggleBatchMode}
-                        className="shrink-0"
-                        aria-label="Toggle batch convert mode"
-                        aria-pressed={batchMode}
-                    >
-                        <ListChecks size={14} aria-hidden />
-                    </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Batch mode</TooltipContent>
             </Tooltip>
             <Tooltip>
                 <TooltipTrigger asChild>
@@ -1481,23 +1388,13 @@ function DragSelectOverlay({
 
 interface WorkAreaProps {
     root: FileRoot;
-    batchMode: boolean;
     batchSelected: Set<string>;
-    batchProgress: BatchProgress | null;
     convertFormat: ConvertFormat;
     convertQuality: ConvertQuality;
     deleteOriginal: boolean;
     onConvertFormatChange: (f: ConvertFormat) => void;
     onConvertQualityChange: (q: ConvertQuality) => void;
     onDeleteOriginalChange: (v: boolean) => void;
-    onSelectAllConvertible: () => void;
-    onClearBatch: () => void;
-    onBatchConvert: () => void;
-    onClearBatchResults: () => void;
-    /** Open the BulkEditSheet with the current batch selection. Undefined
-     *  when the parent didn't wire a handler — render path treats that as
-     *  "feature not available here". */
-    onOpenBulkEdit?: () => void;
     selected: FileEntry | null;
     outputDash: string;
     outputPipe: string;
@@ -1512,25 +1409,6 @@ interface WorkAreaProps {
 }
 
 function WorkArea(props: WorkAreaProps) {
-    if (props.batchMode) {
-        return (
-            <BatchConvertPanel
-                batchSelected={props.batchSelected}
-                batchProgress={props.batchProgress}
-                convertFormat={props.convertFormat}
-                convertQuality={props.convertQuality}
-                deleteOriginal={props.deleteOriginal}
-                onConvertFormatChange={props.onConvertFormatChange}
-                onConvertQualityChange={props.onConvertQualityChange}
-                onDeleteOriginalChange={props.onDeleteOriginalChange}
-                onSelectAllConvertible={props.onSelectAllConvertible}
-                onClearBatch={props.onClearBatch}
-                onBatchConvert={props.onBatchConvert}
-                onClearBatchResults={props.onClearBatchResults}
-                onOpenBulkEdit={props.onOpenBulkEdit}
-            />
-        );
-    }
     if (props.selected) {
         return (
             <SelectedFilePanel
@@ -1555,6 +1433,12 @@ function WorkArea(props: WorkAreaProps) {
             />
         );
     }
+    if (props.batchSelected.size > 0) {
+        // Multi-select state — actions live in the SelectionActionBar
+        // above the file list. The right pane stays empty so the file
+        // list keeps its full width while the user picks more rows.
+        return null;
+    }
     // Empty placeholder, lg+ only (on mobile, the empty right column would
     // be a useless wedge of space below the file list).
     return (
@@ -1566,147 +1450,65 @@ function WorkArea(props: WorkAreaProps) {
     );
 }
 
-interface BatchConvertPanelProps {
-    batchSelected: Set<string>;
-    batchProgress: BatchProgress | null;
-    convertFormat: ConvertFormat;
-    convertQuality: ConvertQuality;
-    deleteOriginal: boolean;
-    onConvertFormatChange: (f: ConvertFormat) => void;
-    onConvertQualityChange: (q: ConvertQuality) => void;
-    onDeleteOriginalChange: (v: boolean) => void;
-    onSelectAllConvertible: () => void;
-    onClearBatch: () => void;
-    onBatchConvert: () => void;
-    onClearBatchResults: () => void;
-    onOpenBulkEdit?: () => void;
-}
-
-function BatchConvertPanel({
-    batchSelected,
-    batchProgress,
-    convertFormat,
-    convertQuality,
-    deleteOriginal,
-    onConvertFormatChange,
-    onConvertQualityChange,
-    onDeleteOriginalChange,
+/** SelectionActionBar — surfaces when 2+ files are selected. Carries the
+ *  multi-file actions Bulk edit + Delete, plus Select-convertible (still
+ *  useful even with batch-convert folded into Bulk edit, e.g. when the
+ *  user wants the convertible subset of a search result) and Clear. */
+function SelectionActionBar({
+    count,
+    onBulkEdit,
+    onDelete,
     onSelectAllConvertible,
-    onClearBatch,
-    onBatchConvert,
-    onClearBatchResults,
-    onOpenBulkEdit,
-}: BatchConvertPanelProps) {
-    const inFlight = batchProgress !== null && !!batchProgress.currentFile;
-    const failedCount = batchProgress ? batchProgress.results.filter((r) => !r.ok).length : 0;
-    const okCount = batchProgress ? batchProgress.results.filter((r) => r.ok).length : 0;
-
+    onClear,
+}: {
+    count: number;
+    onBulkEdit?: () => void;
+    onDelete: () => void;
+    onSelectAllConvertible: () => void;
+    onClear: () => void;
+}) {
     return (
-        <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-                <span className="text-sm font-medium text-foreground">
-                    {batchSelected.size} file
-                    {batchSelected.size === 1 ? "" : "s"} selected
-                </span>
-                <div className="flex items-center gap-3 text-xs">
-                    <button
-                        type="button"
-                        onClick={onSelectAllConvertible}
-                        className="text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                        Select convertible
-                    </button>
-                    {batchSelected.size > 0 && (
-                        <button
-                            type="button"
-                            onClick={onClearBatch}
-                            className="text-muted-foreground hover:text-destructive transition-colors"
-                        >
-                            Clear
-                        </button>
-                    )}
-                </div>
-            </div>
-
-            {/* Bulk edit affordance — separate operation that happens to
-                share the same selection state. Gated at 2+ so a single
-                selected file routes through the standard
-                SelectedFilePanel instead, where rename + metadata write
-                already live for that case. */}
-            {onOpenBulkEdit && batchSelected.size >= 2 && (
+        <div className="flex items-center gap-3 flex-wrap px-3 py-2 rounded-md bg-accent/30 border border-accent/40 text-sm">
+            <span className="font-medium text-foreground">
+                {count} file{count === 1 ? "" : "s"} selected
+            </span>
+            <div className="flex items-center gap-2 ml-auto flex-wrap">
                 <Button
                     type="button"
-                    variant="outline"
-                    onClick={onOpenBulkEdit}
-                    className="h-10 w-full gap-2 text-sm"
+                    size="sm"
+                    variant="ghost"
+                    onClick={onSelectAllConvertible}
+                    className="text-xs"
                 >
-                    <FilePen size={16} aria-hidden />
-                    Bulk edit {batchSelected.size} files
+                    Select convertible
                 </Button>
-            )}
-
-            <ConversionPanel
-                formats={["mp3", "flac", "ogg"]}
-                format={convertFormat}
-                quality={convertQuality}
-                deleteOriginal={deleteOriginal}
-                onFormatChange={onConvertFormatChange}
-                onQualityChange={onConvertQualityChange}
-                onDeleteChange={onDeleteOriginalChange}
-                checkboxId="delete-original-batch"
-            />
-
-            {batchProgress && (
-                <div className="flex flex-col gap-1.5">
-                    {inFlight ? (
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Loader2
-                                size={14}
-                                aria-hidden
-                                className="animate-spin text-muted-foreground shrink-0"
-                            />
-                            <span>
-                                Converting {batchProgress.current} of {batchProgress.total}:{" "}
-                                <span className="font-mono text-xs">
-                                    {batchProgress.currentFile}
-                                </span>
-                            </span>
-                        </div>
-                    ) : (
-                        <p className="text-sm text-success">
-                            Converted {okCount}
-                            {failedCount > 0 ? `. ${failedCount} failed.` : "."}
-                        </p>
-                    )}
-                    {batchProgress.results
-                        .filter((r) => !r.ok)
-                        .map((r, i) => (
-                            <p key={i} className="text-xs text-destructive font-mono break-all">
-                                {r.name}: {r.error}
-                            </p>
-                        ))}
-                </div>
-            )}
-
-            <Button
-                onClick={onBatchConvert}
-                disabled={batchSelected.size === 0 || inFlight}
-                className="h-12 w-full gap-2 text-base"
-            >
-                <Repeat size={18} aria-hidden />
-                Convert {batchSelected.size} file
-                {batchSelected.size === 1 ? "" : "s"}
-            </Button>
-
-            {batchProgress && !inFlight && (
-                <button
+                {onBulkEdit && count >= 2 && (
+                    <Button type="button" size="sm" variant="outline" onClick={onBulkEdit}>
+                        <FilePen size={14} aria-hidden />
+                        Bulk edit
+                    </Button>
+                )}
+                <Button
                     type="button"
-                    onClick={onClearBatchResults}
-                    className="text-xs text-muted-foreground hover:text-foreground transition-colors text-center"
+                    size="sm"
+                    variant="outline"
+                    onClick={onDelete}
+                    className="gap-1.5"
                 >
-                    Clear results
-                </button>
-            )}
+                    <Trash2 size={14} aria-hidden />
+                    Delete
+                </Button>
+                <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={onClear}
+                    aria-label="Clear selection"
+                    className="text-muted-foreground hover:text-foreground"
+                >
+                    Clear
+                </Button>
+            </div>
         </div>
     );
 }
