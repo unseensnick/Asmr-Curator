@@ -253,7 +253,7 @@ function SetupTopic() {
         <article className="flex flex-col gap-5">
             <TopicHeader
                 title="Getting started"
-                lede="One-time setup so the Patreon and Drive paths can read your sessions. After this you only revisit it when a cookie expires (about 30 days for Patreon, 14 for Google)."
+                lede="One-time setup so the Patreon and Drive paths can read your sessions. Cookies are small login files your browser stores so sites remember you're signed in; after this you only revisit when one expires (about 30 days for Patreon, 14 for Google)."
             />
 
             <section className="flex flex-col gap-3">
@@ -291,13 +291,13 @@ function SetupTopic() {
                     />
                     <HelpCard
                         icon={<Globe size={14} aria-hidden />}
-                        title="Firefox 121+ (quick, but resets on restart)"
+                        title="Firefox (temporary install — resets when you close Firefox)"
                         body="Visit about:debugging#/runtime/this-firefox. Click Load Temporary Add-on and pick the manifest.json file inside the unzipped folder. The extension works until you close Firefox. Useful for trying it out; not for daily use."
                     />
                     <HelpCard
                         icon={<Globe size={14} aria-hidden />}
                         title="Firefox Developer Edition, Nightly, or Zen (persistent install)"
-                        body="Visit about:config and set xpinstall.signatures.required to false. Restart the browser. Then drag the .zip file onto the browser window to install. Regular Firefox (release / ESR) refuses unsigned extensions even with this setting; you need Developer Edition, Nightly, or a fork like Zen / LibreWolf."
+                        body="Visit about:config and set xpinstall.signatures.required to false (it's a Firefox setting that controls whether unsigned add-ons are allowed). Restart the browser. Then drag the .zip file onto the browser window to install. Regular Firefox (release / ESR) refuses unsigned extensions even with this setting; you need Developer Edition, Nightly, or a fork like Zen / LibreWolf."
                     />
                 </div>
             </section>
@@ -536,7 +536,7 @@ function BulkTopic() {
                     <HelpCard
                         icon={<FileAudio size={14} aria-hidden />}
                         title="Rename to canonical filenames"
-                        body="Toggle Rename on to write each file's new filename when the commit lands. Each per-row preview shows the proposed name with a small byte count next to it; the count goes amber past 200 bytes and red past 255 (the filesystem cap) so you can shorten tags before committing."
+                        body="Toggle Rename on to write each file's new filename when the commit lands. Each per-row preview shows the proposed name with a small character count next to it; the count turns amber if the name is getting long, and red if it's too long for your operating system to save."
                     />
                     <HelpCard
                         icon={<FolderOpen size={14} aria-hidden />}
@@ -754,7 +754,7 @@ function SelfhostTopic() {
             <HelpCard
                 icon={<Network size={14} aria-hidden />}
                 title="Behind a reverse proxy"
-                body="The app serves the SPA and the API from the same port. Point your proxy at the backend port, set the extension's Backend URL to the public hostname, and you're done. CORS is locked to same-origin in production."
+                body="The app serves the UI and the API from the same port. Point your proxy at the backend port, set the extension's Backend URL to the public hostname, and you're done. The app only accepts requests from itself, not other websites — no extra configuration needed."
             />
         </article>
     );

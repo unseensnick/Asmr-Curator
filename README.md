@@ -147,7 +147,7 @@ For posts that can't be fetched via patreon-dl, drop or paste an image into the 
 
 ### Library management
 
-- **Two-tab file browser.** **Library** (`LIBRARY_PATH`, your curated archive) and **Downloads** (`DOWNLOAD_PATH`, ingest staging, with a pending-count badge so forgotten downloads don't sit unnoticed). Live search by filename, folder, or both inside the active tab.
+- **Two-tab file browser.** **Library** (`LIBRARY_PATH`, your curated archive) and **Downloads** (`DOWNLOAD_PATH`, ingest staging, with a pending-count badge so forgotten downloads don't sit unnoticed). Library mode shows a clickable breadcrumb above the list so you can drill into subfolders without leaving the panel; Live search by filename, folder, or both inside the active tab.
 - **Browse Sheet** — opens via the toolbar **Browse** button. Persistent left rail switches between Library and Downloads in one click. Both share the same selection model:
   - Single-click selects, double-click activates (drill folder / open file)
   - Shift-click and Ctrl/Cmd-click extend, drag-select rubber-bands a rectangle (auto-scrolls near edges)
@@ -426,16 +426,6 @@ Versions before v2.0.1 used a single `LIBRARY_PATH`. Now both paths are required
 - **Export**: Click **Export JSON** in the Dictionary modal → saves a portable JSON file
 - **Import**: Click **Import JSON** → replaces the entire dictionary from a JSON file
 - **Raw backup**: Copy `./data/dictionary.db` — it's a plain SQLite file that persists across container rebuilds
-
-### File Renaming
-
-The **File to Rename** section lets you:
-
-1. Search your audio library by filename, folder, or both using the live search with debouncing
-2. Select a file from the results list
-3. Choose a separator — dash (filesystem-safe) or pipe (for metadata)
-4. Preview the new filename with byte-length indicator (255-byte limit enforced)
-5. Click **Rename File** to apply the change on the server
 
 ## Contributing
 
