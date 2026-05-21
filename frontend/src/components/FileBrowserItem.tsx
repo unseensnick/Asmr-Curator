@@ -17,10 +17,8 @@ interface FileBrowserItemProps {
      *  a fresh function per render and defeat memoization). */
     onClick: (file: FileEntry, modifiers: { shift: boolean; toggle: boolean }) => void;
     onBatchToggle: (path: string) => void;
-    /** Inline-rename state. When `renaming` is true the row swaps the
-     *  filename label for an Input — Enter commits via `onRenameSubmit`,
-     *  Escape aborts via `onRenameCancel`, blur commits like Enter
-     *  (matches the LibraryExplorerSheet convention). */
+    /** Inline rename: Enter / blur commit, Escape aborts. Matches
+     *  LibraryExplorerSheet's rename UX. */
     renaming?: boolean;
     renameValue?: string;
     onRenameChange?: (next: string) => void;
@@ -44,10 +42,6 @@ interface FileBrowserItemProps {
  * that the row truncates stay legible without a selection or right-click.
  * The delay (`delayDuration={500}`) keeps the tooltip from popping on
  * every pointer fly-over.
- *
- * Inline rename mode swaps the filename label for an Input — same shape
- * the LibraryExplorerSheet uses, just inline in this row template so
- * right-click → Rename in the FileBrowser feels identical.
  */
 function FileBrowserItemImpl({
     file,
@@ -65,16 +59,19 @@ function FileBrowserItemImpl({
     const fileNeedsConversion = !!file.needs_conversion || NEEDS_CONVERSION_EXTS.has(file.ext);
 
     const highlight = batchMode ? isBatchSelected : isSelected;
+    // min-h-14 keeps single-line rows (Library subdir listing, empty
+    // folder field) the same height as 2-line rows in recursive search /
+    // Downloads so row rhythm is consistent across tabs.
     const rowClass = highlight
-        ? "flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-border last:border-b-0 transition-colors bg-accent/40 text-foreground"
-        : "flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-border last:border-b-0 transition-colors hover:bg-muted/60";
+        ? "flex items-center gap-3 px-3 py-2.5 min-h-14 cursor-pointer border-b border-border last:border-b-0 transition-colors bg-accent/40 text-foreground"
+        : "flex items-center gap-3 px-3 py-2.5 min-h-14 cursor-pointer border-b border-border last:border-b-0 transition-colors hover:bg-muted/60";
 
     const renameInputRef = useRef<HTMLInputElement | null>(null);
     useEffect(() => {
         if (!renaming) return;
         // Focus + select the basename (everything up to the last dot)
         // so the user can type a new title without clobbering the
-        // extension. Matches the inline-rename UX in the Browse sheet.
+        // extension.
         const el = renameInputRef.current;
         if (!el) return;
         el.focus();
@@ -90,10 +87,8 @@ function FileBrowserItemImpl({
                 data-entry-path={file.path}
             >
                 <FileIcon ext={file.ext} />
-                {/* Wrapper carries min-w-0 the same way the read-mode row
-                    constrains its filename column, so a long pre-filled
-                    value can't push the row's intrinsic width past the
-                    file-list column and reflow the list grid. */}
+                {/* min-w-0 so a long pre-filled rename value can't push the
+                    row past its grid column and reflow the list. */}
                 <div className="flex-1 min-w-0">
                     <Input
                         ref={renameInputRef}
@@ -182,11 +177,9 @@ function FileBrowserItemImpl({
     );
 }
 
-/** Custom equality so a parent re-render (drag-mousemove, batchSelected
- *  set identity churn, App-state churn) doesn't re-render every row.
- *  Compares the primitive props that actually visually change. The callback
- *  props (onClick / onBatchToggle / rename callbacks) are accepted as stable
- *  references from the parent — see FileBrowser's useCallback wrappers. */
+/** Custom equality so parent re-renders (drag mousemove, batch set
+ *  identity churn) don't re-render every row. Callback props must be
+ *  stable refs from the parent — see FileBrowser's useCallback wrappers. */
 function arePropsEqual(prev: FileBrowserItemProps, next: FileBrowserItemProps): boolean {
     return (
         prev.file === next.file &&

@@ -1,13 +1,4 @@
-import {
-    lazy,
-    Suspense,
-    useCallback,
-    useEffect,
-    useLayoutEffect,
-    useMemo,
-    useRef,
-    useState,
-} from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     ChevronDown,
     ChevronRight,
@@ -764,7 +755,11 @@ export default function FileBrowser({
                                 />
                             )}
 
-                            <div className="grid grid-cols-1 lg:grid-cols-[3fr_4fr] gap-4 items-start">
+                            {/* 3:2 split on lg+; min-w-0 on both children so fr
+                                shares hold regardless of intrinsic content width
+                                (long mono filenames would otherwise blow the
+                                column past its share). */}
+                            <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-4 items-start">
                                 {/* modal={false}: skips Radix's
                                     aria-hide-siblings + focus-trap step
                                     that's reserved for true modals.
@@ -779,7 +774,11 @@ export default function FileBrowser({
                                     <ContextMenuTrigger asChild>
                                         <div
                                             onContextMenu={resolveMenuTarget}
-                                            className="flex flex-col gap-2"
+                                            // min-w-0 so wide intrinsic content
+                                            // (long folder names, breadcrumb)
+                                            // can't blow this cell past its 3fr
+                                            // share.
+                                            className="flex flex-col gap-2 min-w-0"
                                         >
                                             {isSubdirListingMode(root, query) && (
                                                 <FileBrowserBreadcrumb
@@ -898,42 +897,44 @@ export default function FileBrowser({
                                             })()}
                                     </ContextMenuContent>
                                 </ContextMenu>
-                                <WorkArea
-                                    root={root}
-                                    batchSelected={batchSelected}
-                                    convertFormat={convertFormat}
-                                    convertQuality={convertQuality}
-                                    deleteOriginal={deleteOriginal}
-                                    onConvertFormatChange={setConvertFormat}
-                                    onConvertQualityChange={setConvertQuality}
-                                    onDeleteOriginalChange={setDeleteOriginal}
-                                    selected={selected}
-                                    outputDash={outputDash}
-                                    outputPipe={outputPipe}
-                                    extractedArtist={extractedArtist}
-                                    librarySubdir={librarySubdir}
-                                    onLibrarySubdirChange={setLibrarySubdir}
-                                    onDeselect={() => setSelected(null)}
-                                    onSelectedChange={setSelected}
-                                    onListReload={() => {
-                                        loadFiles(query, searchMode, root);
-                                        refreshDownloadsCount();
-                                    }}
-                                    onMovedToLibrary={() => {
-                                        // User stays on whichever tab they
-                                        // were on — when batching multiple
-                                        // files out of Downloads, auto-
-                                        // switching to Library every time
-                                        // forced the user to re-switch back
-                                        // for each file. onListReload (one
-                                        // prop above) already refreshes the
-                                        // current list + the Downloads
-                                        // badge, so the moved file just
-                                        // vanishes from where it was.
-                                        setSelected(null);
-                                    }}
-                                    onError={setError}
-                                />
+                                <div className="min-w-0">
+                                    <WorkArea
+                                        root={root}
+                                        batchSelected={batchSelected}
+                                        convertFormat={convertFormat}
+                                        convertQuality={convertQuality}
+                                        deleteOriginal={deleteOriginal}
+                                        onConvertFormatChange={setConvertFormat}
+                                        onConvertQualityChange={setConvertQuality}
+                                        onDeleteOriginalChange={setDeleteOriginal}
+                                        selected={selected}
+                                        outputDash={outputDash}
+                                        outputPipe={outputPipe}
+                                        extractedArtist={extractedArtist}
+                                        librarySubdir={librarySubdir}
+                                        onLibrarySubdirChange={setLibrarySubdir}
+                                        onDeselect={() => setSelected(null)}
+                                        onSelectedChange={setSelected}
+                                        onListReload={() => {
+                                            loadFiles(query, searchMode, root);
+                                            refreshDownloadsCount();
+                                        }}
+                                        onMovedToLibrary={() => {
+                                            // User stays on whichever tab they
+                                            // were on — when batching multiple
+                                            // files out of Downloads, auto-
+                                            // switching to Library every time
+                                            // forced the user to re-switch back
+                                            // for each file. onListReload (one
+                                            // prop above) already refreshes the
+                                            // current list + the Downloads
+                                            // badge, so the moved file just
+                                            // vanishes from where it was.
+                                            setSelected(null);
+                                        }}
+                                        onError={setError}
+                                    />
+                                </div>
                             </div>
                         </div>
                     </CollapsibleContent>
@@ -1251,11 +1252,7 @@ function FileList({
                     ))}
                 </>
             )}
-            {/* Drag-select overlay. Rendered as a portal-like absolute
-                element inside the scroll container so the rectangle sits
-                visually on top of the rows. The hook itself owns the
-                math; we just paint what it tells us. */}
-            {dragRect && <DragSelectOverlay rect={dragRect} containerRef={scrollContainerRef} />}
+            {dragRect && <DragSelectOverlay rect={dragRect} />}
         </div>
     );
 }
@@ -1267,7 +1264,7 @@ function FolderRow({ name, onOpen }: { name: string; onOpen: () => void }) {
         <button
             type="button"
             onClick={onOpen}
-            className="flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-border last:border-b-0 transition-colors hover:bg-muted/60 w-full text-left"
+            className="flex items-center gap-3 px-3 py-2.5 min-h-14 cursor-pointer border-b border-border last:border-b-0 transition-colors hover:bg-muted/60 w-full text-left"
         >
             <Folder size={18} aria-hidden className="text-muted-foreground shrink-0" />
             <span className="flex-1 font-medium text-foreground truncate">{name}</span>
@@ -1342,46 +1339,24 @@ function FileBrowserBreadcrumb({
     );
 }
 
-/** Translucent rectangle painted while a drag-rubber-band is in flight.
- *  Positioned in container-local content coordinates (so the overlay
- *  scrolls with the rows). Reads the container ref inside a layout
- *  effect — React 19's `react-hooks/refs` rule forbids reading
- *  `.current` during render, so we mirror the rect into state. */
-function DragSelectOverlay({
-    rect,
-    containerRef,
-}: {
-    rect: DragRect;
-    containerRef: React.MutableRefObject<HTMLDivElement | null>;
-}) {
-    const [pos, setPos] = useState<{
-        left: number;
-        top: number;
-        width: number;
-        height: number;
-    } | null>(null);
-
-    useLayoutEffect(() => {
-        const container = containerRef.current;
-        if (!container) {
-            setPos(null);
-            return;
-        }
-        const c = container.getBoundingClientRect();
-        setPos({
-            left: rect.left - c.left + container.scrollLeft,
-            top: rect.top - c.top + container.scrollTop,
-            width: rect.width,
-            height: rect.height,
-        });
-    }, [rect, containerRef]);
-
-    if (!pos) return null;
+/** Translucent rectangle painted during a drag-rubber-band.
+ *  Positioned in viewport coords — see the in-body comment for why. */
+function DragSelectOverlay({ rect }: { rect: DragRect }) {
+    // position: fixed (not absolute-in-container): absolute children
+    // contribute to scrollHeight, so a growing rect would extend the
+    // scrollable area and let auto-scroll feed back on itself forever.
+    // The hit-test already runs in viewport coords, so fixed also keeps
+    // overlay position consistent with the gesture's anchor.
     return (
         <div
             aria-hidden
-            className="absolute pointer-events-none bg-accent/15 border border-accent/40 rounded-sm"
-            style={pos}
+            className="fixed pointer-events-none bg-accent/15 border border-accent/40 rounded-sm z-50"
+            style={{
+                left: rect.left,
+                top: rect.top,
+                width: rect.width,
+                height: rect.height,
+            }}
         />
     );
 }

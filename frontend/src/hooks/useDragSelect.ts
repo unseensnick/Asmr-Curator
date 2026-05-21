@@ -25,7 +25,6 @@ export interface UseDragSelectOptions {
     /** Non-null means an inline rename is active; drag-select stays off. */
     renamePathRef: MutableRefObject<string | null>;
     setSelectedPaths: (next: Set<string>) => void;
-    /** Cleared alongside the selection on an empty-area no-op click. */
     setAnchorPath: (next: string | null) => void;
 }
 
@@ -33,10 +32,20 @@ export interface UseDragSelectResult {
     scrollContainerRef: MutableRefObject<HTMLDivElement | null>;
     onMouseDown: (e: ReactMouseEvent<HTMLDivElement>) => void;
     dragRect: DragRect | null;
-    /** Force-teardown of the window listeners + auto-scroll RAF.
-     *  Idempotent; safe from Sheet close / unmount paths. */
+    /** Idempotent teardown; safe to call from Sheet-close / unmount. */
     cleanup: () => void;
 }
+
+/** Movement (px) the pointer must cross before mousedown commits to a
+ *  drag-select gesture. Set higher than the OS double-click tolerance so
+ *  hand jitter on a click doesn't accidentally toggle the row into batch
+ *  mode. */
+const DRAG_ENGAGE_THRESHOLD_PX = 8;
+
+/** How long after a real drag ends to keep swallowing trailing clicks.
+ *  The browser fires the click synchronously on mouseup; 50ms is plenty
+ *  of headroom without swallowing a deliberate follow-up click. */
+const POST_DRAG_CLICK_SWALLOW_MS = 50;
 
 /**
  * Drag-rectangle (rubber-band) selection with near-edge auto-scroll.
@@ -48,6 +57,10 @@ export function useDragSelect(options: UseDragSelectOptions): UseDragSelectResul
 
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
     const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+    // Container origin at mousedown so we can re-anchor dragStartRef when
+    // layout reflows mid-drag (e.g. SelectionActionBar mounting above the
+    // list pushes rows down out of the rect).
+    const dragContainerOriginRef = useRef<{ left: number; top: number } | null>(null);
     const dragBaseRef = useRef<Set<string>>(new Set());
     const dragAdditiveRef = useRef(false);
     const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
@@ -64,10 +77,19 @@ export function useDragSelect(options: UseDragSelectOptions): UseDragSelectResul
             const start = dragStartRef.current;
             const container = scrollContainerRef.current;
             if (!start || !container) return;
-            const left = Math.min(start.x, clientX);
-            const right = Math.max(start.x, clientX);
-            const top = Math.min(start.y, clientY);
-            const bottom = Math.max(start.y, clientY);
+            // Re-anchor start against container shift since mousedown so
+            // the row originally under the cursor stays inside the rect
+            // when layout reflows. Hit-test below still uses viewport coords.
+            const origin = dragContainerOriginRef.current;
+            const c = container.getBoundingClientRect();
+            const shiftX = origin ? c.left - origin.left : 0;
+            const shiftY = origin ? c.top - origin.top : 0;
+            const anchorX = start.x + shiftX;
+            const anchorY = start.y + shiftY;
+            const left = Math.min(anchorX, clientX);
+            const right = Math.max(anchorX, clientX);
+            const top = Math.min(anchorY, clientY);
+            const bottom = Math.max(anchorY, clientY);
             setDragRect({
                 left,
                 top,
@@ -121,7 +143,31 @@ export function useDragSelect(options: UseDragSelectOptions): UseDragSelectResul
                 autoScrollRafRef.current = null;
                 return;
             }
-            container.scrollTop += dy;
+            // Bail when the container has no room to scroll in the
+            // requested direction. Browsers clamp the scrollTop
+            // assignment silently, so without an explicit bounds check
+            // the tick reschedules forever — dy stays non-zero as long
+            // as the pointer hovers near the edge.
+            const maxScroll = container.scrollHeight - container.clientHeight;
+            const atTop = container.scrollTop <= 0;
+            const atBottom = container.scrollTop >= maxScroll;
+            if ((dy < 0 && atTop) || (dy > 0 && atBottom)) {
+                autoScrollRafRef.current = null;
+                return;
+            }
+            // Clamp per-frame velocity so a pointer dragged far outside
+            // the container (clientY hundreds of px past the edge) can't
+            // jump the scrollTop by enormous deltas each frame.
+            const clamped = Math.sign(dy) * Math.min(Math.abs(dy), 24);
+            const before = container.scrollTop;
+            container.scrollTop += clamped;
+            // Defence in depth: sub-pixel scrollTop quirks can leave the
+            // value unchanged even when bounds allow movement — stop the
+            // RAF on zero progress so it can never spin in place.
+            if (container.scrollTop === before) {
+                autoScrollRafRef.current = null;
+                return;
+            }
             // Content under the rect shifted — recompute hit-test so
             // newly-revealed rows get picked up immediately.
             updateDragSelection(pointer.x, pointer.y);
@@ -137,20 +183,19 @@ export function useDragSelect(options: UseDragSelectOptions): UseDragSelectResul
             // Don't drag-select while the inline rename input is showing —
             // it's already a focus-stealing surface.
             if (renamePathRef.current) return;
-            // Mousedown ON a row still starts tracking, but `engaged`
-            // only flips to true once movement crosses the 3px threshold.
-            // That way: a quiet click + release lets the row's onClick
-            // handle the file normally; a click + drag engages the
-            // rubber-band starting from the clicked row. Dense lists
-            // (FileBrowser's Downloads tab) need this — relying on
-            // gaps-between-rows for drag-select fails there because
-            // there are no gaps.
+            // Mousedown on a row starts tracking but only engages once
+            // movement passes DRAG_ENGAGE_THRESHOLD_PX. Required for dense
+            // lists (Downloads tab) where there are no gaps between rows
+            // to mousedown into — a quiet click still falls through to
+            // the row's onClick.
             const onRow = !!target?.closest?.("[data-entry-path]");
             // Only preventDefault on empty-space clicks; on rows let the
             // browser deliver focus + the row's click event normally
             // until / unless we engage.
             if (!onRow) e.preventDefault();
             dragStartRef.current = { x: e.clientX, y: e.clientY };
+            const c0 = scrollContainerRef.current?.getBoundingClientRect();
+            dragContainerOriginRef.current = c0 ? { left: c0.left, top: c0.top } : null;
             dragBaseRef.current = new Set(selectedPathsRef.current);
             dragAdditiveRef.current = e.ctrlKey || e.metaKey || e.shiftKey;
             lastPointerRef.current = { x: e.clientX, y: e.clientY };
@@ -161,7 +206,8 @@ export function useDragSelect(options: UseDragSelectOptions): UseDragSelectResul
                 if (!engaged) {
                     const start = dragStartRef.current;
                     const moved =
-                        Math.abs(ev.clientX - start.x) > 3 || Math.abs(ev.clientY - start.y) > 3;
+                        Math.abs(ev.clientX - start.x) > DRAG_ENGAGE_THRESHOLD_PX ||
+                        Math.abs(ev.clientY - start.y) > DRAG_ENGAGE_THRESHOLD_PX;
                     if (!moved) return;
                     engaged = true;
                     // Now that we're committed to a drag, suppress the
@@ -179,10 +225,11 @@ export function useDragSelect(options: UseDragSelectOptions): UseDragSelectResul
                 // genuine click (no Shift/Ctrl held to preserve, no
                 // movement, and the click landed outside any row). Mirrors
                 // what an OS file explorer does when you click the empty
-                // area of a folder. Row clicks always fall through to the
-                // row's onClick instead.
+                // area of a folder.
                 if (start && last) {
-                    const moved = Math.abs(last.x - start.x) > 3 || Math.abs(last.y - start.y) > 3;
+                    const moved =
+                        Math.abs(last.x - start.x) > DRAG_ENGAGE_THRESHOLD_PX ||
+                        Math.abs(last.y - start.y) > DRAG_ENGAGE_THRESHOLD_PX;
                     if (!moved && !dragAdditiveRef.current && !onRow) {
                         setSelectedPaths(new Set());
                         setAnchorPath(null);
@@ -200,15 +247,16 @@ export function useDragSelect(options: UseDragSelectOptions): UseDragSelectResul
                         window.removeEventListener("click", cancelClick, true);
                     };
                     window.addEventListener("click", cancelClick, true);
-                    // Safety: if for some reason no click follows
-                    // (e.g. mouseup landed outside any clickable
-                    // surface), drop the suppressor so a future click
-                    // unrelated to the drag isn't swallowed.
+                    // Drop the suppressor if no click follows (mouseup
+                    // outside a clickable surface) so a later unrelated
+                    // click isn't eaten.
                     setTimeout(() => {
                         window.removeEventListener("click", cancelClick, true);
-                    }, 100);
+                    }, POST_DRAG_CLICK_SWALLOW_MS);
                 }
                 dragStartRef.current = null;
+                dragContainerOriginRef.current = null;
+                lastPointerRef.current = null;
                 setDragRect(null);
                 stopAutoScroll();
                 window.removeEventListener("mousemove", onMove);
