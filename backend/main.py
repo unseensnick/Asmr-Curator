@@ -215,31 +215,38 @@ OUTPUT_FORMATS = _FORMATS_CONFIG["outputFormats"]
 
 QUALITY_FLAGS: dict[str, dict[str, list[str]]] = {
     "mp3": {
-        # VBR: -q:a 0 = best (~220-260kbps avg), 9 = worst (~45-85kbps avg)
-        "low": ["-codec:a", "libmp3lame", "-q:a", "7"],  # ~96-112kbps
-        "standard": ["-codec:a", "libmp3lame", "-q:a", "4"],  # ~140-185kbps
-        "high": ["-codec:a", "libmp3lame", "-q:a", "2"],  # ~170-210kbps
-        "best": ["-codec:a", "libmp3lame", "-q:a", "0"],  # ~220-260kbps
+        # LAME VBR: -q:a 0 = best (~245kbps avg), 9 = worst (~65kbps avg).
+        # "low" anchors at ~130kbps to match VLC's MP3 default; the earlier
+        # -q:a 7 sat below that floor and made the preset feel cheaper than
+        # a comparable VLC export at the same size.
+        "low": ["-codec:a", "libmp3lame", "-q:a", "5"],  # ~130kbps
+        "standard": ["-codec:a", "libmp3lame", "-q:a", "3"],  # ~160kbps
+        "high": ["-codec:a", "libmp3lame", "-q:a", "2"],  # ~190kbps
+        "best": ["-codec:a", "libmp3lame", "-q:a", "0"],  # ~245kbps
     },
     "flac": {
-        "lossless": [
-            "-codec:a",
-            "flac",
-            "-compression_level",
-            "8",
-            "-ar",
-            "44100",
-            "-sample_fmt",
-            "s16",
-        ],
+        # No -ar / -sample_fmt: ffmpeg preserves source rate + bit depth,
+        # so a 48kHz / 24-bit source stays 48kHz / 24-bit instead of being
+        # silently downsampled to 44.1kHz / 16-bit.
+        "lossless": ["-codec:a", "flac", "-compression_level", "8"],
     },
     "ogg": {
-        "low": ["-codec:a", "libvorbis", "-q:a", "3"],
-        "standard": ["-codec:a", "libvorbis", "-q:a", "5"],
-        "high": ["-codec:a", "libvorbis", "-q:a", "7"],
-        "best": ["-codec:a", "libvorbis", "-q:a", "9"],
+        # libvorbis -q:a scale: 0 = worst, 10 = best.
+        "low": ["-codec:a", "libvorbis", "-q:a", "4"],  # ~128kbps
+        "standard": ["-codec:a", "libvorbis", "-q:a", "6"],  # ~192kbps
+        "high": ["-codec:a", "libvorbis", "-q:a", "7"],  # ~224kbps
+        "best": ["-codec:a", "libvorbis", "-q:a", "9"],  # ~320kbps
     },
 }
+
+# Codecs that support an explicit CBR bitrate override (power-mode field).
+# Wired in `routes/convert.py` — when a request carries `bitrate_kbps`, the
+# preset's `-q:a` flag is swapped for `-b:a <N>k` and the codec is taken
+# from the table above. FLAC is intentionally omitted; lossless has no
+# bitrate target.
+BITRATE_OVERRIDE_FORMATS: frozenset[str] = frozenset({"mp3", "ogg"})
+BITRATE_OVERRIDE_MIN_KBPS = 32
+BITRATE_OVERRIDE_MAX_KBPS = 320
 
 
 # ── Router registration ──────────────────────────────────────────────────────

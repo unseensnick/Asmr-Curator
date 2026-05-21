@@ -160,7 +160,7 @@ export default function PatreonPanel({
                     type: "error",
                     msg:
                         res.hint ??
-                        "No posts came back. Either the URL is wrong, or your Patreon session has expired.",
+                        "No posts found. Check the URL, or update your Patreon session in settings.",
                 });
                 if (res.log_tail) setLogTail(res.log_tail);
                 return;
@@ -177,7 +177,7 @@ export default function PatreonPanel({
                 type: "error",
                 msg:
                     head ||
-                    "Patreon couldn't be reached. Try again, or refresh your cookie in settings.",
+                    "Patreon isn't responding. Try again, or update your Patreon session in settings.",
             });
             if (tail) setLogTail(tail);
         } finally {

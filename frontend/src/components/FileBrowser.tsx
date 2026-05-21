@@ -74,6 +74,9 @@ interface FileBrowserProps {
      *  rail + the single-file Move picker + the BulkEditSheet move picker. */
     librarySubdir: string;
     onLibrarySubdirChange: (subdir: string) => void;
+    /** Power mode unlocks the explicit bitrate input inside the per-file
+     *  ConversionPanel. Passed straight through to SelectedFilePanel. */
+    powerMode?: boolean;
 }
 
 interface SearchResponse {
@@ -97,6 +100,7 @@ export default function FileBrowser({
     onOpenBulkEdit,
     librarySubdir,
     onLibrarySubdirChange: setLibrarySubdir,
+    powerMode = false,
 }: FileBrowserProps) {
     // Persist the last-opened root across reloads so a user who lives in
     // Downloads after a bridge doesn't get forced back to Library on every
@@ -137,6 +141,18 @@ export default function FileBrowser({
         () => (localStorage.getItem("convertQuality") as ConvertQuality) || "high",
     );
     const [deleteOriginal, setDeleteOriginal] = useState(false);
+    // Power-mode bitrate override. `null` means "use the preset". Hidden
+    // when powerMode is false; persisted so the value survives reloads.
+    const [convertBitrateKbps, setConvertBitrateKbps] = useState<number | null>(() => {
+        const stored = localStorage.getItem("convertBitrateKbps");
+        if (!stored) return null;
+        const n = Number(stored);
+        return Number.isFinite(n) ? n : null;
+    });
+    useEffect(() => {
+        if (convertBitrateKbps == null) localStorage.removeItem("convertBitrateKbps");
+        else localStorage.setItem("convertBitrateKbps", String(convertBitrateKbps));
+    }, [convertBitrateKbps]);
 
     // Multi-select state. `batchSelected` is a derived view of the
     // controlled `bulkSelected` prop (lifted to App.tsx). `batchMode` is
@@ -300,11 +316,12 @@ export default function FileBrowser({
                 setFiles(data.files);
             }
         } catch (e) {
-            const envName = rt === "library" ? "LIBRARY_PATH" : "DOWNLOAD_PATH";
+            const where = rt === "library" ? "Library" : "Downloads";
             setError(
-                `Couldn't reach the ${rt}. Check that ${envName} is set and points to a valid folder. ` +
-                    getErrorMessage(e),
+                `Couldn't load the ${where} folder. Check the folder path in your host setup.`,
             );
+            // eslint-disable-next-line no-console -- aid for self-host debugging
+            console.warn(`Load ${rt} failed:`, getErrorMessage(e));
             setFiles([]);
             setSubdirEntries(null);
         } finally {
@@ -613,7 +630,7 @@ export default function FileBrowser({
             await loadFiles(query, searchMode, root);
             if (root === "downloads") refreshDownloadsCount();
         } catch (e) {
-            setError("Rename failed. " + getErrorMessage(e));
+            setError("Couldn't rename the file. " + getErrorMessage(e));
             cancelRename();
         }
     }
@@ -904,9 +921,12 @@ export default function FileBrowser({
                                         convertFormat={convertFormat}
                                         convertQuality={convertQuality}
                                         deleteOriginal={deleteOriginal}
+                                        convertBitrateKbps={convertBitrateKbps}
                                         onConvertFormatChange={setConvertFormat}
                                         onConvertQualityChange={setConvertQuality}
                                         onDeleteOriginalChange={setDeleteOriginal}
+                                        onConvertBitrateChange={setConvertBitrateKbps}
+                                        powerMode={powerMode}
                                         selected={selected}
                                         outputDash={outputDash}
                                         outputPipe={outputPipe}
@@ -1367,9 +1387,12 @@ interface WorkAreaProps {
     convertFormat: ConvertFormat;
     convertQuality: ConvertQuality;
     deleteOriginal: boolean;
+    convertBitrateKbps: number | null;
     onConvertFormatChange: (f: ConvertFormat) => void;
     onConvertQualityChange: (q: ConvertQuality) => void;
     onDeleteOriginalChange: (v: boolean) => void;
+    onConvertBitrateChange: (kbps: number | null) => void;
+    powerMode: boolean;
     selected: FileEntry | null;
     outputDash: string;
     outputPipe: string;
@@ -1395,11 +1418,14 @@ function WorkArea(props: WorkAreaProps) {
                 convertFormat={props.convertFormat}
                 convertQuality={props.convertQuality}
                 deleteOriginal={props.deleteOriginal}
+                convertBitrateKbps={props.convertBitrateKbps}
+                powerMode={props.powerMode}
                 librarySubdir={props.librarySubdir}
                 onLibrarySubdirChange={props.onLibrarySubdirChange}
                 onConvertFormatChange={props.onConvertFormatChange}
                 onConvertQualityChange={props.onConvertQualityChange}
                 onDeleteOriginalChange={props.onDeleteOriginalChange}
+                onConvertBitrateChange={props.onConvertBitrateChange}
                 onDeselect={props.onDeselect}
                 onSelectedChange={props.onSelectedChange}
                 onListReload={props.onListReload}

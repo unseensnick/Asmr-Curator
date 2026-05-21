@@ -8,6 +8,9 @@ from pydantic import BaseModel
 
 from backend.main import (
     AUDIO_EXTS,
+    BITRATE_OVERRIDE_FORMATS,
+    BITRATE_OVERRIDE_MAX_KBPS,
+    BITRATE_OVERRIDE_MIN_KBPS,
     FFMPEG_SUBPROCESS_TIMEOUT_S,
     OUTPUT_FORMATS,
     QUALITY_FLAGS,
@@ -33,6 +36,10 @@ class ConvertIn(BaseModel):
     quality: str
     root: str = "library"
     delete_original: bool = False
+    # Power-mode override: explicit CBR target in kbps. When present, the
+    # preset's `-q:a` is swapped for `-b:a <N>k` and the codec name from
+    # the preset is kept. Rejected for FLAC (lossless has no bitrate).
+    bitrate_kbps: int | None = None
 
 
 @router.post("/api/convert")
@@ -53,13 +60,30 @@ def convert_file(body: ConvertIn):
     if quality not in QUALITY_FLAGS[fmt]:
         raise HTTPException(400, f"Unsupported quality '{quality}' for format '{fmt}'")
 
+    if body.bitrate_kbps is not None:
+        if fmt not in BITRATE_OVERRIDE_FORMATS:
+            raise HTTPException(400, f"Bitrate override is not supported for {fmt}")
+        if not (BITRATE_OVERRIDE_MIN_KBPS <= body.bitrate_kbps <= BITRATE_OVERRIDE_MAX_KBPS):
+            raise HTTPException(
+                400,
+                f"Bitrate must be between {BITRATE_OVERRIDE_MIN_KBPS} and "
+                f"{BITRATE_OVERRIDE_MAX_KBPS} kbps",
+            )
+
     fmt_info = next(f for f in OUTPUT_FORMATS if f["value"] == fmt)
     if src.suffix.lower() == fmt_info["ext"]:
         raise HTTPException(400, "File is already in this format")
     dest = src.with_suffix(fmt_info["ext"])
     reject_if_exists(dest)
 
-    codec_flags = QUALITY_FLAGS[fmt][quality]
+    # Preset argv is `[-codec:a, <codec>, -q:a, <n>]`. When a bitrate
+    # override is in play, keep the codec pair and replace the rate-control
+    # pair with `-b:a <N>k`.
+    preset_flags = QUALITY_FLAGS[fmt][quality]
+    if body.bitrate_kbps is not None:
+        codec_flags = [*preset_flags[:2], "-b:a", f"{body.bitrate_kbps}k"]
+    else:
+        codec_flags = preset_flags
     cmd = ["ffmpeg", "-i", str(src), "-vn", *codec_flags, str(dest)]
 
     try:

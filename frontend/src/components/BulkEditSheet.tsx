@@ -112,6 +112,9 @@ interface BulkEditSheetProps {
     /** Pre-warm the Dictionary chunk on hover/focus so the slide-in
      *  animation runs without a chunk-load gap. */
     onPrefetchDictionary?: () => void;
+    /** Power mode unlocks the explicit bitrate input in the Convert
+     *  section below the simple Quality picker. */
+    powerMode?: boolean;
 }
 
 /**
@@ -140,6 +143,7 @@ export default function BulkEditSheet({
     onLibrarySubdirChange,
     onOpenDictionary,
     onPrefetchDictionary,
+    powerMode = false,
 }: BulkEditSheetProps) {
     // Keyed by `FileEntry.path` (relative to the chosen root). Paths the
     // user hasn't touched aren't in the map — `editFor` falls back to
@@ -209,6 +213,18 @@ export default function BulkEditSheet({
         () => (localStorage.getItem("convertQuality") as ConvertQuality) || "high",
     );
     const [deleteOriginal, setDeleteOriginal] = useState(false);
+    // Power-mode CBR override; `null` falls back to the preset's VBR
+    // target. Persisted so it survives sheet open/close + reloads.
+    const [convertBitrateKbps, setConvertBitrateKbps] = useState<number | null>(() => {
+        const stored = localStorage.getItem("convertBitrateKbps");
+        if (!stored) return null;
+        const n = Number(stored);
+        return Number.isFinite(n) ? n : null;
+    });
+    useEffect(() => {
+        if (convertBitrateKbps == null) localStorage.removeItem("convertBitrateKbps");
+        else localStorage.setItem("convertBitrateKbps", String(convertBitrateKbps));
+    }, [convertBitrateKbps]);
     // Per-file progress during the convert phase of a commit. `null` when
     // not converting (either convert is off, or we're in the bulk-write
     // phase that follows).
@@ -589,12 +605,17 @@ export default function BulkEditSheet({
                         currentFile: file.name,
                     });
                     try {
+                        const bitrateOverride =
+                            powerMode && convertBitrateKbps != null && convertFormat !== "flac"
+                                ? { bitrate_kbps: convertBitrateKbps }
+                                : {};
                         const res = await apiPost<{ path: string; new_name: string }>(API.convert, {
                             path: file.path,
                             output_format: convertFormat,
                             quality,
                             root,
                             delete_original: deleteOriginal,
+                            ...bitrateOverride,
                         });
                         const newExt = "." + (res.new_name.split(".").pop() ?? "");
                         workingFiles.push({
@@ -1192,11 +1213,10 @@ export default function BulkEditSheet({
                                     Also convert these files
                                 </span>
                                 <span className="text-xs text-muted-foreground leading-relaxed">
-                                    Re-encodes each file with ffmpeg before the metadata write +
-                                    rename + move runs, so the rest of the commit operates on the
-                                    converted files. Formats that already support the tag fields
-                                    will just be re-encoded; formats that don&apos;t (WAV, M4A,
-                                    etc.) become writable for the metadata step that follows.
+                                    Converts each file to your chosen format first. Useful for
+                                    formats like WAV or M4A that can&apos;t store tags directly;
+                                    converting to MP3, OGG, or FLAC lets the tag fields below save
+                                    into the file.
                                 </span>
                             </span>
                         </label>
@@ -1212,6 +1232,9 @@ export default function BulkEditSheet({
                                     onQualityChange={setConvertQuality}
                                     onDeleteChange={setDeleteOriginal}
                                     checkboxId="bulk-convert-delete-original"
+                                    powerMode={powerMode}
+                                    bitrateKbps={convertBitrateKbps}
+                                    onBitrateChange={setConvertBitrateKbps}
                                 />
                             </div>
                         )}

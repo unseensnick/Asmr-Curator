@@ -1,7 +1,14 @@
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { QUALITY_LABELS, QUALITY_VALUES } from "@/lib/audioFormats";
 import type { ConvertFormat, ConvertQuality } from "@/lib/types";
+
+/** Allowed range for the power-mode bitrate override. Mirrors the
+ *  backend's BITRATE_OVERRIDE_{MIN,MAX}_KBPS in backend/main.py — keep in
+ *  sync if those change. */
+export const BITRATE_OVERRIDE_MIN_KBPS = 32;
+export const BITRATE_OVERRIDE_MAX_KBPS = 320;
 
 interface ConversionPanelProps {
     formats: ConvertFormat[];
@@ -12,6 +19,14 @@ interface ConversionPanelProps {
     onQualityChange: (q: ConvertQuality) => void;
     onDeleteChange: (v: boolean) => void;
     checkboxId: string;
+    /** When true, show an explicit kbps override input below the Quality
+     *  picker. Overrides the preset's VBR target for the lossy codecs
+     *  (MP3, OGG); the input is read-only-disabled for FLAC, which has
+     *  no bitrate concept. `null` here means "use the preset"; a number
+     *  means "send that kbps as a CBR target." */
+    powerMode?: boolean;
+    bitrateKbps?: number | null;
+    onBitrateChange?: (kbps: number | null) => void;
 }
 
 /**
@@ -30,7 +45,14 @@ export default function ConversionPanel({
     onQualityChange,
     onDeleteChange,
     checkboxId,
+    powerMode = false,
+    bitrateKbps = null,
+    onBitrateChange,
 }: ConversionPanelProps) {
+    const showBitrate = powerMode && !!onBitrateChange;
+    const bitrateInvalid =
+        bitrateKbps != null &&
+        (bitrateKbps < BITRATE_OVERRIDE_MIN_KBPS || bitrateKbps > BITRATE_OVERRIDE_MAX_KBPS);
     const toggleItemClass =
         "text-sm px-3 py-1.5 h-auto rounded-none! border-r border-border last:border-r-0 bg-background text-muted-foreground hover:text-foreground data-[state=on]:bg-accent data-[state=on]:text-accent-foreground data-[state=on]:border-accent uppercase";
     return (
@@ -86,6 +108,48 @@ export default function ConversionPanel({
                     </ToggleGroup>
                 )}
             </div>
+
+            {showBitrate && (
+                <div className="flex items-start gap-3 flex-wrap">
+                    <span className="text-sm font-medium tracking-wide text-muted-foreground w-24 shrink-0 pt-2">
+                        Bitrate
+                    </span>
+                    <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center gap-2">
+                            <Input
+                                type="number"
+                                inputMode="numeric"
+                                min={BITRATE_OVERRIDE_MIN_KBPS}
+                                max={BITRATE_OVERRIDE_MAX_KBPS}
+                                step={8}
+                                placeholder="Use preset"
+                                value={bitrateKbps ?? ""}
+                                onChange={(e) => {
+                                    const raw = e.target.value.trim();
+                                    if (!raw) {
+                                        onBitrateChange?.(null);
+                                        return;
+                                    }
+                                    const n = Number(raw);
+                                    onBitrateChange?.(Number.isFinite(n) ? n : null);
+                                }}
+                                disabled={format === "flac"}
+                                aria-label="Custom bitrate in kbps"
+                                aria-invalid={bitrateInvalid || undefined}
+                                className="w-28 h-9 font-mono"
+                            />
+                            <span className="text-xs text-muted-foreground">kbps</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground leading-relaxed max-w-prose">
+                            {format === "flac"
+                                ? "FLAC keeps every detail of the original, so there's no bitrate to set."
+                                : bitrateInvalid
+                                  ? `Bitrate must be between ${BITRATE_OVERRIDE_MIN_KBPS} and ${BITRATE_OVERRIDE_MAX_KBPS} kbps.`
+                                  : "Leave blank to use the preset above. A number here overrides it with a fixed kbps target."}
+                        </span>
+                    </div>
+                </div>
+            )}
 
             <label
                 htmlFor={checkboxId}

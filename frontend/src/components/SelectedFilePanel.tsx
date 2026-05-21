@@ -25,6 +25,10 @@ interface SelectedFilePanelProps {
     convertFormat: ConvertFormat;
     convertQuality: ConvertQuality;
     deleteOriginal: boolean;
+    /** Power-mode CBR override. `null` falls back to the preset's VBR
+     *  target; a number sends `bitrate_kbps` on the convert request. */
+    convertBitrateKbps: number | null;
+    powerMode: boolean;
     /** Shared with LibraryExplorerSheet so the Move-to-library picker
      *  doesn't re-walk the tree per file. */
     librarySubdir: string;
@@ -32,6 +36,7 @@ interface SelectedFilePanelProps {
     onConvertFormatChange: (f: ConvertFormat) => void;
     onConvertQualityChange: (q: ConvertQuality) => void;
     onDeleteOriginalChange: (v: boolean) => void;
+    onConvertBitrateChange: (kbps: number | null) => void;
     onDeselect: () => void;
     onSelectedChange: (next: FileEntry) => void;
     onListReload: () => void;
@@ -70,11 +75,14 @@ export default function SelectedFilePanel({
     convertFormat,
     convertQuality,
     deleteOriginal,
+    convertBitrateKbps,
+    powerMode,
     librarySubdir,
     onLibrarySubdirChange,
     onConvertFormatChange,
     onConvertQualityChange,
     onDeleteOriginalChange,
+    onConvertBitrateChange,
     onDeselect,
     onSelectedChange,
     onListReload,
@@ -209,12 +217,21 @@ export default function SelectedFilePanel({
         onError("");
         try {
             const quality = convertFormat === "flac" ? "lossless" : convertQuality;
+            // Only attach the bitrate when power mode is on AND the user
+            // entered a value AND the format can carry it. FLAC is always
+            // excluded server-side; double-guarding here keeps the request
+            // payload clean.
+            const bitrateOverride =
+                powerMode && convertBitrateKbps != null && convertFormat !== "flac"
+                    ? { bitrate_kbps: convertBitrateKbps }
+                    : {};
             const data = await apiPost<ConvertResponse>(API.convert, {
                 path: selected.path,
                 output_format: convertFormat,
                 quality,
                 root,
                 delete_original: deleteOriginal,
+                ...bitrateOverride,
             });
             const newExt = FORMAT_EXT[convertFormat];
             onSelectedChange({
@@ -272,9 +289,12 @@ export default function SelectedFilePanel({
                     convertFormat={convertFormat}
                     convertQuality={convertQuality}
                     deleteOriginal={deleteOriginal}
+                    convertBitrateKbps={convertBitrateKbps}
+                    powerMode={powerMode}
                     onConvertFormatChange={onConvertFormatChange}
                     onConvertQualityChange={onConvertQualityChange}
                     onDeleteOriginalChange={onDeleteOriginalChange}
+                    onConvertBitrateChange={onConvertBitrateChange}
                     onConvert={handleConvert}
                 />
             ) : (
@@ -302,9 +322,12 @@ export default function SelectedFilePanel({
                     safeConvertFormat={safeConvertFormat}
                     convertQuality={convertQuality}
                     deleteOriginal={deleteOriginal}
+                    convertBitrateKbps={convertBitrateKbps}
+                    powerMode={powerMode}
                     onConvertFormatChange={onConvertFormatChange}
                     onConvertQualityChange={onConvertQualityChange}
                     onDeleteOriginalChange={onDeleteOriginalChange}
+                    onConvertBitrateChange={onConvertBitrateChange}
                     converting={converting}
                     converted={converted}
                     onConvert={handleConvert}

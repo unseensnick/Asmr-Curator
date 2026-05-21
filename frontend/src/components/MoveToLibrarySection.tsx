@@ -75,11 +75,11 @@ export default function MoveToLibrarySection({
             // failed. Surface as a warning so the user knows tags didn't
             // get written; the file is at its new location either way.
             if (data.metadata_error) {
-                onError(`Moved, but metadata embed failed: ${data.metadata_error}`);
+                onError(`Moved the file, but couldn't save its tags. ${data.metadata_error}`);
             }
             onMoved(data.to_path, data.new_name);
         } catch (e) {
-            onError("Move failed: " + getErrorMessage(e));
+            onError("Couldn't move the file. " + getErrorMessage(e));
         } finally {
             setMoving(false);
         }

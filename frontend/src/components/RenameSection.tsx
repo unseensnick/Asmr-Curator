@@ -15,9 +15,12 @@ interface RequiredConversionProps {
     convertFormat: ConvertFormat;
     convertQuality: ConvertQuality;
     deleteOriginal: boolean;
+    convertBitrateKbps: number | null;
+    powerMode: boolean;
     onConvertFormatChange: (f: ConvertFormat) => void;
     onConvertQualityChange: (q: ConvertQuality) => void;
     onDeleteOriginalChange: (v: boolean) => void;
+    onConvertBitrateChange: (kbps: number | null) => void;
     onConvert: () => void;
 }
 
@@ -27,9 +30,12 @@ export function RequiredConversion({
     convertFormat,
     convertQuality,
     deleteOriginal,
+    convertBitrateKbps,
+    powerMode,
     onConvertFormatChange,
     onConvertQualityChange,
     onDeleteOriginalChange,
+    onConvertBitrateChange,
     onConvert,
 }: RequiredConversionProps) {
     return (
@@ -47,6 +53,9 @@ export function RequiredConversion({
                 onQualityChange={onConvertQualityChange}
                 onDeleteChange={onDeleteOriginalChange}
                 checkboxId="delete-original-required"
+                powerMode={powerMode}
+                bitrateKbps={convertBitrateKbps}
+                onBitrateChange={onConvertBitrateChange}
             />
             <ActionButton kind="convert" busy={converting} done={converted} onClick={onConvert} />
         </>
@@ -77,9 +86,12 @@ interface RenameSectionProps {
     safeConvertFormat: ConvertFormat;
     convertQuality: ConvertQuality;
     deleteOriginal: boolean;
+    convertBitrateKbps: number | null;
+    powerMode: boolean;
     onConvertFormatChange: (f: ConvertFormat) => void;
     onConvertQualityChange: (q: ConvertQuality) => void;
     onDeleteOriginalChange: (v: boolean) => void;
+    onConvertBitrateChange: (kbps: number | null) => void;
     converting: boolean;
     converted: boolean;
     onConvert: () => void;
@@ -110,9 +122,12 @@ export default function RenameSection(props: RenameSectionProps) {
         safeConvertFormat,
         convertQuality,
         deleteOriginal,
+        convertBitrateKbps,
+        powerMode,
         onConvertFormatChange,
         onConvertQualityChange,
         onDeleteOriginalChange,
+        onConvertBitrateChange,
         converting,
         converted,
         onConvert,
@@ -260,6 +275,9 @@ export default function RenameSection(props: RenameSectionProps) {
                             onQualityChange={onConvertQualityChange}
                             onDeleteChange={onDeleteOriginalChange}
                             checkboxId="delete-original-optional"
+                            powerMode={powerMode}
+                            bitrateKbps={convertBitrateKbps}
+                            onBitrateChange={onConvertBitrateChange}
                         />
                         <ActionButton
                             kind="convert"

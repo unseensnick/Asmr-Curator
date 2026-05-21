@@ -13,6 +13,7 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ### Additions
 
+- **Power mode unlocks an explicit bitrate input in the Convert panel.** Override the preset when you want a specific kbps target (32 to 320 kbps in 8 kbps steps). Leave it blank and the four-tier preset picker still works as before. Disabled for FLAC because lossless has no bitrate to set.
 - **Help &amp; reference sheet in the header.** A new `?` button next to Dictionary opens a calm right-side sheet covering the three workflows (Patreon URL / Screenshot / files on disk), first-time cookie setup, and the non-obvious affordances (right-click a tag chip, Cmd / Ctrl + Enter, Power mode). A small dot next to the icon clears on first open. Not a tutorial — it's a reference card the user pulls open when they want it.
 
 ### Changes
@@ -29,8 +30,11 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 - **Opening the Dictionary from inside Bulk edit no longer briefly blanks the sheet** — the slide-in starts immediately on click.
 - **The Dictionary sheet opens faster on first click.** Inactive tabs now load only when you click them, so a large vocabulary doesn't delay the slide-in.
 - **The Library tab's file rows match the Downloads tab's row rhythm.** Library subdir listings showed a single line per row while Downloads (and search results) showed two — filename plus folder hint — so the two tabs felt jarringly different in density. A minimum row height now keeps both visually consistent.
+- **Conversion presets retuned to more comfortable bitrates.** Low now matches the quality you'd get from VLC's default MP3 export (around 130 kbps); Standard moves up to roughly 160 kbps. OGG's Low and Standard get the same nudge. FLAC keeps the source's sample rate and bit depth instead of forcing 44.1 kHz / 16-bit.
 
 ### Fixes
+
+- **Plain-English error and helper text in a few spots that leaked engineer nouns.** The bulk-edit Convert helper no longer mentions `ffmpeg`; the FileBrowser load-error no longer surfaces internal path-variable names; move and rename failures read in the librarian's voice instead of pasting raw backend strings.
 
 - **Drag-selecting bottom-to-top in the FileBrowser no longer drops the first row** when the multi-selection action bar appears mid-drag.
 - **Drag-select's auto-scroll stops at the bottom of the list** instead of looping forever when the cursor parks at the bottom edge after scrolling to the end.

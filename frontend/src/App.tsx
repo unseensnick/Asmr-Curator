@@ -133,7 +133,14 @@ export default function App() {
                 // explanation reads as "the app is broken" to the
                 // sleepy persona — librarian voice + a Retry button
                 // beats a silent empty state every time.
-                setDictLoadError("Couldn't reach the dictionary. " + getErrorMessage(e));
+                // Surface a clean, deterministic line — the raw error
+                // (often a network/timeout string from `fetch`) doesn't
+                // help the sleepy persona figure out what to do next.
+                setDictLoadError(
+                    "Couldn't reach the dictionary. Tags won't match canonical forms until this resolves.",
+                );
+                // eslint-disable-next-line no-console -- aid for self-host debugging
+                console.warn("Dictionary load failed:", getErrorMessage(e));
             });
     }
     useEffect(() => {
@@ -346,6 +353,7 @@ export default function App() {
                         onOpenBulkEdit={openBulkEdit}
                         librarySubdir={librarySubdir}
                         onLibrarySubdirChange={setLibrarySubdir}
+                        powerMode={powerMode}
                     />
                 </section>
 
@@ -391,6 +399,7 @@ export default function App() {
                         onLibrarySubdirChange={setLibrarySubdir}
                         onOpenDictionary={() => setLibraryOpen(true)}
                         onPrefetchDictionary={prefetchLibrarySettings}
+                        powerMode={powerMode}
                     />
                 </Suspense>
                 <Suspense fallback={null}>
