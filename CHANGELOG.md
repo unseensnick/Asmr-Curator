@@ -11,6 +11,8 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
+## [2.1.0]
+
 ### Additions
 
 - **Power mode unlocks a Bitrate slider in the Convert panel.** Drag to pin a specific kbps target (32 to 320 kbps, 8 kbps steps); the four-tier preset picker still works as before, and a Use preset button on the slider returns to it. FLAC shows a plain note instead — there's no bitrate to set on a lossless format.
