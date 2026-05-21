@@ -1,5 +1,6 @@
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
+import { Slider } from "@/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { QUALITY_LABELS, QUALITY_VALUES } from "@/lib/audioFormats";
 import type { ConvertFormat, ConvertQuality } from "@/lib/types";
@@ -9,6 +10,17 @@ import type { ConvertFormat, ConvertQuality } from "@/lib/types";
  *  sync if those change. */
 export const BITRATE_OVERRIDE_MIN_KBPS = 32;
 export const BITRATE_OVERRIDE_MAX_KBPS = 320;
+export const BITRATE_OVERRIDE_STEP_KBPS = 8;
+
+/** Nominal kbps each preset produces (LAME / libvorbis VBR averages).
+ *  Used as the slider's resting position when no override is set, so the
+ *  thumb starts where the preset currently lands and a touch becomes a
+ *  meaningful override. The numbers track the comments in backend/main.py
+ *  QUALITY_FLAGS — update both together. */
+const PRESET_NOMINAL_KBPS: Record<"mp3" | "ogg", Record<ConvertQuality, number>> = {
+    mp3: { low: 130, standard: 160, high: 190, best: 245 },
+    ogg: { low: 128, standard: 192, high: 224, best: 320 },
+};
 
 interface ConversionPanelProps {
     formats: ConvertFormat[];
@@ -50,9 +62,12 @@ export default function ConversionPanel({
     onBitrateChange,
 }: ConversionPanelProps) {
     const showBitrate = powerMode && !!onBitrateChange;
-    const bitrateInvalid =
-        bitrateKbps != null &&
-        (bitrateKbps < BITRATE_OVERRIDE_MIN_KBPS || bitrateKbps > BITRATE_OVERRIDE_MAX_KBPS);
+    const isLossy = format === "mp3" || format === "ogg";
+    const presetKbps = isLossy ? PRESET_NOMINAL_KBPS[format][quality] : null;
+    const sliderValue =
+        bitrateKbps ??
+        presetKbps ??
+        Math.round((BITRATE_OVERRIDE_MIN_KBPS + BITRATE_OVERRIDE_MAX_KBPS) / 2);
     const toggleItemClass =
         "text-sm px-3 py-1.5 h-auto rounded-none! border-r border-border last:border-r-0 bg-background text-muted-foreground hover:text-foreground data-[state=on]:bg-accent data-[state=on]:text-accent-foreground data-[state=on]:border-accent uppercase";
     return (
@@ -114,39 +129,58 @@ export default function ConversionPanel({
                     <span className="text-sm font-medium tracking-wide text-muted-foreground w-24 shrink-0 pt-2">
                         Bitrate
                     </span>
-                    <div className="flex flex-col gap-1.5">
-                        <div className="flex items-center gap-2">
-                            <Input
-                                type="number"
-                                inputMode="numeric"
-                                min={BITRATE_OVERRIDE_MIN_KBPS}
-                                max={BITRATE_OVERRIDE_MAX_KBPS}
-                                step={8}
-                                placeholder="Use preset"
-                                value={bitrateKbps ?? ""}
-                                onChange={(e) => {
-                                    const raw = e.target.value.trim();
-                                    if (!raw) {
-                                        onBitrateChange?.(null);
-                                        return;
-                                    }
-                                    const n = Number(raw);
-                                    onBitrateChange?.(Number.isFinite(n) ? n : null);
-                                }}
-                                disabled={format === "flac"}
-                                aria-label="Custom bitrate in kbps"
-                                aria-invalid={bitrateInvalid || undefined}
-                                className="w-28 h-9 font-mono"
-                            />
-                            <span className="text-xs text-muted-foreground">kbps</span>
-                        </div>
-                        <span className="text-xs text-muted-foreground leading-relaxed max-w-prose">
-                            {format === "flac"
-                                ? "FLAC keeps every detail of the original, so there's no bitrate to set."
-                                : bitrateInvalid
-                                  ? `Bitrate must be between ${BITRATE_OVERRIDE_MIN_KBPS} and ${BITRATE_OVERRIDE_MAX_KBPS} kbps.`
-                                  : "Leave blank to use the preset above. A number here overrides it with a fixed kbps target."}
-                        </span>
+                    <div className="flex flex-col gap-2 flex-1 min-w-[16rem] max-w-md">
+                        {!isLossy ? (
+                            <span className="text-xs text-muted-foreground leading-relaxed">
+                                FLAC keeps every detail of the original, so there&apos;s no bitrate
+                                to set.
+                            </span>
+                        ) : (
+                            <>
+                                <div className="flex items-baseline gap-2 font-mono text-sm">
+                                    <span
+                                        className={
+                                            bitrateKbps == null
+                                                ? "text-muted-foreground"
+                                                : "text-foreground tabular-nums"
+                                        }
+                                    >
+                                        {sliderValue}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground">kbps</span>
+                                    <span className="text-xs text-muted-foreground/70 ml-auto">
+                                        {bitrateKbps == null ? "using preset" : "custom override"}
+                                    </span>
+                                </div>
+                                <Slider
+                                    value={[sliderValue]}
+                                    min={BITRATE_OVERRIDE_MIN_KBPS}
+                                    max={BITRATE_OVERRIDE_MAX_KBPS}
+                                    step={BITRATE_OVERRIDE_STEP_KBPS}
+                                    onValueChange={(values) => {
+                                        const v = values[0];
+                                        if (typeof v === "number") onBitrateChange?.(v);
+                                    }}
+                                    aria-label="Custom bitrate in kbps"
+                                />
+                                <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                                    <span>
+                                        Drag to set a fixed bitrate, or use the preset above.
+                                    </span>
+                                    {bitrateKbps != null && (
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="ghost"
+                                            className="h-auto px-2 py-1 text-xs"
+                                            onClick={() => onBitrateChange?.(null)}
+                                        >
+                                            Use preset
+                                        </Button>
+                                    )}
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
             )}
