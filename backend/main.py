@@ -20,10 +20,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from mutagen.flac import FLAC
-from mutagen.id3 import ID3, TALB, TIT2, TPE1, TPE2, ID3NoHeaderError
-from mutagen.mp4 import MP4
-from mutagen.oggvorbis import OggVorbis
 
 from backend import drive_fetch
 from backend.audio_utils import AUDIO_FORMATS_CONFIG
@@ -209,143 +205,12 @@ def reject_if_exists(path: Path) -> None:
         raise HTTPException(409, f"File already exists: {path.name}")
 
 
-# ── Audio metadata writer (shared by rename + move + external-audio ingest) ──
-
-# field name → (ID3 tag id, ID3 tag class) for MP3
-_MP3_TAGS = {
-    "title": ("TIT2", TIT2),
-    "artist": ("TPE1", TPE1),
-    "album": ("TALB", TALB),
-    "album_artist": ("TPE2", TPE2),
-}
-# field name → Vorbis comment key for FLAC/OGG
-_VORBIS_TAGS = {
-    "title": "title",
-    "artist": "artist",
-    "album": "album",
-    "album_artist": "albumartist",
-}
-# field name → MP4 atom key for M4A/AAC
-_M4A_TAGS = {
-    "title": "\xa9nam",
-    "artist": "\xa9ART",
-    "album": "\xa9alb",
-    "album_artist": "aART",
-}
-
-
-def _write_metadata(path: Path, title: str, artist: str, album: str, album_artist: str) -> None:
-    """Write title/artist/album/album_artist tags to a metadata-compatible audio file."""
-    ext = path.suffix.lower()
-    fields = {"title": title, "artist": artist, "album": album, "album_artist": album_artist}
-
-    if ext == ".mp3":
-        try:
-            audio = ID3(str(path))
-        except ID3NoHeaderError:
-            audio = ID3()
-        for field, value in fields.items():
-            if value:
-                tag_id, tag_cls = _MP3_TAGS[field]
-                audio.setall(tag_id, [tag_cls(encoding=3, text=value)])
-        audio.save(str(path))
-
-    elif ext in (".flac", ".ogg"):
-        audio = FLAC(str(path)) if ext == ".flac" else OggVorbis(str(path))
-        for field, value in fields.items():
-            if value:
-                audio[_VORBIS_TAGS[field]] = [value]
-        audio.save()
-
-    elif ext in (".m4a", ".aac"):
-        audio = MP4(str(path))
-        for field, value in fields.items():
-            if value:
-                audio[_M4A_TAGS[field]] = [value]
-        audio.save()
-
-
-def _read_metadata(path: Path) -> dict[str, str]:
-    """Read title/artist/album/album_artist tags from a metadata-compatible
-    audio file. Returns a dict with every key present (empty string when
-    the tag is absent) so callers don't have to guard each lookup.
-
-    Used by the BulkEditSheet's load-current-metadata path to populate
-    the per-file Title input and the shared Artist / Album / Album-artist
-    fields from disk. Files missing tags (no ID3 header on an MP3, or a
-    bare audio file an external tool wrote without metadata) return all
-    empties; non-tag-compatible extensions also return empties — the
-    caller surfaces that as 'no metadata to load'.
-    """
-    out: dict[str, str] = {"title": "", "artist": "", "album": "", "album_artist": ""}
-    ext = path.suffix.lower()
-
-    def _first(values: object) -> str:
-        # Mutagen returns different shapes across formats (list of strings,
-        # list of frame objects, str). Normalise to the first string-able
-        # value or an empty string.
-        if isinstance(values, list) and values:
-            v = values[0]
-            return str(v) if v is not None else ""
-        if isinstance(values, str):
-            return values
-        return ""
-
-    if ext == ".mp3":
-        try:
-            audio = ID3(str(path))
-        except ID3NoHeaderError:
-            return out
-        for field, (tag_id, _) in _MP3_TAGS.items():
-            frame = audio.get(tag_id)
-            if frame is not None and getattr(frame, "text", None):
-                out[field] = _first(frame.text)
-    elif ext in (".flac", ".ogg"):
-        audio = FLAC(str(path)) if ext == ".flac" else OggVorbis(str(path))
-        for field, key in _VORBIS_TAGS.items():
-            if key in audio:
-                out[field] = _first(audio[key])
-    elif ext in (".m4a", ".aac"):
-        audio = MP4(str(path))
-        for field, key in _M4A_TAGS.items():
-            if key in audio:
-                out[field] = _first(audio[key])
-    return out
-
-
-def _clear_metadata(path: Path, fields: list[str]) -> None:
-    """Remove the given tag fields entirely from a metadata-compatible file.
-
-    Distinct from `_write_metadata`'s skip-on-empty-value semantics: that
-    treats `""` as 'leave existing alone'; this drops the frame outright.
-    Used by /api/files/bulk-write when the user explicitly asks to blank
-    a shared field (artist / album_artist / album) across the selection.
-    """
-    ext = path.suffix.lower()
-    if ext == ".mp3":
-        try:
-            audio = ID3(str(path))
-        except ID3NoHeaderError:
-            return
-        for field in fields:
-            tag_id, _ = _MP3_TAGS[field]
-            audio.delall(tag_id)
-        audio.save(str(path))
-    elif ext in (".flac", ".ogg"):
-        audio = FLAC(str(path)) if ext == ".flac" else OggVorbis(str(path))
-        for field in fields:
-            key = _VORBIS_TAGS[field]
-            if key in audio:
-                del audio[key]
-        audio.save()
-    elif ext in (".m4a", ".aac"):
-        audio = MP4(str(path))
-        for field in fields:
-            key = _M4A_TAGS[field]
-            if key in audio:
-                del audio[key]
-        audio.save()
-
+# Audio-metadata helpers live in `backend.audio_metadata`. Re-exported
+# under their previous underscored names for the route modules that import
+# them from here. F401: re-exports for external callers are not unused.
+from backend.audio_metadata import clear_metadata as _clear_metadata  # noqa: E402,F401
+from backend.audio_metadata import read_metadata as _read_metadata  # noqa: E402,F401
+from backend.audio_metadata import write_metadata as _write_metadata  # noqa: E402,F401
 
 # ── Audio-format catalogue (file browser + convert + rename ext gating) ──────
 
