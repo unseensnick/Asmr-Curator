@@ -1,9 +1,10 @@
 import { useRef, useState } from "react";
-import { BookOpen, Download, FlaskConical, RotateCcw, ShieldOff, Upload, X } from "lucide-react";
+import { BookOpen, Download, FlaskConical, RotateCcw, ShieldOff, Upload } from "lucide-react";
 
 import DictionaryTester from "@/components/dictionary/DictionaryTester";
 import SuppressedPane from "@/components/dictionary/SuppressedPane";
 import VocabularyPane from "@/components/dictionary/VocabularyPane";
+import SheetHeaderBar from "@/components/SheetHeaderBar";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -197,10 +198,7 @@ export default function LibrarySettingsSheet({
                 </SheetDescription>
 
                 {/* Header */}
-                <div className="flex items-center gap-3 px-5 py-4 border-b border-border shrink-0">
-                    <span className="text-sm font-medium tracking-wide text-foreground">
-                        Dictionary
-                    </span>
+                <SheetHeaderBar title="Dictionary" closeLabel="Close dictionary" onClose={onClose}>
                     <span className="font-mono text-xs tabular-nums text-muted-foreground">
                         {dict.vocabulary.length.toLocaleString()} tag
                         {dict.vocabulary.length === 1 ? "" : "s"}
@@ -210,15 +208,7 @@ export default function LibrarySettingsSheet({
                             · {dict.suppressed.length.toLocaleString()} suppressed
                         </span>
                     )}
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        className="ml-auto text-muted-foreground hover:text-foreground transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                        aria-label="Close dictionary"
-                    >
-                        <X size={18} aria-hidden />
-                    </button>
-                </div>
+                </SheetHeaderBar>
 
                 {/* Body: nav + pane */}
                 <Tabs

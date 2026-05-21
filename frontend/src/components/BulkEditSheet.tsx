@@ -3,6 +3,7 @@ import { AlertCircle, BookOpen, Eraser, Loader2, RefreshCw, X } from "lucide-rea
 
 import LibrarySubdirPicker from "@/components/LibrarySubdirPicker";
 import SectionLabel from "@/components/SectionLabel";
+import SheetHeaderBar from "@/components/SheetHeaderBar";
 import TagsField from "@/components/TagsField";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -734,11 +735,7 @@ export default function BulkEditSheet({
                     canonical format.
                 </SheetDescription>
 
-                {/* Header */}
-                <div className="flex items-center gap-3 px-5 py-4 border-b border-border shrink-0">
-                    <span className="text-sm font-medium tracking-wide text-foreground">
-                        Bulk edit
-                    </span>
+                <SheetHeaderBar title="Bulk edit" closeLabel="Close bulk edit" onClose={onClose}>
                     <span className="text-sm text-muted-foreground" aria-live="polite">
                         {count} {fileWord}
                     </span>
@@ -761,15 +758,7 @@ export default function BulkEditSheet({
                         <BookOpen size={14} aria-hidden />
                         Dictionary
                     </Button>
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        className="text-muted-foreground hover:text-foreground transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                        aria-label="Close bulk edit"
-                    >
-                        <X size={18} aria-hidden />
-                    </button>
-                </div>
+                </SheetHeaderBar>
 
                 {/* Body (scrollable) */}
                 <div className="flex-1 overflow-y-auto px-5 py-5 flex flex-col gap-7">

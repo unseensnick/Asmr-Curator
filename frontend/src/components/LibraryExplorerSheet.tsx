@@ -28,6 +28,7 @@ import {
     X,
 } from "lucide-react";
 
+import SheetHeaderBar from "@/components/SheetHeaderBar";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -491,7 +492,7 @@ export default function LibraryExplorerSheet({
                     }
                 });
         });
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
+         
     }, [open, menuTarget, cutPaths, moveNotice, deleteCandidate, moveBusy]);
 
     // File-explorer hotkeys: N / F2 / Del.
@@ -1101,16 +1102,15 @@ export default function LibraryExplorerSheet({
                      *  + main split. Lives outside the ContextMenu wrapper
                      *  so right-click on the title bar uses the browser
                      *  default (the file menu is content-only). */}
-                    <div className="flex items-center gap-3 px-5 py-4 border-b border-border shrink-0">
-                        <span className="text-sm font-medium tracking-wide text-foreground">
-                            Browse files
-                        </span>
+                    <SheetHeaderBar
+                        title="Browse files"
+                        closeLabel="Close library browser"
+                        onClose={() => handleOpenChange(false)}
+                    >
                         {visible && (
                             <span
-                                // /80 (not /70) so the small mono numerals
-                                // clear WCAG AA on the cream-tinted light-
-                                // mode surface — the audit flagged /70 as
-                                // borderline at this size.
+                                // /80 (not /70) clears WCAG AA on the
+                                // cream-tinted light-mode surface.
                                 className="font-mono text-xs tabular-nums text-muted-foreground/80"
                             >
                                 {selectedPaths.size > 1
@@ -1121,15 +1121,7 @@ export default function LibraryExplorerSheet({
                                     : ""}
                             </span>
                         )}
-                        <button
-                            type="button"
-                            onClick={() => handleOpenChange(false)}
-                            className="ml-auto text-muted-foreground hover:text-foreground transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                            aria-label="Close library browser"
-                        >
-                            <X size={18} aria-hidden />
-                        </button>
-                    </div>
+                    </SheetHeaderBar>
 
                     {/* Body — horizontal split. Left rail = root selector
                      *  (Library / Downloads), always visible so root

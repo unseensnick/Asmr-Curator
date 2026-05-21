@@ -1,6 +1,5 @@
-import { X } from "lucide-react";
-
 import CookiePane from "@/components/dictionary/CookiePane";
+import SheetHeaderBar from "@/components/SheetHeaderBar";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 
 interface CookiesSheetProps {
@@ -30,19 +29,7 @@ export default function CookiesSheet({ open, onClose }: CookiesSheetProps) {
                     workflows.
                 </SheetDescription>
 
-                <div className="flex items-center gap-3 px-5 py-4 border-b border-border shrink-0">
-                    <span className="text-sm font-medium tracking-wide text-foreground">
-                        Cookies
-                    </span>
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        className="ml-auto text-muted-foreground hover:text-foreground transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                        aria-label="Close cookies"
-                    >
-                        <X size={18} aria-hidden />
-                    </button>
-                </div>
+                <SheetHeaderBar title="Cookies" closeLabel="Close cookies" onClose={onClose} />
 
                 <CookiePane open={open} />
             </SheetContent>

@@ -12,9 +12,9 @@ import {
     MousePointerClick,
     Network,
     Sparkles,
-    X,
 } from "lucide-react";
 
+import SheetHeaderBar from "@/components/SheetHeaderBar";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 
 interface HelpSheetProps {
@@ -91,19 +91,11 @@ export default function HelpSheet({ open, onClose }: HelpSheetProps) {
                     Documentation for every feature in this project, organised by topic.
                 </SheetDescription>
 
-                <div className="flex items-center gap-3 px-5 py-4 border-b border-border shrink-0">
-                    <span className="text-sm font-medium tracking-wide text-foreground">
-                        Help and reference
-                    </span>
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        className="ml-auto text-muted-foreground hover:text-foreground transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                        aria-label="Close help"
-                    >
-                        <X size={18} aria-hidden />
-                    </button>
-                </div>
+                <SheetHeaderBar
+                    title="Help and reference"
+                    closeLabel="Close help"
+                    onClose={onClose}
+                />
 
                 {/* Body: rail + content. min-h-0 on the parent lets the
                     scrollable main column overflow-y inside the sheet
