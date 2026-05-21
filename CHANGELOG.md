@@ -34,6 +34,7 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 - **Frontend deps bumped to latest across majors** (vite 8.0.x, vitest 4.x), which transitively retires the vulnerable nested `esbuild` 0.21.5 (GHSA-67mh-4wv8-2f99). One properties test was adjusted for a vitest 4 API change.
 - **File-API path validators now return a clean 403 on malformed input** (null bytes, paths the OS refuses to resolve). Previously these surfaced as a 500 with a Python stack trace — defence-in-depth tightening, not a known exploit.
 - **Clicking "New folder" in the Browse sheet now lands focus in the input on the first try, with no console warning.** Both routes — the toolbar button and the right-click → New folder action — were racing Radix's focus management and either leaving the input unfocused or briefly marking the Sheet content `aria-hidden` while focus was inside it.
+- **Hitting Esc inside the Bulk edit sheet (or any other open sheet / dialog) no longer wipes the FileBrowser's selection.** The FileBrowser's "clear selection on Esc" shortcut was bound globally to `document`, so an Esc in the Bulk edit sheet ran both handlers in one keypress — and since the sheet's file list IS the FileBrowser's bulkSelected, the rows would vanish out from under the user. The clear-selection shortcut now bails when any Radix sheet or dialog is open, and still works on the root view.
 
 ## [2.0.4]
 

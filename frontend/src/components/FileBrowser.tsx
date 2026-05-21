@@ -500,6 +500,22 @@ export default function FileBrowser({
             }
 
             if (e.key === "Escape") {
+                // Bail when any Radix dialog / sheet / alertdialog is open
+                // (BulkEditSheet, LibrarySettingsSheet, the Browse sheet,
+                // the delete confirm, etc.). The listener is bound to
+                // `document` so it fires regardless of focus — without
+                // this guard, an Esc inside an open sheet would clear
+                // the FileBrowser's bulkSelected in the same keypress,
+                // and since bulkSelected IS the BulkEditSheet's files
+                // prop, the rows would vanish out from under the user.
+                // The overlay layer owns Esc while it's open; only the
+                // root view (no overlay) gets the clear-selection shortcut.
+                if (
+                    document.querySelector(
+                        '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+                    )
+                )
+                    return;
                 // No-op when nothing is selected — let the keypress fall
                 // through to any ancestor (Sheet close, dialog dismiss).
                 if (batchSelected.size === 0 && !selected) return;
