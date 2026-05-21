@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { AlertCircle, Loader2, RefreshCw, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertCircle, Eraser, Loader2, RefreshCw, X } from "lucide-react";
 
 import LibrarySubdirPicker from "@/components/LibrarySubdirPicker";
 import SectionLabel from "@/components/SectionLabel";
@@ -9,7 +9,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { bulkWrite, BulkWriteValidationError, loadCachedMetadata } from "@/lib/api";
+import {
+    bulkWrite,
+    BulkWriteValidationError,
+    loadCachedMetadata,
+    loadCurrentMetadata,
+} from "@/lib/api";
 import { parseTitleLine } from "@/lib/parser";
 import type { AppDict, FileEntry, VocabEntry } from "@/lib/types";
 import {
@@ -65,6 +70,36 @@ interface SharedMetadata {
 }
 
 const EMPTY_SHARED: SharedMetadata = { artist: "", album_artist: "", album: "", suffix: "" };
+
+/** Likely-suffix pattern (F4A, M4A, GN4A, MP3, etc.). Used by
+ *  `splitPipeTitle` to drop a trailing all-caps short segment so a
+ *  re-apply with the same `shared.suffix` doesn't double it. */
+const SUFFIX_PATTERN = /^[A-Z0-9]{2,6}$/;
+
+/** Undo the pipe-encoding the app writes to ID3 TIT2.
+ *
+ * Single-file Generate composes `<title> | <tag1> | <tag2> | <suffix>`
+ * and writes the whole thing to TIT2. When the bulk-edit auto-load
+ * reads it back, we want the inputs split: the Title field gets the
+ * clean title, the Tags field gets the tag list, and the trailing
+ * suffix segment drops (the shared Suffix input handles that lane).
+ *
+ * Non-pipe titles pass through verbatim — third-party tagged files
+ * that don't follow the convention still load cleanly into the Title
+ * input as plain text. */
+function splitPipeTitle(raw: string): { title: string; tags: string[] } {
+    if (!raw.includes(" | ")) return { title: raw, tags: [] };
+    const parts = raw.split(" | ");
+    const title = parts[0] ?? "";
+    const rest = parts.slice(1);
+    if (rest.length > 0) {
+        const last = rest[rest.length - 1];
+        if (last && SUFFIX_PATTERN.test(last)) {
+            rest.pop();
+        }
+    }
+    return { title, tags: rest };
+}
 
 interface BulkEditSheetProps {
     open: boolean;
@@ -283,6 +318,142 @@ export default function BulkEditSheet({
             setIsLoading(false);
         }
     }
+
+    /** Apply a Set<string> of seen values across the selection to one
+     *  shared field: 0 distinct = leave alone, 1 = populate (and drop
+     *  any mixed flag), 2+ = blank the input + flag as `<Mixed values>`. */
+    const applySharedFromSeen = useCallback((field: SharedIdField, seen: Set<string>) => {
+        if (seen.size === 1) {
+            const only = [...seen][0] ?? "";
+            setShared((prev) => ({ ...prev, [field]: only }));
+            setMixedFields((prev) => {
+                const next = new Set(prev);
+                next.delete(field);
+                return next;
+            });
+        } else if (seen.size > 1) {
+            setShared((prev) => ({ ...prev, [field]: "" }));
+            setMixedFields((prev) => {
+                const next = new Set(prev);
+                next.add(field);
+                return next;
+            });
+        }
+    }, []);
+
+    /**
+     * Read each file's on-disk ID3 / FLAC / MP4 tags and populate the
+     * sheet from them. TIT2 gets pipe-split via `splitPipeTitle` so a
+     * previously-tagged file's `<title> | tag1 | tag2 | F4A` lands as
+     * a clean Title input + Tags chips. Shared fields (artist / album /
+     * album_artist) collapse to a single value when all selected files
+     * agree, otherwise surface as `<Mixed values>`.
+     *
+     * Overwrites any per-file edits in flight on purpose — the user
+     * explicitly asked for "what's on disk right now", and the alternative
+     * (merge) would silently keep stale values. Hit Clear first to wipe,
+     * then Load to refresh.
+     */
+    const handleLoadCurrentMetadata = useCallback(async () => {
+        if (files.length === 0 || isLoading) return;
+        setIsLoading(true);
+        setLoadFeedback({ kind: "none" });
+        try {
+            const response = await loadCurrentMetadata(
+                files.map((f) => f.path),
+                root,
+            );
+            const nextEdits: Record<string, PerFileEdit> = { ...edits };
+            const artistsSeen = new Set<string>();
+            const albumsSeen = new Set<string>();
+            const albumArtistsSeen = new Set<string>();
+            let loaded = 0;
+            for (const item of response.items) {
+                const hasData = item.title || item.artist || item.album || item.album_artist;
+                if (!hasData) continue;
+                loaded += 1;
+                const { title, tags } = splitPipeTitle(item.title);
+                nextEdits[item.path] = { title, tags };
+                if (item.artist) artistsSeen.add(item.artist);
+                if (item.album) albumsSeen.add(item.album);
+                if (item.album_artist) albumArtistsSeen.add(item.album_artist);
+            }
+            setEdits(nextEdits);
+            applySharedFromSeen("artist", artistsSeen);
+            applySharedFromSeen("album", albumsSeen);
+            applySharedFromSeen("album_artist", albumArtistsSeen);
+            setLoadFeedback(
+                loaded === 0 ? { kind: "empty" } : { kind: "success", loaded, total: files.length },
+            );
+        } catch (err) {
+            setLoadFeedback({ kind: "error", message: getErrorMessage(err) });
+        } finally {
+            setIsLoading(false);
+        }
+        // edits is intentionally read-without-deps — including it would
+        // refire the callback on every keystroke. We're using its
+        // current value at click time, not subscribing.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [files, root, isLoading, applySharedFromSeen]);
+
+    // Stable identity for the current selection (path-set). Drives the
+    // auto-load ref so we know when the set has changed.
+    const filesKey = useMemo(
+        () =>
+            files
+                .map((f) => f.path)
+                .sort()
+                .join("|"),
+        [files],
+    );
+    const autoLoadedForFilesRef = useRef<string>("");
+
+    /** Wipe every input back to its initial state. Use case: user
+     *  auto-loaded current metadata but wants to start from scratch
+     *  (third-party tagged file, want to retag with their own scheme).
+     *  Doesn't touch librarySubdir — that's app-wide navigation
+     *  state, not bulk-edit input. */
+    function handleClearAll() {
+        setEdits({});
+        setShared(EMPTY_SHARED);
+        setClearFields(new Set());
+        setMixedFields(new Set());
+        setLinkArtists(true);
+        setRename(false);
+        setMoveEnabled(false);
+        setLoadFeedback({ kind: "none" });
+        setSubmitError(null);
+        // Mark this file set as handled so the auto-load effect doesn't
+        // immediately undo what the user just cleared.
+        autoLoadedForFilesRef.current = filesKey;
+    }
+
+    // Auto-load current metadata when the sheet opens (or when the
+    // selection changes while it's open), but only if the inputs are
+    // empty — in-flight edits stay put. Reads `edits` / `shared` /
+    // `clearFields` / `mixedFields` once at trigger time to decide
+    // whether to auto-load; we don't want every keystroke to re-fire,
+    // so the rule's check fights what we want here.
+    //
+    // The sync setLoading / setEdits inside the data-fetching call is
+    // the standard React-docs pattern flagged by set-state-in-effect.
+    useEffect(() => {
+        if (!open) {
+            autoLoadedForFilesRef.current = "";
+            return;
+        }
+        if (autoLoadedForFilesRef.current === filesKey) return;
+        const hasState =
+            Object.keys(edits).length > 0 ||
+            Boolean(shared.artist || shared.album || shared.album_artist) ||
+            clearFields.size > 0 ||
+            mixedFields.size > 0;
+        autoLoadedForFilesRef.current = filesKey;
+        if (hasState || files.length === 0) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- data-fetching kickoff
+        handleLoadCurrentMetadata();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
+    }, [open, filesKey, handleLoadCurrentMetadata]);
 
     function toggleClear(field: SharedIdField) {
         const willClear = !clearFields.has(field);
@@ -544,13 +715,33 @@ export default function BulkEditSheet({
                                     it never causes a layout shift even when
                                     cycling through empty / success / error
                                     states. */}
-                                <div className="flex items-center gap-3 flex-wrap">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={handleLoadCurrentMetadata}
+                                        disabled={isLoading}
+                                        title="Re-read the ID3 / FLAC / MP4 tags currently on disk"
+                                    >
+                                        {isLoading ? (
+                                            <Loader2
+                                                size={14}
+                                                aria-hidden
+                                                className="animate-spin"
+                                            />
+                                        ) : (
+                                            <RefreshCw size={14} aria-hidden />
+                                        )}
+                                        Load from file
+                                    </Button>
                                     <Button
                                         type="button"
                                         variant="outline"
                                         size="sm"
                                         onClick={handleLoadFromCache}
                                         disabled={isLoading}
+                                        title="Pull title + tags from the matching Patreon post-api.json sidecar"
                                     >
                                         {isLoading ? (
                                             <Loader2
@@ -562,6 +753,17 @@ export default function BulkEditSheet({
                                             <RefreshCw size={14} aria-hidden />
                                         )}
                                         Load from cached post info
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={handleClearAll}
+                                        disabled={isLoading}
+                                        title="Wipe every input back to a clean slate"
+                                    >
+                                        <Eraser size={14} aria-hidden />
+                                        Clear
                                     </Button>
                                     {loadFeedback.kind === "success" && (
                                         <span

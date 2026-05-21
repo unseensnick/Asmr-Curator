@@ -19,6 +19,7 @@ from backend.main import (
     METADATA_COMPATIBLE_EXTS,
     NEEDS_CONVERSION_EXTS,
     _clear_metadata,
+    _read_metadata,
     _write_metadata,
     log,
     reject_if_exists,
@@ -283,6 +284,62 @@ def load_cached_metadata(body: LoadCachedMetadataIn):
             entry["tags"] = list(cached.tags)
         items.append(entry)
 
+    return {"items": items}
+
+
+# ── Current-metadata lookup (BulkEditSheet "Load current metadata") ──────────
+
+
+class LoadCurrentMetadataIn(BaseModel):
+    paths: list[str]
+    root: str = "library"
+
+
+@router.post("/api/files/load-current-metadata")
+def load_current_metadata(body: LoadCurrentMetadataIn):
+    """For each selected file, return the ID3 / FLAC / MP4 tags currently
+    written to disk. Feeds the BulkEditSheet's auto-load on open: per-file
+    Title fills from TIT2 (the frontend pipe-splits it back into title +
+    tags for the in-app encoding), and shared Artist / Album /
+    Album-artist fill from their respective frames when every selected
+    file agrees on the value.
+
+    Files outside `METADATA_COMPATIBLE_EXTS`, missing tag headers, or
+    that fail to validate against `root` come back with empty fields —
+    the bulk surface treats that as 'no metadata to load' rather than an
+    error, so one stray file in a selection doesn't block the others.
+    Files that don't exist on disk also fall through empty for the same
+    reason.
+    """
+    root_path = root_for(body.root)
+    items: list[dict] = []
+    for rel in body.paths:
+        entry: dict = {
+            "path": rel,
+            "title": "",
+            "artist": "",
+            "album": "",
+            "album_artist": "",
+        }
+        try:
+            target = validate_under_root(rel, root_path)
+        except HTTPException:
+            items.append(entry)
+            continue
+        if not target.exists() or not target.is_file():
+            items.append(entry)
+            continue
+        if target.suffix.lower() not in METADATA_COMPATIBLE_EXTS:
+            items.append(entry)
+            continue
+        try:
+            tags = _read_metadata(target)
+        except Exception as e:
+            log.error("load-current-metadata failed on %s: %s", target.name, e)
+            items.append(entry)
+            continue
+        entry.update(tags)
+        items.append(entry)
     return {"items": items}
 
 

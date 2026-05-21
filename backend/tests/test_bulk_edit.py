@@ -204,6 +204,87 @@ class TestLoadCachedMetadata:
         assert r.json() == {"items": []}
 
 
+# ── /api/files/load-current-metadata ────────────────────────────────────────
+
+
+class TestLoadCurrentMetadata:
+    """Round-trips ID3 tags from disk for the BulkEditSheet's auto-load on
+    open. Empty fields for files that don't exist, aren't tag-compatible,
+    or have no tag header — never errors, since one bad file shouldn't
+    block the rest of a selection."""
+
+    def test_reads_tags_from_existing_file(self, monkeypatch, tmp_path):
+        from fastapi.testclient import TestClient
+
+        from backend import main
+
+        library = tmp_path / "library"
+        library.mkdir()
+        monkeypatch.setattr(main, "DOWNLOAD_PATH", tmp_path / "downloads")
+        monkeypatch.setattr(main, "LIBRARY_PATH", library)
+        (library / "a.mp3").write_bytes(b"")
+        main._write_metadata(library / "a.mp3", "Sleepy", "Solar Girl", "Whispers", "Solar Girl")
+        c = TestClient(main.app)
+        r = c.post(
+            "/api/files/load-current-metadata",
+            json={"paths": ["a.mp3"], "root": "library"},
+        )
+        assert r.status_code == 200
+        item = r.json()["items"][0]
+        assert item["title"] == "Sleepy"
+        assert item["artist"] == "Solar Girl"
+        assert item["album"] == "Whispers"
+        assert item["album_artist"] == "Solar Girl"
+
+    def test_empty_fields_for_untagged_file(self, client):
+        c, _, library = client
+        _stage_mp3(library, "fresh.mp3")
+        r = c.post(
+            "/api/files/load-current-metadata",
+            json={"paths": ["fresh.mp3"], "root": "library"},
+        )
+        assert r.status_code == 200
+        assert r.json()["items"][0] == {
+            "path": "fresh.mp3",
+            "title": "",
+            "artist": "",
+            "album": "",
+            "album_artist": "",
+        }
+
+    def test_empty_for_missing_file(self, client):
+        c, _, _ = client
+        r = c.post(
+            "/api/files/load-current-metadata",
+            json={"paths": ["ghost.mp3"], "root": "library"},
+        )
+        assert r.status_code == 200
+        assert r.json()["items"][0]["title"] == ""
+
+    def test_empty_for_non_metadata_extension(self, client):
+        c, _, library = client
+        (library / "track.wav").write_bytes(b"")
+        r = c.post(
+            "/api/files/load-current-metadata",
+            json={"paths": ["track.wav"], "root": "library"},
+        )
+        assert r.status_code == 200
+        item = r.json()["items"][0]
+        # Empty across the board — bulk-edit can't tag this format anyway.
+        assert item["title"] == ""
+
+    def test_traversal_paths_drop_to_empty_entry(self, client):
+        # Same defence-in-depth as load-cached-metadata: a bad path is
+        # an empty entry, not a 400 that blocks the whole batch.
+        c, _, _ = client
+        r = c.post(
+            "/api/files/load-current-metadata",
+            json={"paths": ["../escape.mp3"], "root": "library"},
+        )
+        assert r.status_code == 200
+        assert r.json()["items"][0]["title"] == ""
+
+
 # ── /api/files/bulk-write ───────────────────────────────────────────────────
 
 

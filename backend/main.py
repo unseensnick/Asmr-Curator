@@ -265,6 +265,54 @@ def _write_metadata(path: Path, title: str, artist: str, album: str, album_artis
         audio.save()
 
 
+def _read_metadata(path: Path) -> dict[str, str]:
+    """Read title/artist/album/album_artist tags from a metadata-compatible
+    audio file. Returns a dict with every key present (empty string when
+    the tag is absent) so callers don't have to guard each lookup.
+
+    Used by the BulkEditSheet's load-current-metadata path to populate
+    the per-file Title input and the shared Artist / Album / Album-artist
+    fields from disk. Files missing tags (no ID3 header on an MP3, or a
+    bare audio file an external tool wrote without metadata) return all
+    empties; non-tag-compatible extensions also return empties — the
+    caller surfaces that as 'no metadata to load'.
+    """
+    out: dict[str, str] = {"title": "", "artist": "", "album": "", "album_artist": ""}
+    ext = path.suffix.lower()
+
+    def _first(values: object) -> str:
+        # Mutagen returns different shapes across formats (list of strings,
+        # list of frame objects, str). Normalise to the first string-able
+        # value or an empty string.
+        if isinstance(values, list) and values:
+            v = values[0]
+            return str(v) if v is not None else ""
+        if isinstance(values, str):
+            return values
+        return ""
+
+    if ext == ".mp3":
+        try:
+            audio = ID3(str(path))
+        except ID3NoHeaderError:
+            return out
+        for field, (tag_id, _) in _MP3_TAGS.items():
+            frame = audio.get(tag_id)
+            if frame is not None and getattr(frame, "text", None):
+                out[field] = _first(frame.text)
+    elif ext in (".flac", ".ogg"):
+        audio = FLAC(str(path)) if ext == ".flac" else OggVorbis(str(path))
+        for field, key in _VORBIS_TAGS.items():
+            if key in audio:
+                out[field] = _first(audio[key])
+    elif ext in (".m4a", ".aac"):
+        audio = MP4(str(path))
+        for field, key in _M4A_TAGS.items():
+            if key in audio:
+                out[field] = _first(audio[key])
+    return out
+
+
 def _clear_metadata(path: Path, fields: list[str]) -> None:
     """Remove the given tag fields entirely from a metadata-compatible file.
 

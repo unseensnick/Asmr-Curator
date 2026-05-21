@@ -2,6 +2,7 @@ export const API = {
     files: "/api/files",
     search: "/api/files/search",
     loadCachedMetadata: "/api/files/load-cached-metadata",
+    loadCurrentMetadata: "/api/files/load-current-metadata",
     bulkWrite: "/api/files/bulk-write",
     rename: "/api/rename",
     renamePath: "/api/rename-path",
@@ -412,6 +413,28 @@ export function loadCachedMetadata(
     root: FileRoot,
 ): Promise<LoadCachedMetadataResponse> {
     return apiPost<LoadCachedMetadataResponse>(API.loadCachedMetadata, { paths, root });
+}
+
+/** Current on-disk ID3 / FLAC / MP4 tags for the bulk-edit auto-load
+ *  step. Files without tags / wrong extensions / missing on disk come
+ *  back with all-empty fields rather than as errors. */
+export interface LoadCurrentMetadataItem {
+    path: string;
+    title: string;
+    artist: string;
+    album: string;
+    album_artist: string;
+}
+
+export interface LoadCurrentMetadataResponse {
+    items: LoadCurrentMetadataItem[];
+}
+
+export function loadCurrentMetadata(
+    paths: string[],
+    root: FileRoot,
+): Promise<LoadCurrentMetadataResponse> {
+    return apiPost<LoadCurrentMetadataResponse>(API.loadCurrentMetadata, { paths, root });
 }
 
 // Phase 2 of the BulkEditSheet plan: per-file title + optional canonical
