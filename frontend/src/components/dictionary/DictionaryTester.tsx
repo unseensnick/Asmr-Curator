@@ -271,12 +271,7 @@ function TagRow({ tag, onAddToVocab, onSuppress }: TagRowProps) {
                 >
                     Add to vocabulary
                 </Button>
-                <Button
-                    variant="outline"
-                    size="xs"
-                    onClick={onSuppress}
-                    className="text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
-                >
+                <Button variant="outline" size="xs" onClick={onSuppress}>
                     Suppress
                 </Button>
             </div>

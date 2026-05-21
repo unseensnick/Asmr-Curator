@@ -8,6 +8,7 @@ disk, and this module reads back what it produced.
 import collections
 import contextlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -15,11 +16,18 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
 from backend.audio_utils import AUDIO_FORMATS_CONFIG, flatten_dest_parts, unique_destination
+
+log = logging.getLogger(__name__)
+
+# Called once per parsed phase event from patreon-dl stdout (plus an
+# opening `starting`). `None` disables parsing entirely.
+ProgressCallback = Callable[[dict], None]
 
 PATREON_DL_BIN = os.environ.get("PATREON_DL_BIN", "patreon-dl")
 # Hard cap so a runaway creator-wide download can't hang the API forever.
@@ -32,10 +40,8 @@ AUDIO_EXTS = set(AUDIO_FORMATS_CONFIG["metadataCompatibleExts"]) | set(
     AUDIO_FORMATS_CONFIG["needsConversionExts"]
 )
 
-# patreon-dl's media-type vocabulary plus our synthetic `external` flag.
-# `external` signals `_write_config` to drop the `posts.with.media.type`
-# filter so posts whose only audio is a Drive URL still surface — patreon-dl
-# never sees the literal string.
+# patreon-dl media types + the synthetic `external` flag (which drops the
+# media-type filter so Drive-only posts still surface).
 ALLOWED_CONTENT_TYPES = ("audio", "video", "image", "attachment", "external")
 
 
@@ -43,10 +49,8 @@ class PatreonFetchError(RuntimeError):
     """Raised when patreon-dl fails or returns no usable content."""
 
 
-# File-host links surfaced on FetchedPost.external_links so the frontend
-# can flag the post for the per-link Download flow. Drive-only auto-capture
-# happens server-side via `backend.drive_fetch`; the others surface as
-# plain links the user opens manually.
+# Hosts whose URLs surface on FetchedPost.external_links. Drive scrapes
+# server-side; the rest surface as plain links the user opens manually.
 EXTERNAL_HOST_ALLOWLIST = (
     "drive.google.com",
     "mega.nz",
@@ -112,6 +116,124 @@ _WS_RE = re.compile(r"\s+")
 _PLAIN_URL_RE = re.compile(r"""https?://[^\s<>'"\)\]]+""", re.IGNORECASE)
 # Punctuation that's almost always a sentence-end rather than part of the URL.
 _URL_TRAILING_PUNCT = ".,;:!?"
+
+# ─── Stdout phase parsing ────────────────────────────────────────────────────
+# patreon-dl emits ANSI-decorated lines; color is disabled in `_write_config`
+# and residual escapes are stripped here. Unmatched lines fall through to the
+# log tail (used by the dry-run + no-posts disclosure).
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
+
+
+# Compiled patterns, ordered most-specific-first. Each entry pairs a regex
+# with a builder that produces the SSE event dict for a match.
+_PROGRESS_PATTERNS: list[tuple[re.Pattern[str], Callable[[re.Match[str]], dict]]] = [
+    (
+        re.compile(r"Targeting posts by '([^']+)'"),
+        lambda m: {"state": "resolving", "target_kind": "creator", "label": m.group(1)},
+    ),
+    (
+        re.compile(r"Targeting posts at '([^']+)'"),
+        lambda m: {"state": "resolving", "target_kind": "url", "label": m.group(1)},
+    ),
+    (
+        re.compile(r"Targeting post #(\S+)"),
+        lambda m: {"state": "resolving", "target_kind": "post", "label": m.group(1)},
+    ),
+    (
+        re.compile(r"Fetched posts:\s+(\d+)\s*/\s*(\d+)"),
+        lambda m: {
+            "state": "fetching_posts",
+            "fetched": int(m.group(1)),
+            "total": int(m.group(2)),
+        },
+    ),
+    (
+        re.compile(r"Done\.\s+(\d+) posts fetched"),
+        lambda m: {"state": "posts_found", "count": int(m.group(1))},
+    ),
+    (
+        re.compile(r"Download post #(\S+)\s+\((.+)\)\s*$"),
+        lambda m: {
+            "state": "post_progress",
+            "post_id": m.group(1),
+            "title": m.group(2).strip(),
+        },
+    ),
+    (
+        re.compile(
+            r"Download progress \([^)]+\):\s+(\d+)\s*/\s*(\d+)\s+\w+s?\s*/\s*(\d+)%"
+            r"(?:\s*\((\d+)\s*kB/s\))?",
+        ),
+        lambda m: {
+            "state": "downloading",
+            "bytes": int(m.group(1)),
+            "total": int(m.group(2)),
+            "percent": int(m.group(3)),
+            "speed_kbs": int(m.group(4)) if m.group(4) else None,
+        },
+    ),
+    (
+        re.compile(r'Download complete \([^)]+\)\s*->\s*"([^"]+)"'),
+        lambda m: {"state": "wrote_file", "path": m.group(1)},
+    ),
+    (
+        re.compile(r"Skipped downloading post #(\S+):\s*(.+)"),
+        lambda m: {
+            "state": "skipped",
+            "post_id": m.group(1),
+            "reason": m.group(2).strip(),
+        },
+    ),
+    (
+        re.compile(r"Done downloading"),
+        lambda m: {"state": "phase_done"},
+    ),
+]
+
+
+# How close together repeated `downloading` events can fire. The Downloader
+# emits one per chunk on fast streams; the UI doesn't need >2 Hz updates,
+# and the SSE queue stays calm under a creator-wide pull with dozens of
+# concurrent task progress lines.
+_DOWNLOADING_THROTTLE_S = 0.5
+
+
+def _safe_emit(callback: ProgressCallback | None, event: dict) -> None:
+    """Invoke `callback(event)` and swallow any exception.
+
+    The progress callback runs from the patreon-dl drain thread; a raised
+    exception would kill that thread silently and starve the SSE queue.
+    Log + drop so the subprocess still completes cleanly.
+    """
+    if callback is None:
+        return
+    try:
+        callback(event)
+    except Exception:
+        log.exception("patreon_fetch on_progress callback raised; dropping event")
+
+
+def parse_progress_line(line: str) -> dict | None:
+    """Map one stripped patreon-dl stdout line to an SSE event dict, or None.
+
+    Pure for testing — caller is responsible for ANSI stripping and for
+    feeding only one line at a time. Unknown / non-matching lines (debug
+    chatter, warnings, blank progress lines) return None and the line ends
+    up in `log_tail` only.
+    """
+    if not line:
+        return None
+    plain = _strip_ansi(line)
+    for pattern, builder in _PROGRESS_PATTERNS:
+        m = pattern.search(plain)
+        if m:
+            return builder(m)
+    return None
 
 
 def _anchor_text(inner_html: str) -> str:
@@ -195,6 +317,7 @@ def fetch(
     published_before: str | None = None,
     dry_run: bool = False,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    on_progress: ProgressCallback | None = None,
 ) -> FetchResult:
     """Download `url` with patreon-dl into `output_dir` and return parsed metadata.
 
@@ -207,6 +330,11 @@ def fetch(
     - `published_after` / `published_before`: ISO `yyyy-MM-dd` date bounds for
       creator URLs (no-op on single-post URLs). Caller should validate the
       format; we pass strings through verbatim.
+    - `on_progress`: optional sync callback receiving SSE-shaped phase event
+      dicts (`{"state": "resolving" | "fetching_posts" | ...}`) as patreon-dl
+      writes stdout. The `/api/patreon/fetch` route bridges these into an
+      asyncio queue. Called from the drain thread — caller must be threadsafe.
+      `None` skips parsing entirely.
     """
     if not shutil.which(PATREON_DL_BIN):
         raise PatreonFetchError(
@@ -226,6 +354,10 @@ def fetch(
         if cached_post_id:
             cached = _find_cached_post(output_dir, cached_post_id)
             if cached is not None:
+                _safe_emit(
+                    on_progress,
+                    {"state": "cached", "count": 1},
+                )
                 return FetchResult(
                     output_dir=str(output_dir),
                     posts=[cached],
@@ -241,6 +373,10 @@ def fetch(
                     published_before=published_before,
                 )
                 if cached_posts:
+                    _safe_emit(
+                        on_progress,
+                        {"state": "cached", "count": len(cached_posts)},
+                    )
                     return FetchResult(
                         output_dir=str(output_dir),
                         posts=cached_posts,
@@ -287,10 +423,30 @@ def fetch(
     # log tail at the end.
     tail_lines: collections.deque[str] = collections.deque(maxlen=400)
     returncode: int
+    last_download_emit: list[float] = [0.0]  # boxed so closure can mutate
 
     def _drain(stream) -> None:
         for line in iter(stream.readline, ""):
             tail_lines.append(line)
+            if on_progress is None:
+                continue
+            event = parse_progress_line(line.rstrip("\r\n"))
+            if event is None:
+                continue
+            # Throttle `downloading` events — patreon-dl emits one per chunk
+            # on fast streams, which would saturate the SSE queue without
+            # giving the UI anything new to render.
+            if event["state"] == "downloading":
+                now = time.monotonic()
+                if (
+                    event.get("percent") not in (0, 100)
+                    and now - last_download_emit[0] < _DOWNLOADING_THROTTLE_S
+                ):
+                    continue
+                last_download_emit[0] = now
+            _safe_emit(on_progress, event)
+
+    _safe_emit(on_progress, {"state": "starting"})
 
     try:
         # Merge stderr into stdout — patreon-dl writes its info/warn lines to
@@ -381,6 +537,14 @@ def _write_config(opts: PatreonFetchOptions) -> str:
     lines: list[str] = [
         "# Autogenerated by asmr-workbench patreon_fetch.py — do not edit.",
     ]
+
+    # ── [logger.console] section ────────────────────────────────────────────
+    # cli-color (patreon-dl's logger backend) emits ANSI escapes even when
+    # stdout isn't a TTY, which the SSE phase parser would otherwise have
+    # to strip on every line. Turning color off here keeps the log tail
+    # clean too.
+    lines.append("[logger.console]")
+    lines.append("color = 0")
 
     # ── [downloader] section ────────────────────────────────────────────────
     # `stop.on` ends the walk early; per-post dedup is separate

@@ -3,8 +3,10 @@ delete, rename (file-only + path-general)."""
 
 import asyncio
 import errno
+import itertools
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -17,6 +19,8 @@ from backend.main import (
     AUDIO_EXTS,
     METADATA_COMPATIBLE_EXTS,
     NEEDS_CONVERSION_EXTS,
+    _clear_metadata,
+    _read_metadata,
     _write_metadata,
     log,
     reject_if_exists,
@@ -25,6 +29,7 @@ from backend.main import (
     validate_under_library,
     validate_under_root,
 )
+from backend.patreon_fetch import _iter_cached_posts
 
 # LIBRARY_PATH accessed via `_main.LIBRARY_PATH` (attribute lookup) rather
 # than a top-level import binding so the test suite's monkeypatch on
@@ -217,6 +222,435 @@ def debug_files(root: str = "library"):
     }
 
 
+# ── Cached Patreon metadata lookup (bulk-edit "Load from cache") ─────────────
+
+
+# Patreon post IDs are numeric. The flattened ingest layout names each post
+# folder `<post_id> - <title>`; the legacy layout was just `<post_id>`. The
+# folder name is the only stable signal we have for tying a file back to its
+# sidecar without re-parsing every cached `post-api.json` per path.
+_POST_ID_FOLDER_RE = re.compile(r"^(\d+)(?: - .+)?$")
+
+
+def _post_id_from_folder(name: str) -> str | None:
+    match = _POST_ID_FOLDER_RE.match(name)
+    return match.group(1) if match else None
+
+
+class LoadCachedMetadataIn(BaseModel):
+    paths: list[str]
+    root: str = "downloads"
+
+
+@router.post("/api/files/load-cached-metadata")
+def load_cached_metadata(body: LoadCachedMetadataIn):
+    """For each selected file, return cached Patreon title / artist / tags
+    when the file lives under a post folder whose name carries a post_id.
+
+    Sidecars live at `DOWNLOAD_PATH/.patreon-dl/.../post_info/post-api.json`
+    regardless of where the audio ended up after `_flatten_audio` or a
+    Move-to-library. The lookup is parent-folder-name driven, so files
+    under `<creator>/<post_id> - <title>/` resolve in both DOWNLOAD_PATH
+    and LIBRARY_PATH; files outside that naming pattern come back with no
+    metadata fields (the bulk-edit UI surfaces this as "no cached info").
+
+    The cache is walked once per request rather than per path — a 100-file
+    selection is one `rglob`, not 100.
+    """
+    root_path = root_for(body.root)
+
+    patreon_dir = _main.DOWNLOAD_PATH.resolve() / ".patreon-dl"
+    cache: dict[str, object] = {}
+    if patreon_dir.is_dir():
+        for post, _, _ in _iter_cached_posts(patreon_dir):
+            cache[post.post_id] = post
+
+    items: list[dict] = []
+    for rel in body.paths:
+        try:
+            target = validate_under_root(rel, root_path)
+        except HTTPException:
+            # Bad path in a bulk request doesn't fail the whole request —
+            # surface as an empty entry so the UI can show the user that
+            # this file has no cached info, same as a path that simply
+            # doesn't match a post-folder name.
+            items.append({"path": rel})
+            continue
+        post_id = _post_id_from_folder(target.parent.name)
+        cached = cache.get(post_id) if post_id else None
+        entry: dict = {"path": rel}
+        if cached is not None:
+            entry["title"] = cached.title
+            entry["artist"] = cached.artist
+            entry["tags"] = list(cached.tags)
+        items.append(entry)
+
+    return {"items": items}
+
+
+# ── Current-metadata lookup (BulkEditSheet "Load current metadata") ──────────
+
+
+class LoadCurrentMetadataIn(BaseModel):
+    paths: list[str]
+    root: str = "library"
+
+
+@router.post("/api/files/load-current-metadata")
+def load_current_metadata(body: LoadCurrentMetadataIn):
+    """For each selected file, return the ID3 / FLAC / MP4 tags currently
+    written to disk. Feeds the BulkEditSheet's auto-load on open: per-file
+    Title fills from TIT2 (the frontend pipe-splits it back into title +
+    tags for the in-app encoding), and shared Artist / Album /
+    Album-artist fill from their respective frames when every selected
+    file agrees on the value.
+
+    Files outside `METADATA_COMPATIBLE_EXTS`, missing tag headers, or
+    that fail to validate against `root` come back with empty fields —
+    the bulk surface treats that as 'no metadata to load' rather than an
+    error, so one stray file in a selection doesn't block the others.
+    Files that don't exist on disk also fall through empty for the same
+    reason.
+    """
+    root_path = root_for(body.root)
+    items: list[dict] = []
+    for rel in body.paths:
+        entry: dict = {
+            "path": rel,
+            "title": "",
+            "artist": "",
+            "album": "",
+            "album_artist": "",
+        }
+        try:
+            target = validate_under_root(rel, root_path)
+        except HTTPException:
+            items.append(entry)
+            continue
+        if not target.exists() or not target.is_file():
+            items.append(entry)
+            continue
+        if target.suffix.lower() not in METADATA_COMPATIBLE_EXTS:
+            items.append(entry)
+            continue
+        try:
+            tags = _read_metadata(target)
+        except Exception as e:
+            log.error("load-current-metadata failed on %s: %s", target.name, e)
+            items.append(entry)
+            continue
+        entry.update(tags)
+        items.append(entry)
+    return {"items": items}
+
+
+# ── Bulk write (BulkEditSheet "Preview changes → Commit") ────────────────────
+
+
+_BULK_SHARED_FIELDS = ("artist", "album_artist", "album")
+
+
+class BulkWriteItem(BaseModel):
+    path: str
+    # Per-file ID3 TIT2 / equivalent. Empty string = leave existing title
+    # alone (matches _write_metadata's skip-on-empty behaviour).
+    title: str = ""
+    # Pre-composed canonical filename WITH extension. The frontend owns
+    # the composition rules (brackets-in-filename, dash join, sanitize)
+    # so they live in one place; the backend treats this as opaque and
+    # only validates shape / length / collision.
+    new_name: str = ""
+
+
+class BulkWriteShared(BaseModel):
+    artist: str = ""
+    album_artist: str = ""
+    album: str = ""
+    # Subset of `_BULK_SHARED_FIELDS` — fields to BLANK on every item.
+    # Distinct from the empty-string default, which means 'leave existing'.
+    clear: list[str] = []
+
+
+class BulkWriteIn(BaseModel):
+    items: list[BulkWriteItem]
+    shared: BulkWriteShared = BulkWriteShared()
+    rename: bool = False
+    root: str = "library"
+    # Optional library-subdir destination. When set (only valid with
+    # root=='downloads'), each item's post-rename file moves into
+    # LIBRARY_PATH/<to_subdir>/ at the end of phase 2. Subsumes a
+    # separate /api/move/batch round-trip the frontend would otherwise
+    # have to chain. Empty string and null both mean "don't move".
+    to_subdir: str | None = None
+
+
+def _validate_bulk_rename_name(name: str) -> str | None:
+    """Same rule set as `_validate_name`, but collects the error message
+    instead of raising so phase 1 of bulk-write can surface every offending
+    file in one response. Thin wrapper — the rules live in `_validate_name`.
+    """
+    try:
+        _validate_name(name, max_bytes=255, term="Filename")
+    except HTTPException as e:
+        # `detail` is a str on every call site here (no dict variants).
+        return str(e.detail)
+    return None
+
+
+@router.patch("/api/files/bulk-write")
+def bulk_write(body: BulkWriteIn):
+    """Apply bulk metadata + optional canonical rename + optional move
+    across the selection in one transactional request.
+
+    **Two-phase commit.** Phase 1 walks every item and validates path
+    resolution, file existence, metadata-compatible extension, rename
+    target shape + length + collision (both on-disk and against other
+    items in the same batch), and — when `to_subdir` is set — the
+    move-destination folder existence + per-item move collision. If ANY
+    item fails, the whole batch aborts with 422 and disk state is
+    untouched — the response includes per-item `ok: false` for both the
+    actual offenders and the would-have-been-fine items so the UI can
+    show the failed ones in context.
+
+    Phase 2 applies each item independently — rename first (within the
+    source parent), then write per-file title + shared fields
+    (`_write_metadata` skips blank values) + any explicit clears
+    (`_clear_metadata` drops the frame), then optionally move into
+    `LIBRARY_PATH/to_subdir/`. A mutagen or OS error here is per-item
+    `{ok: false, error}`; we don't try to unwind successfully-committed
+    earlier items because filesystem rollback is unreliable.
+
+    `to_subdir` is gated to `root=="downloads"` because the only
+    intended use is the BulkEditSheet's Downloads → Library move
+    workflow; library-to-library moves stay on /api/move so this
+    endpoint doesn't grow a parallel set of source-validation paths.
+
+    The frontend pre-composes `new_name` so the canonical-format rules
+    (brackets-kept-in-filename, dash join, sanitize) stay in one place;
+    the backend treats `new_name` as opaque and only enforces shape.
+    """
+    root_path = root_for(body.root)
+
+    # Cap items so a runaway client can't make the two-phase commit walk an
+    # unbounded list. 500 is well above realistic UI selections (the Bulk edit
+    # toolbar button hides until ≥2 are selected; the FileBrowser itself caps
+    # responses at the same order of magnitude).
+    if len(body.items) > 500:
+        raise HTTPException(413, "Too many items in one batch (max 500).")
+
+    invalid_clear = [f for f in body.shared.clear if f not in _BULK_SHARED_FIELDS]
+    if invalid_clear:
+        raise HTTPException(
+            400,
+            f"clear[] contains unknown field(s): {sorted(invalid_clear)}. "
+            f"Allowed: {list(_BULK_SHARED_FIELDS)}.",
+        )
+
+    # ── Optional move destination (downloads → library only) ─────────────────
+    # Resolved up-front so phase 1 can per-item-check collisions at the
+    # eventual landing spot. None means "don't move".
+    move_dest_dir: Path | None = None
+    if body.to_subdir is not None and body.to_subdir.strip() != "":
+        if body.root != "downloads":
+            raise HTTPException(
+                400,
+                "to_subdir is only valid when root is 'downloads' — moving WITHIN library "
+                "uses /api/move directly.",
+            )
+        move_dest_dir = validate_under_library(body.to_subdir.strip())
+        if not move_dest_dir.exists():
+            raise HTTPException(404, "Destination folder does not exist.")
+        if not move_dest_dir.is_dir():
+            raise HTTPException(400, "Destination is not a folder.")
+
+    # ── Phase 1: validate every item, no writes ──────────────────────────────
+    planned: list[dict] = []
+    errors: list[dict] = []
+    proposed_dests: set[Path] = set()
+    # Tracks the post-rename + post-move landing paths so two items in the
+    # same batch can't both try to land at the same library/to_subdir/name.
+    proposed_move_dests: set[Path] = set()
+
+    for item in body.items:
+        try:
+            src = validate_under_root(item.path, root_path)
+        except HTTPException as e:
+            errors.append({"path": item.path, "ok": False, "error": str(e.detail)})
+            continue
+        if not src.exists():
+            errors.append({"path": item.path, "ok": False, "error": "File not found."})
+            continue
+        if not src.is_file():
+            errors.append({"path": item.path, "ok": False, "error": "Path is not a file."})
+            continue
+        if src.suffix.lower() not in METADATA_COMPATIBLE_EXTS:
+            errors.append(
+                {
+                    "path": item.path,
+                    "ok": False,
+                    "error": (
+                        f"Cannot tag {src.suffix} files — convert to a metadata-compatible "
+                        "format first (MP3, FLAC, AAC, or OGG)."
+                    ),
+                },
+            )
+            continue
+
+        dest: Path | None = None
+        if body.rename and item.new_name and item.new_name.strip() != src.name:
+            err = _validate_bulk_rename_name(item.new_name)
+            if err is not None:
+                errors.append({"path": item.path, "ok": False, "error": err})
+                continue
+            new_name_clean = item.new_name.strip()
+            dest_rel = str(src.parent.relative_to(root_path.resolve()) / new_name_clean)
+            try:
+                dest_candidate = validate_under_root(dest_rel, root_path)
+            except HTTPException as e:
+                errors.append({"path": item.path, "ok": False, "error": str(e.detail)})
+                continue
+            if dest_candidate.exists():
+                errors.append(
+                    {"path": item.path, "ok": False, "error": "Target name already exists."},
+                )
+                continue
+            if dest_candidate in proposed_dests:
+                # Two items in the same batch picked the same new name.
+                # Without this check phase 2 would race — the first wins,
+                # the second fails with a collision — but the user sees
+                # an order-dependent error. Catching here means both
+                # affected items show in the validation response.
+                errors.append(
+                    {
+                        "path": item.path,
+                        "ok": False,
+                        "error": "Another item in this batch targets the same new name.",
+                    },
+                )
+                continue
+            proposed_dests.add(dest_candidate)
+            dest = dest_candidate
+
+        # If a move is requested, work out the landing name (post-rename
+        # when rename applies, otherwise the original) and check both
+        # disk + within-batch collisions at the destination.
+        if move_dest_dir is not None:
+            final_name = dest.name if dest is not None else src.name
+            move_target = move_dest_dir / final_name
+            if move_target.exists():
+                errors.append(
+                    {
+                        "path": item.path,
+                        "ok": False,
+                        "error": "A file with this name already exists at the destination folder.",
+                    },
+                )
+                continue
+            if move_target in proposed_move_dests:
+                errors.append(
+                    {
+                        "path": item.path,
+                        "ok": False,
+                        "error": "Another item in this batch would land at the same destination.",
+                    },
+                )
+                continue
+            proposed_move_dests.add(move_target)
+
+        planned.append({"item": item, "src": src, "dest": dest})
+
+    if errors:
+        # All-or-nothing on validation. Tag the not-actually-broken items
+        # so the UI can dim them without highlighting them as offenders.
+        aborted = [
+            {
+                "path": plan["item"].path,
+                "ok": False,
+                "error": "Aborted — other items failed validation.",
+            }
+            for plan in planned
+        ]
+        raise HTTPException(
+            status_code=422,
+            detail={"ok": False, "results": errors + aborted},
+        )
+
+    # ── Phase 2: apply each item, best-effort ────────────────────────────────
+    results: list[dict] = []
+    for plan in planned:
+        item: BulkWriteItem = plan["item"]
+        src: Path = plan["src"]
+        dest: Path | None = plan["dest"]
+        new_path_rel: str | None = None
+
+        moved_to_library = False
+        try:
+            if dest is not None:
+                src.rename(dest)
+                target = dest
+                new_path_rel = str(dest.relative_to(root_path.resolve()))
+            else:
+                target = src
+
+            _write_metadata(
+                target,
+                item.title,
+                body.shared.artist,
+                body.shared.album,
+                body.shared.album_artist,
+            )
+
+            # Clears come after sets so a same-batch "set artist AND clear
+            # album_artist" runs as written. clear[] never overlaps with
+            # the set fields because the UI uses one-or-the-other per
+            # field, but order keeps the semantic crisp.
+            if body.shared.clear:
+                _clear_metadata(target, body.shared.clear)
+
+            # Move step. Runs after metadata writes so the destination
+            # file lands with the requested tags + filename in one
+            # transactional unit. shutil.move (not Path.rename) so
+            # cross-mount DOWNLOAD_PATH → LIBRARY_PATH works when the
+            # two volumes differ.
+            if move_dest_dir is not None:
+                move_target = move_dest_dir / target.name
+                shutil.move(str(target), str(move_target))
+                new_path_rel = str(move_target.relative_to(_main.LIBRARY_PATH.resolve()))
+                moved_to_library = True
+        except OSError as e:
+            log.error("bulk-write OSError on %s: %s", src.name, e)
+            results.append(
+                {
+                    "path": item.path,
+                    "ok": False,
+                    "error": "Filesystem error. Check the server log.",
+                },
+            )
+            continue
+        except Exception as e:
+            log.error("bulk-write tag-write error on %s: %s", src.name, e)
+            results.append(
+                {
+                    "path": item.path,
+                    "ok": False,
+                    "error": "Tag write failed. Check the server log.",
+                },
+            )
+            continue
+
+        entry: dict = {"path": item.path, "ok": True}
+        if new_path_rel is not None:
+            entry["new_path"] = new_path_rel
+        if moved_to_library:
+            # Signal that `new_path` is relative to LIBRARY_PATH now,
+            # not the request's `root`. Frontend uses this to refresh
+            # the right tab + re-derive the Move-to picker's anchor.
+            entry["new_root"] = "library"
+        results.append(entry)
+
+    return {"ok": True, "results": results}
+
+
 # ── Folder creation + cross-root move ────────────────────────────────────────
 # /api/mkdir creates a folder under LIBRARY_PATH (one validator for the
 # inline picker AND the standalone "New folder" button). /api/move handles
@@ -225,28 +659,33 @@ def debug_files(root: str = "library"):
 # different volumes).
 
 
-def _validate_name(name: str, *, max_bytes: int | None = None) -> str:
+def _validate_name(name: str, *, max_bytes: int | None = None, term: str = "Name") -> str:
     """Reject names that would escape path validation or create dotfiles the
-    FileBrowser hides. Shared between mkdir + the rename endpoints.
+    FileBrowser hides. Shared between mkdir + the rename endpoints + the
+    bulk-edit rename validator.
 
     Strips whitespace and rejects: empty, contains `/` or `\\`, equals
     `.` or `..`, starts with `.`. When `max_bytes` is set, also rejects
     names whose UTF-8 byte length exceeds the cap (Linux filesystem limit
     is 255; callers pass that when relevant).
+
+    `term` controls user-facing wording — "Name" for folder/general,
+    "Filename" for the rename endpoints. Source of truth for the same
+    rules, instead of four near-identical inline ladders.
     """
     name = name.strip()
     if not name:
-        raise HTTPException(400, "Name cannot be empty.")
+        raise HTTPException(400, f"{term} cannot be empty.")
     if "/" in name or "\\" in name:
-        raise HTTPException(400, "Names can't contain `/` or `\\`.")
+        raise HTTPException(400, f"{term}s can't contain `/` or `\\`.")
     if name in (".", ".."):
-        raise HTTPException(400, "Invalid name.")
+        raise HTTPException(400, f"Invalid {term.lower()}.")
     if name.startswith("."):
-        raise HTTPException(400, "Names can't start with a dot.")
+        raise HTTPException(400, f"{term}s can't start with a dot.")
     if max_bytes is not None:
         name_bytes = len(name.encode("utf-8"))
         if name_bytes > max_bytes:
-            raise HTTPException(422, f"Name too long: {name_bytes} bytes (max {max_bytes}).")
+            raise HTTPException(422, f"{term} too long: {name_bytes} bytes (max {max_bytes}).")
     return name
 
 
@@ -329,15 +768,7 @@ def _plan_move(
         if dest_resolved == src_resolved or src_resolved in dest_resolved.parents:
             raise HTTPException(400, "Can't move a folder into itself.")
 
-    final_name = (new_name or src.name).strip()
-    if not final_name or "/" in final_name or "\\" in final_name:
-        raise HTTPException(400, "Invalid name.")
-    name_bytes = len(final_name.encode("utf-8"))
-    if name_bytes > 255:
-        raise HTTPException(
-            422,
-            f"Name too long: {name_bytes} bytes (max 255). Shorten it.",
-        )
+    final_name = _validate_name(new_name or src.name, max_bytes=255)
 
     dest_rel = (
         f"{dest_dir.relative_to(_main.LIBRARY_PATH.resolve())}/{final_name}"
@@ -542,10 +973,15 @@ def delete_path(body: DeleteIn):
         pass  # non-empty; fall through
 
     if not body.recursive:
+        # Cap the walk so deep library subtrees don't stat thousands of
+        # descendants just to drive the "are you sure?" prompt. The UI shows
+        # at most "100+"; anything beyond that is the same prompt either way.
+        _PROBE_CAP = 100
         try:
-            count = sum(1 for _ in target.rglob("*"))
+            walked = list(itertools.islice(target.rglob("*"), _PROBE_CAP + 1))
+            count = len(walked) if len(walked) <= _PROBE_CAP else _PROBE_CAP + 1
         except OSError:
-            count = -1  # best effort — non-zero is enough to drive the prompt
+            count = -1  # best effort; the prompt just needs a non-zero
         raise HTTPException(
             status_code=409,
             detail={
@@ -666,19 +1102,12 @@ def rename_file(body: RenameIn):
             f"Cannot rename {src.suffix} files — convert to a metadata-compatible format first (MP3, FLAC, AAC, or OGG)",
         )
 
-    new_name = body.new_name.strip()
-    if not new_name or "/" in new_name or "\\" in new_name:
-        raise HTTPException(400, "Invalid filename")
+    # Shared name-rule validator: same empty / slash / dotfile / 255-byte
+    # checks the bulk-write phase-1 collector and mkdir use.
+    new_name = _validate_name(body.new_name, max_bytes=255, term="Filename")
 
     dest = validate_under_root(str(src.parent.relative_to(root_path) / new_name), root_path)
     reject_if_exists(dest)
-
-    # Linux max filename length is 255 bytes (not chars — encode to check).
-    name_bytes = len(new_name.encode("utf-8"))
-    if name_bytes > 255:
-        raise HTTPException(
-            422, f"Filename too long: {name_bytes} bytes (max 255). Remove some tags to shorten it."
-        )
 
     try:
         src.rename(dest)

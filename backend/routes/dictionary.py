@@ -1,5 +1,7 @@
 """Tag vocabulary + suppressed-terms CRUD + bulk import/reset."""
 
+from contextlib import contextmanager
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -7,6 +9,18 @@ from backend import database
 from backend.main import require_non_empty
 
 router = APIRouter()
+
+
+@contextmanager
+def _conflict_on_value_error():
+    """`database.*` raises ValueError on unique-constraint / collision errors.
+    Wrap the call site to rethrow as 409 Conflict so route handlers don't all
+    repeat the same three-line try/except.
+    """
+    try:
+        yield
+    except ValueError as e:
+        raise HTTPException(409, str(e))
 
 
 # ── Full dict (load / import / reset) ───────────────────────────────────────
@@ -51,20 +65,16 @@ def get_vocabulary():
 def add_vocab(body: VocabIn):
     canonical = require_non_empty(body.canonical, "canonical")
     aliases = [a.strip().lower() for a in body.aliases if a.strip()]
-    try:
+    with _conflict_on_value_error():
         return database.add_vocab_entry(canonical, aliases)
-    except ValueError as e:
-        raise HTTPException(409, str(e))
 
 
 @router.patch("/api/vocabulary/{entry_id}")
 def edit_vocab(entry_id: int, body: VocabIn):
     canonical = require_non_empty(body.canonical, "canonical")
     aliases = [a.strip().lower() for a in body.aliases if a.strip()]
-    try:
+    with _conflict_on_value_error():
         row = database.edit_vocab_entry(entry_id, canonical, aliases)
-    except ValueError as e:
-        raise HTTPException(409, str(e))
     if not row:
         raise HTTPException(404, "vocabulary entry not found")
     return row
@@ -93,10 +103,8 @@ def get_suppressed():
 @router.post("/api/suppressed", status_code=201)
 def add_suppressed(body: SuppressIn):
     term = require_non_empty(body.term, "term").lower()
-    try:
+    with _conflict_on_value_error():
         return database.add_suppressed(term)
-    except ValueError as e:
-        raise HTTPException(409, str(e))
 
 
 @router.delete("/api/suppressed/{term_id}")

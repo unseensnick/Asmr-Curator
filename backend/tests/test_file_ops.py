@@ -9,21 +9,7 @@ so tests can stage files on disk directly and assert post-move layout.
 import json
 from pathlib import Path
 
-import pytest
-from fastapi.testclient import TestClient
-
-
-@pytest.fixture
-def client(monkeypatch, tmp_path):
-    download = tmp_path / "downloads"
-    library = tmp_path / "library"
-    download.mkdir()
-    library.mkdir()
-    from backend import main
-
-    monkeypatch.setattr(main, "DOWNLOAD_PATH", download)
-    monkeypatch.setattr(main, "LIBRARY_PATH", library)
-    return TestClient(main.app), download, library
+# `client` fixture is auto-discovered from backend/tests/conftest.py.
 
 
 # ── /api/mkdir ─────────────────────────────────────────────────────────────

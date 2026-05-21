@@ -102,7 +102,7 @@ Open **http://localhost:8000**. The dictionary database is created and seeded au
 | Layer            | Tech                                                  |
 | ---------------- | ----------------------------------------------------- |
 | Frontend         | React 19, Vite, Tailwind CSS v4, shadcn/ui            |
-| Backend          | Python 3.12+, FastAPI, Uvicorn                        |
+| Backend          | Python 3.14+, FastAPI, Uvicorn                        |
 | Database         | SQLite — single file, zero config                     |
 | Drive scrape     | Playwright + headless Chromium                        |
 | LLM (optional)   | Ollama (`qwen2.5vl:7b`) — runs outside the container  |
@@ -147,7 +147,7 @@ For posts that can't be fetched via patreon-dl, drop or paste an image into the 
 
 ### Library management
 
-- **Two-tab file browser.** **Library** (`LIBRARY_PATH`, your curated archive) and **Downloads** (`DOWNLOAD_PATH`, ingest staging, with a pending-count badge so forgotten downloads don't sit unnoticed). Live search by filename, folder, or both inside the active tab.
+- **Two-tab file browser.** **Library** (`LIBRARY_PATH`, your curated archive) and **Downloads** (`DOWNLOAD_PATH`, ingest staging, with a pending-count badge so forgotten downloads don't sit unnoticed). Library mode shows a clickable breadcrumb above the list so you can drill into subfolders without leaving the panel; Live search by filename, folder, or both inside the active tab.
 - **Browse Sheet** — opens via the toolbar **Browse** button. Persistent left rail switches between Library and Downloads in one click. Both share the same selection model:
   - Single-click selects, double-click activates (drill folder / open file)
   - Shift-click and Ctrl/Cmd-click extend, drag-select rubber-bands a rectangle (auto-scrolls near edges)
@@ -188,10 +188,11 @@ Optional MV3 browser extension (in [`extension/`](extension/)) for Chromium and 
 ├── .github/workflows/      # CI: build_check.yml (lint + build + tests), release.yml
 ├── .claude/                # Project rules, skills, agents, hooks (see CLAUDE.md)
 ├── backend/
-│   ├── main.py             # FastAPI app + shared helpers (validators, env paths)
+│   ├── main.py             # FastAPI app + shared validators / env paths
 │   ├── routes/             # one module per domain: system, extract, files,
 │   │                       #                       convert, settings, patreon, dictionary
 │   ├── database.py         # SQLite schema, defaults, helpers (no ORM)
+│   ├── audio_metadata.py   # mutagen ID3 / FLAC / MP4 read / write / clear
 │   ├── patreon_fetch.py    # subprocess wrapper around patreon-dl
 │   ├── drive_fetch.py      # Playwright-driven Drive ingest
 │   ├── audio_utils.py      # shared URL-clean + filename-derive helpers
@@ -286,7 +287,7 @@ Interactive docs at **http://localhost:8000/docs** (Swagger UI, auto-generated).
 | ------ | ------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | GET    | `/api/settings/patreon-cookie`  | Cookie status — `{ set: bool, length: number }`                                                       |
 | PUT    | `/api/settings/patreon-cookie`  | Save the Patreon cookie. Accepts `application/json` (`{"cookie":"..."}`) or raw `text/plain` body     |
-| POST   | `/api/patreon/fetch`            | Fetch a Patreon post or creator URL via `patreon-dl`. Request: `{ "url": "...", "metadata_only"?: false, "content_types"?: ["audio"], "published_after"?: "YYYY-MM-DD", "published_before"?: "YYYY-MM-DD", "dry_run"?: false }`. Response: `{ output_dir, count, metadata_only, dry_run, posts: [{post_id, title, tags, artist, post_dir, audio_path, external_links}] }`. `external_links` lists third-party file-host URLs (Drive / Mega / MediaFire / Dropbox) found in the post body. Audio files land at `DOWNLOAD_PATH/<creator>/<post_id> - <post_title>/<original_filename>` (flattened out of patreon-dl's nesting); patreon-dl's own tree + status DB stay isolated under `DOWNLOAD_PATH/.patreon-dl/`. Legacy `<post_id>/<file>` paths from before the layout change are still resolved by the cached-sidecar fast path. `content_types` defaults to `["audio"]`; allowed: `audio` / `video` / `image` / `attachment` / `external`. Both single-post and creator URLs in `metadata_only` mode short-circuit through a cached-sidecar fast path (creator matching uses the campaign vanity from the sidecar with a slugified-artist fallback) |
+| POST   | `/api/patreon/fetch`            | Fetch a Patreon post or creator URL via `patreon-dl`. **Returns `text/event-stream`** with live phases — `starting`, `resolving`, `fetching_posts` (`{ fetched, total }`), `posts_found`, `post_progress` (`{ post_id, title }`), `downloading` (`{ bytes, total, percent, speed_kbs }`), `wrote_file`, `skipped`, `phase_done`, terminating in `done` or `error`. The final `done` frame carries the same payload the synchronous endpoint used to return: `{ output_dir, count, metadata_only, dry_run, posts: [{post_id, title, tags, artist, post_dir, audio_path, external_links}] }`. Request: `{ "url": "...", "metadata_only"?: false, "content_types"?: ["audio"], "published_after"?: "YYYY-MM-DD", "published_before"?: "YYYY-MM-DD", "dry_run"?: false }`. `external_links` lists third-party file-host URLs (Drive / Mega / MediaFire / Dropbox) found in the post body. Audio files land at `DOWNLOAD_PATH/<creator>/<post_id> - <post_title>/<original_filename>` (flattened out of patreon-dl's nesting); patreon-dl's own tree + status DB stay isolated under `DOWNLOAD_PATH/.patreon-dl/`. Legacy `<post_id>/<file>` paths from before the layout change are still resolved by the cached-sidecar fast path. `content_types` defaults to `["audio"]`; allowed: `audio` / `video` / `image` / `attachment` / `external`. Both single-post and creator URLs in `metadata_only` mode short-circuit through a cached-sidecar fast path (creator matching uses the campaign vanity from the sidecar with a slugified-artist fallback) |
 | POST   | `/api/patreon/ingest-external-audio` | Download a signed third-party audio URL into `DOWNLOAD_PATH/<creator>/<post_id> - <title>/` when `artist` or `title` is supplied (legacy `<post_id>/` otherwise). Request: `{ "post_id": "12345", "source_url": "https://...", "filename"?: "optional.mp3", "title"?, "artist"?, "album"?, "album_artist"? }`. Streams via `httpx` to a `.part` temp file, renames on success. Host resolution checked against private/loopback/link-local ranges to block SSRF |
 | POST   | `/api/patreon/ingest-drive-link` | **Server-side Drive scrape.** Returns a `text/event-stream` with progress events (`launching_browser` → `loading_page` → `waiting_for_player` → `captured` → `downloading` → `done`/`error`; contested requests get a `queued` stage with `ahead` count). Headless Chromium loads the Drive viewer with your synced Google cookie, captures the first `videoplayback?…` URL on a recognised Drive host, prefers `itag=140` (m4a audio) over `itag=134` (mp4 video) with a 5 s grace window, strips `ump`/`range`/`srfvp`, streams the body to disk in bounded-memory chunks. Sign-in redirects fail fast with `code="auth_expired"`. Request: `{ "post_id": "12345", "drive_url": "https://drive.google.com/file/d/<ID>/view", "filename"?: "optional.m4a" }`. Response: `{ audio_path, size, source_url, file_id }` |
 | GET    | `/api/settings/google-cookie`   | Status — `{ set: bool, count: number, length: number }` (never the values) |
@@ -295,7 +296,7 @@ Interactive docs at **http://localhost:8000/docs** (Swagger UI, auto-generated).
 <details>
 <summary><b>Setting the Patreon cookie</b> — three ways</summary>
 
-The Patreon URL panel and the `/api/patreon/fetch` endpoint both require a session cookie since `patreon-dl` is a cookie-driven scraper (no Patreon API key exists for this use case). Three ways to set it:
+The Patreon URL panel and the `/api/patreon/fetch` endpoint both require a session cookie since `patreon-dl` is a cookie-driven scraper (no Patreon API key exists for this use case). The fetch streams patreon-dl progress while it runs, so the URL panel narrates phase-by-phase instead of sitting on a single static label. Three ways to set the cookie:
 
 - **Browser extension (easiest)** — install the MV3 extension from `extension/`, log into patreon.com (and google.com for Drive) in the same browser, click the floating "Sync cookies" pill (or use the toolbar popup). See [`extension/README.md`](extension/README.md).
 - **In the UI** — open the Settings dropdown → **Manage cookies** → paste the cookie value into the Patreon textarea → **Save cookie**. The Cookies modal includes a step-by-step DevTools walkthrough.
@@ -335,6 +336,9 @@ Every file endpoint accepts a `root` parameter (`"library"` for `LIBRARY_PATH`, 
 | GET    | `/api/files`        | List files and subdirectories at `<root>/subdir` (one level). Query: `subdir`, `root` |
 | GET    | `/api/files/search` | Recursively search all audio/video files under `<root>`; supports `q`, `search_in`, `root`. Hidden / cache dirs pruned; capped at 500 (response includes `truncated: true` when the cap is hit) |
 | GET    | `/api/files/debug`  | Diagnostic endpoint — shows what's visible at the chosen root to troubleshoot mounts. Query: `root` |
+| POST   | `/api/files/load-cached-metadata` | For each selected file, return cached Patreon `title` / `artist` / `tags` from the matching `post-api.json` sidecar under `DOWNLOAD_PATH/.patreon-dl/`. Body: `{ paths, root }`. Match is by post_id parsed from the file's parent folder name (`<post_id> - <title>/` or legacy `<post_id>/`); files outside that naming come back with no metadata fields. Drives the BulkEditSheet's "Load from cached post info" button |
+| POST   | `/api/files/load-current-metadata` | For each selected file, return the ID3 / FLAC / MP4 tags currently written to disk (`title` / `artist` / `album` / `album_artist`). Body: `{ paths, root }`. Files missing tag headers, with non-metadata extensions, or that don't exist come back with empty fields rather than as errors so one stray file in a selection doesn't block the others. Drives the BulkEditSheet's auto-load on open + the "Load from file" button |
+| PATCH  | `/api/files/bulk-write` | Apply per-file title + shared metadata fields (artist / album / album_artist) + optional canonical rename across a selection. Body: `{ items: [{ path, title?, new_name? }], shared: { artist?, album_artist?, album?, clear? }, rename, root }`. Two-phase commit — phase 1 validates every item (path, suffix, rename target shape / collision / within-batch dedupe); if ANY item fails, the whole batch aborts with 422 and disk state is untouched. Phase 2 applies the writes per-item with best-effort partial-success semantics. `shared.clear[]` blanks the listed fields across the selection (`artist` / `album_artist` / `album`); a blank shared value otherwise means "leave existing per file". Frontend pre-composes `new_name` so the canonical-format rules stay in one place |
 | POST   | `/api/rename`       | Rename a file in place (same parent directory). Body: `{ path, new_name, root, metadata? }`. Only `.mp3` / `.flac` / `.ogg` (formats with embeddable metadata) can be renamed directly; other formats must be converted first |
 | POST   | `/api/mkdir`        | Create a subfolder under `LIBRARY_PATH/<parent>/`. Body: `{ subdir, parent? }`. Scoped to `LIBRARY_PATH` only — `DOWNLOAD_PATH` is transient and not curated. Returns 409 on name collision |
 | POST   | `/api/move`         | Move a file **or folder** from `from_root` (library or downloads) into a `LIBRARY_PATH/<to_subdir>/` folder, optionally renaming during the move. Body: `{ from_path, from_root, to_subdir, new_name? }`. Uses `shutil.move` (cross-mount safe). Folder moves include a cycle check — pasting a folder into itself returns 400. Returns 409 on name collision at the destination — no silent overwrites |
@@ -358,7 +362,7 @@ Every file endpoint accepts a `root` parameter (`"library"` for `LIBRARY_PATH`, 
 | Method | Path                    | Description                                                                                          |
 | ------ | ----------------------- | ---------------------------------------------------------------------------------------------------- |
 | GET    | `/api/convert/formats`  | List supported output formats and quality levels (sourced from `frontend/src/lib/audio-formats.json`) |
-| POST   | `/api/convert`          | Re-encode a file with `ffmpeg`. Request: `{ "path": "...", "output_format": "mp3"\|"flac"\|"ogg", "quality": "low"\|"standard"\|"high"\|"best"\|"lossless", "root"?: "library"\|"downloads", "delete_original": false }` |
+| POST   | `/api/convert`          | Re-encode a file with `ffmpeg`. Request: `{ "path": "...", "output_format": "mp3"\|"flac"\|"ogg", "quality": "low"\|"standard"\|"high"\|"best"\|"lossless", "root"?: "library"\|"downloads", "delete_original": false, "bitrate_kbps"?: number }`. The optional `bitrate_kbps` (32 to 320, in steps of 8) is the power-mode override the UI sends when the user drags the bitrate slider; it swaps the preset's `-q:a` VBR target for `-b:a <N>k` and is rejected for FLAC |
 
 ### Supported Audio/Video Formats
 
@@ -422,16 +426,6 @@ Versions before v2.0.1 used a single `LIBRARY_PATH`. Now both paths are required
 - **Export**: Click **Export JSON** in the Dictionary modal → saves a portable JSON file
 - **Import**: Click **Import JSON** → replaces the entire dictionary from a JSON file
 - **Raw backup**: Copy `./data/dictionary.db` — it's a plain SQLite file that persists across container rebuilds
-
-### File Renaming
-
-The **File to Rename** section lets you:
-
-1. Search your audio library by filename, folder, or both using the live search with debouncing
-2. Select a file from the results list
-3. Choose a separator — dash (filesystem-safe) or pipe (for metadata)
-4. Preview the new filename with byte-length indicator (255-byte limit enforced)
-5. Click **Rename File** to apply the change on the server
 
 ## Contributing
 

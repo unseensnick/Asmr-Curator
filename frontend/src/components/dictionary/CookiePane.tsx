@@ -468,7 +468,7 @@ function StatusRow({ label, status, onClear, busy }: StatusRowProps) {
                         size="sm"
                         onClick={onClear}
                         disabled={busy}
-                        className="gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        className="gap-1.5"
                     >
                         <Trash2 size={12} aria-hidden />
                         Clear

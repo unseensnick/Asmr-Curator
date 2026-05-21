@@ -1,9 +1,10 @@
 import { useRef, useState } from "react";
-import { BookOpen, Download, FlaskConical, RotateCcw, ShieldOff, Upload, X } from "lucide-react";
+import { BookOpen, Download, FlaskConical, RotateCcw, ShieldOff, Upload } from "lucide-react";
 
 import DictionaryTester from "@/components/dictionary/DictionaryTester";
 import SuppressedPane from "@/components/dictionary/SuppressedPane";
 import VocabularyPane from "@/components/dictionary/VocabularyPane";
+import SheetHeaderBar from "@/components/SheetHeaderBar";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -66,7 +67,24 @@ export default function LibrarySettingsSheet({
     dict,
     onDictChange,
 }: LibrarySettingsSheetProps) {
-    const [tab, setTab] = useState<DictTab>("vocabulary");
+    const [tab, setTabState] = useState<DictTab>("vocabulary");
+    // Only render a pane after the user has visited that tab at least
+    // once. Without this, all three panes (Vocabulary, Suppressed,
+    // DictionaryTester) render up-front because the project overrides
+    // Radix's default unmount with `data-[state=inactive]:hidden` to
+    // preserve per-pane state. That gave a snappy tab switch at the
+    // cost of a heavy first paint on open — for a multi-hundred-entry
+    // vocabulary the click-to-visible delay was noticeable.
+    //
+    // With this set, only the active pane (default "vocabulary") mounts
+    // on open. Other panes mount on first visit and stay mounted, so
+    // tab switches after that point still preserve scroll / filter /
+    // edit state.
+    const [visited, setVisited] = useState<Set<DictTab>>(() => new Set(["vocabulary"]));
+    function setTab(next: DictTab) {
+        setTabState(next);
+        setVisited((prev) => (prev.has(next) ? prev : new Set(prev).add(next)));
+    }
     // Quick-fill: jump to a tab and pre-populate its add input
     const [quickFill, setQuickFill] = useState<{
         tab: DictTab;
@@ -180,10 +198,7 @@ export default function LibrarySettingsSheet({
                 </SheetDescription>
 
                 {/* Header */}
-                <div className="flex items-center gap-3 px-5 py-4 border-b border-border shrink-0">
-                    <span className="text-sm font-medium tracking-wide text-foreground">
-                        Dictionary
-                    </span>
+                <SheetHeaderBar title="Dictionary" closeLabel="Close dictionary" onClose={onClose}>
                     <span className="font-mono text-xs tabular-nums text-muted-foreground">
                         {dict.vocabulary.length.toLocaleString()} tag
                         {dict.vocabulary.length === 1 ? "" : "s"}
@@ -193,16 +208,7 @@ export default function LibrarySettingsSheet({
                             · {dict.suppressed.length.toLocaleString()} suppressed
                         </span>
                     )}
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        className="ml-auto text-muted-foreground hover:text-foreground transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                        aria-label="Close dictionary"
-                        title="Close"
-                    >
-                        <X size={18} aria-hidden />
-                    </button>
-                </div>
+                </SheetHeaderBar>
 
                 {/* Body: nav + pane */}
                 <Tabs
@@ -247,46 +253,56 @@ export default function LibrarySettingsSheet({
                             value="vocabulary"
                             className="flex-1 min-h-0 mt-0 flex flex-col data-[state=inactive]:hidden"
                         >
-                            <VocabularyPane
-                                vocabulary={dict.vocabulary}
-                                quickFill={
-                                    quickFill?.tab === "vocabulary" ? quickFill.value : undefined
-                                }
-                                onQuickFillConsumed={() => setQuickFill(null)}
-                                onChange={(vocabulary) => {
-                                    onDictChange({
-                                        ...dict,
-                                        vocabulary,
-                                        ...buildDictDerived(vocabulary, dict.suppressed),
-                                    });
-                                }}
-                                onReorder={handleVocabReorder}
-                            />
+                            {visited.has("vocabulary") && (
+                                <VocabularyPane
+                                    vocabulary={dict.vocabulary}
+                                    quickFill={
+                                        quickFill?.tab === "vocabulary"
+                                            ? quickFill.value
+                                            : undefined
+                                    }
+                                    onQuickFillConsumed={() => setQuickFill(null)}
+                                    onChange={(vocabulary) => {
+                                        onDictChange({
+                                            ...dict,
+                                            vocabulary,
+                                            ...buildDictDerived(vocabulary, dict.suppressed),
+                                        });
+                                    }}
+                                    onReorder={handleVocabReorder}
+                                />
+                            )}
                         </TabsContent>
                         <TabsContent
                             value="suppressed"
                             className="flex-1 min-h-0 mt-0 flex flex-col data-[state=inactive]:hidden"
                         >
-                            <SuppressedPane
-                                suppressed={dict.suppressed}
-                                quickFill={
-                                    quickFill?.tab === "suppressed" ? quickFill.value : undefined
-                                }
-                                onQuickFillConsumed={() => setQuickFill(null)}
-                                onChange={(suppressed) => {
-                                    onDictChange({
-                                        ...dict,
-                                        suppressed,
-                                        ...buildDictDerived(dict.vocabulary, suppressed),
-                                    });
-                                }}
-                            />
+                            {visited.has("suppressed") && (
+                                <SuppressedPane
+                                    suppressed={dict.suppressed}
+                                    quickFill={
+                                        quickFill?.tab === "suppressed"
+                                            ? quickFill.value
+                                            : undefined
+                                    }
+                                    onQuickFillConsumed={() => setQuickFill(null)}
+                                    onChange={(suppressed) => {
+                                        onDictChange({
+                                            ...dict,
+                                            suppressed,
+                                            ...buildDictDerived(dict.vocabulary, suppressed),
+                                        });
+                                    }}
+                                />
+                            )}
                         </TabsContent>
                         <TabsContent
                             value="test"
                             className="flex-1 min-h-0 mt-0 flex flex-col data-[state=inactive]:hidden"
                         >
-                            <DictionaryTester dict={dict} onQuickFix={handleQuickFix} />
+                            {visited.has("test") && (
+                                <DictionaryTester dict={dict} onQuickFix={handleQuickFix} />
+                            )}
                         </TabsContent>
                     </div>
                 </Tabs>
@@ -321,7 +337,7 @@ export default function LibrarySettingsSheet({
                         variant="outline"
                         size="sm"
                         onClick={() => setResetOpen(true)}
-                        className="gap-1.5 ml-auto border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        className="gap-1.5 ml-auto"
                     >
                         <RotateCcw size={14} aria-hidden />
                         Reset to defaults

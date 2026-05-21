@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Check, GripVertical, Info, Plus, Trash2, X } from "lucide-react";
+import { AlertCircle, BookOpen, Check, GripVertical, Info, Plus, Trash2, X } from "lucide-react";
 
+import EmptyState from "@/components/EmptyState";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -13,6 +14,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { API, apiDelete, apiPatch, apiPost } from "@/lib/api";
 import type { VocabEntry } from "@/lib/types";
 import { getErrorMessage } from "@/lib/utils";
@@ -188,11 +190,18 @@ export default function VocabularyPane({
                 {/* Scrollable list */}
                 <div className="flex-1 min-h-0 overflow-y-auto px-6">
                     <div className="flex flex-col gap-1.5 pb-3">
-                        {filtered.length === 0 && (
-                            <p className="text-sm text-muted-foreground italic py-2">
-                                {search ? "No matches." : "No vocabulary entries yet."}
-                            </p>
-                        )}
+                        {filtered.length === 0 &&
+                            (search ? (
+                                <p className="text-sm text-muted-foreground italic py-2">
+                                    No matches.
+                                </p>
+                            ) : (
+                                <EmptyState
+                                    icon={BookOpen}
+                                    title="Your tag dictionary is empty."
+                                    hint="Add a canonical tag with the input above, or use Import / Reset to defaults in the footer to seed a starter set."
+                                />
+                            ))}
                         {filtered.map((entry) =>
                             editingId === entry.id ? (
                                 <VocabEntryEditor
@@ -331,7 +340,6 @@ function VocabEntryRow({
             role="button"
             tabIndex={0}
             aria-label={`Edit ${entry.canonical}`}
-            title="Click to edit"
             className="group/vocab flex items-start gap-2 px-3 py-2.5 rounded-lg border border-border bg-background hover:bg-muted/40 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
         >
             {draggable && (
@@ -369,15 +377,20 @@ function VocabEntryRow({
                                 ? `Also on ${otherNames}. This entry wins lookup because it sits lower in the list.`
                                 : `Also on ${otherNames}, which wins lookup (lower in the list).`;
                             return (
-                                <span
-                                    key={a}
-                                    title={tip}
-                                    aria-label={tip}
-                                    className="font-mono inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border border-warning/40 bg-warning/10 text-warning"
-                                >
-                                    <AlertCircle size={10} aria-hidden />
-                                    {a}
-                                </span>
+                                <Tooltip key={a}>
+                                    <TooltipTrigger asChild>
+                                        <span
+                                            aria-label={tip}
+                                            className="font-mono inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border border-warning/40 bg-warning/10 text-warning"
+                                        >
+                                            <AlertCircle size={10} aria-hidden />
+                                            {a}
+                                        </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" className="max-w-xs">
+                                        {tip}
+                                    </TooltipContent>
+                                </Tooltip>
                             );
                         })}
                     </div>
@@ -390,7 +403,6 @@ function VocabEntryRow({
                     onDelete();
                 }}
                 className="text-muted-foreground hover:text-destructive transition-colors shrink-0 p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                title="Delete"
                 aria-label={`Delete ${entry.canonical}`}
             >
                 <Trash2 size={14} aria-hidden />
@@ -478,7 +490,6 @@ function VocabEntryEditor({ entry, vocabulary, onSave, onCancel }: VocabEntryEdi
                     type="button"
                     onClick={save}
                     className="text-success hover:text-success/80 transition-colors p-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                    title="Save"
                     aria-label="Save changes"
                 >
                     <Check size={16} aria-hidden />
@@ -487,7 +498,6 @@ function VocabEntryEditor({ entry, vocabulary, onSave, onCancel }: VocabEntryEdi
                     type="button"
                     onClick={onCancel}
                     className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                    title="Cancel"
                     aria-label="Cancel edit"
                 >
                     <X size={16} aria-hidden />

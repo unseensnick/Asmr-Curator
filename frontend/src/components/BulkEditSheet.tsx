@@ -1,0 +1,1380 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertCircle, BookOpen, Eraser, Loader2, RefreshCw, X } from "lucide-react";
+
+import ConversionPanel from "@/components/ConversionPanel";
+import LibrarySubdirPicker from "@/components/LibrarySubdirPicker";
+import SectionLabel from "@/components/SectionLabel";
+import SheetHeaderBar from "@/components/SheetHeaderBar";
+import TagsField from "@/components/TagsField";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+    API,
+    apiPost,
+    bulkWrite,
+    BulkWriteValidationError,
+    loadCachedMetadata,
+    loadCurrentMetadata,
+} from "@/lib/api";
+import { FORMAT_EXT } from "@/lib/audioFormats";
+import { parseTitleLine } from "@/lib/parser";
+import type { AppDict, ConvertFormat, ConvertQuality, FileEntry, VocabEntry } from "@/lib/types";
+import {
+    getErrorMessage,
+    normaliseAndDedupeTags,
+    sanitizeFilename,
+    stripOuterBrackets,
+} from "@/lib/utils";
+
+import { byteLength, MAX_BYTES } from "./selectedFile/utils";
+
+export type BulkEditRoot = "library" | "downloads";
+
+/** Per-file local edits. Empty title means "leave existing alone"
+ *  (backend skip-on-empty); empty tags means "no tags in the new
+ *  filename" when rename is on. */
+interface PerFileEdit {
+    title: string;
+    tags: string[];
+}
+
+const EMPTY_EDIT: PerFileEdit = { title: "", tags: [] };
+
+/** Shared metadata fields applied to every selected file. Suffix is
+ *  filename-composition only — it doesn't write to ID3, only joins the
+ *  canonical rename string. */
+type SharedIdField = "artist" | "album_artist" | "album";
+
+const SHARED_ID_FIELDS = [
+    "artist",
+    "album_artist",
+    "album",
+] as const satisfies readonly SharedIdField[];
+
+const SHARED_FIELD_LABELS: Record<SharedIdField, string> = {
+    artist: "Artist",
+    album_artist: "Album artist",
+    album: "Album",
+};
+
+interface SharedMetadata {
+    artist: string;
+    album_artist: string;
+    album: string;
+    suffix: string;
+}
+
+const EMPTY_SHARED: SharedMetadata = { artist: "", album_artist: "", album: "", suffix: "" };
+
+/** Likely-suffix pattern (F4A, M4A, GN4A, MP3, etc.). Used by
+ *  `splitPipeTitle` to drop a trailing all-caps short segment so a
+ *  re-apply with the same `shared.suffix` doesn't double it. */
+const SUFFIX_PATTERN = /^[A-Z0-9]{2,6}$/;
+
+/** Undo the pipe-encoding the single-file Generate writes to ID3 TIT2
+ *  (`<title> | tag1 | tag2 | <suffix>`). Drops the trailing all-caps
+ *  suffix so re-applying with the same `shared.suffix` doesn't double
+ *  it. Non-pipe titles pass through unchanged. */
+function splitPipeTitle(raw: string): { title: string; tags: string[] } {
+    if (!raw.includes(" | ")) return { title: raw, tags: [] };
+    const parts = raw.split(" | ");
+    const title = parts[0] ?? "";
+    const rest = parts.slice(1);
+    if (rest.length > 0) {
+        const last = rest[rest.length - 1];
+        if (last && SUFFIX_PATTERN.test(last)) {
+            rest.pop();
+        }
+    }
+    return { title, tags: rest };
+}
+
+interface BulkEditSheetProps {
+    open: boolean;
+    onClose: () => void;
+    files: FileEntry[];
+    /** Which side of the bind-mount the backend resolves paths against. */
+    root: BulkEditRoot;
+    dict: AppDict;
+    /** Drop a file from the working selection without closing the sheet.
+     *  Omit to hide the per-row X. */
+    onRemoveFile?: (path: string) => void;
+    onPromoteToCanonical: (text: string) => Promise<void>;
+    onPromoteToAlias: (text: string, canonical: VocabEntry) => Promise<void>;
+    /** Library subfolder; doubles as the Move section's destination when
+     *  the Move toggle is on. */
+    librarySubdir: string;
+    onLibrarySubdirChange: (subdir: string) => void;
+    onOpenDictionary: () => void;
+    /** Pre-warm the Dictionary chunk on hover/focus so the slide-in
+     *  animation runs without a chunk-load gap. */
+    onPrefetchDictionary?: () => void;
+    /** Power mode unlocks the explicit bitrate input in the Convert
+     *  section below the simple Quality picker. */
+    powerMode?: boolean;
+}
+
+/**
+ * Bulk metadata + optional canonical rename across a selection of audio
+ * files. Three sections (per-file details, apply-to-all, rename),
+ * sticky footer with Cancel + a gated commit. State is mounted-on-open
+ * (re-opening starts fresh) except per-file edits, which are path-keyed
+ * so adding/removing files mid-batch preserves their inputs.
+ */
+type LoadFeedback =
+    | { kind: "none" }
+    | { kind: "success"; loaded: number; total: number }
+    | { kind: "empty" }
+    | { kind: "error"; message: string };
+
+export default function BulkEditSheet({
+    open,
+    onClose,
+    files,
+    root,
+    dict,
+    onRemoveFile,
+    onPromoteToCanonical,
+    onPromoteToAlias,
+    librarySubdir,
+    onLibrarySubdirChange,
+    onOpenDictionary,
+    onPrefetchDictionary,
+    powerMode = false,
+}: BulkEditSheetProps) {
+    // Keyed by `FileEntry.path` (relative to the chosen root). Paths the
+    // user hasn't touched aren't in the map — `editFor` falls back to
+    // EMPTY_EDIT so the inputs render as blank with placeholder copy.
+    const [edits, setEdits] = useState<Record<string, PerFileEdit>>({});
+
+    function patchEdit(path: string, partial: Partial<PerFileEdit>) {
+        setEdits((prev) => ({
+            ...prev,
+            [path]: { ...(prev[path] ?? EMPTY_EDIT), ...partial },
+        }));
+    }
+
+    function editFor(path: string): PerFileEdit {
+        return edits[path] ?? EMPTY_EDIT;
+    }
+
+    // Shared apply-to-all metadata + the explicit-clear set. Empty values
+    // mean "leave the field as-is on each file" (the backend's skip-on-
+    // empty rule); `clearFields` is the only path that writes a blank ID3
+    // frame across the selection.
+    const [shared, setShared] = useState<SharedMetadata>(EMPTY_SHARED);
+    const [clearFields, setClearFields] = useState<Set<SharedIdField>>(new Set());
+
+    // A field belongs to `mixedFields` when the per-file values loaded by
+    // the Load-from-cache step disagree across the selection. The MP3Tag-
+    // style `<Mixed values>` placeholder fires off the same set so users
+    // get the convention they already know from there.
+    const [mixedFields, setMixedFields] = useState<Set<SharedIdField>>(new Set());
+
+    // Load-from-cache state. `isLoading` gates the button + spinner; the
+    // feedback variant carries either a hit count, an empty-result state,
+    // or an error message. Reset on every fresh click so feedback never
+    // lingers stale from a previous attempt.
+    const [isLoading, setIsLoading] = useState(false);
+    const [loadFeedback, setLoadFeedback] = useState<LoadFeedback>({ kind: "none" });
+
+    // Optional rename gate. Off by default — bulk-edit defaults to a
+    // metadata-only update so users don't accidentally rewrite every
+    // filename in the selection. Flipping this on surfaces the dry-run
+    // preview pane below; only files with a non-null proposed name get
+    // a rename in the eventual commit.
+    const [rename, setRename] = useState(false);
+
+    // Move-to-library checkbox. The destination subdir itself is the
+    // app-wide `librarySubdir` (controlled by App.tsx and shared with
+    // the LibraryExplorerSheet + single-file MoveToLibrarySection) —
+    // navigating one updates the others. An empty subdir with the
+    // checkbox on is treated as "no move" so the user can toggle
+    // without typing.
+    const [moveEnabled, setMoveEnabled] = useState(false);
+    const moveAvailable = root === "downloads";
+
+    // Convert section. Off by default — the common bulk-edit case is
+    // metadata only on already-compatible files. When on, the commit
+    // runs `/api/convert` per file BEFORE the bulk-write so the metadata
+    // write + rename + move act on the new (post-convert) paths. Format
+    // / quality defaults come from localStorage so the user's previous
+    // choice carries over the way it used to in the FileBrowser's
+    // standalone batch-convert mode.
+    const [convertEnabled, setConvertEnabled] = useState(false);
+    const [convertFormat, setConvertFormat] = useState<ConvertFormat>(() => {
+        const stored = localStorage.getItem("convertFormat") as ConvertFormat;
+        return stored && stored in FORMAT_EXT ? stored : "mp3";
+    });
+    const [convertQuality, setConvertQuality] = useState<ConvertQuality>(
+        () => (localStorage.getItem("convertQuality") as ConvertQuality) || "high",
+    );
+    const [deleteOriginal, setDeleteOriginal] = useState(false);
+    // Power-mode CBR override; `null` falls back to the preset's VBR
+    // target. Persisted so it survives sheet open/close + reloads.
+    const [convertBitrateKbps, setConvertBitrateKbps] = useState<number | null>(() => {
+        const stored = localStorage.getItem("convertBitrateKbps");
+        if (!stored) return null;
+        const n = Number(stored);
+        return Number.isFinite(n) ? n : null;
+    });
+    useEffect(() => {
+        if (convertBitrateKbps == null) localStorage.removeItem("convertBitrateKbps");
+        else localStorage.setItem("convertBitrateKbps", String(convertBitrateKbps));
+    }, [convertBitrateKbps]);
+    // Per-file progress during the convert phase of a commit. `null` when
+    // not converting (either convert is off, or we're in the bulk-write
+    // phase that follows).
+    const [convertProgress, setConvertProgress] = useState<{
+        current: number;
+        total: number;
+        currentFile: string;
+    } | null>(null);
+
+    // Persistent link between Artist and Album artist (the common case —
+    // anything that isn't a compilation). When on, the album_artist
+    // input mirrors `shared.artist` live and is disabled; the commit
+    // step writes shared.artist into both fields. Mirrors the existing
+    // RenameSection's `linkArtists` pattern. Defaults ON because the
+    // single-artist case is the overwhelming majority for the ASMR
+    // workflows that drive this surface — the toggle is right there to
+    // unlink for the rare compilation / collab.
+    const [linkArtists, setLinkArtists] = useState(true);
+
+    // Commit state. `isSubmitting` gates the footer + reopens prevention;
+    // `submitError` carries the message when the PATCH fails. Success
+    // closes the sheet via `onClose`, so there's no success-feedback
+    // state to manage.
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [submitError, setSubmitError] = useState<string | null>(null);
+
+    async function handleLoadFromCache() {
+        if (files.length === 0 || isLoading) return;
+        setIsLoading(true);
+        setLoadFeedback({ kind: "none" });
+        try {
+            const response = await loadCachedMetadata(
+                files.map((f) => f.path),
+                root,
+            );
+            // Run each sidecar through the same pipeline the Patreon URL
+            // applyPost flow uses in PatreonPanel: parseTitleLine splits
+            // any [bracketed] / (parenthesised) tags out of the raw title
+            // into `embeddedTags`, and normaliseAndDedupeTags resolves
+            // aliases against the dictionary + drops suppressed terms +
+            // dedupes. Without this the bulk path would write raw
+            // sidecar values that bypass the user's vocabulary, leaving
+            // tag chips that don't match canonical forms.
+            const nextEdits: Record<string, PerFileEdit> = { ...edits };
+            const artistsSeen = new Set<string>();
+            let loaded = 0;
+            for (const item of response.items) {
+                const hasData = item.title || item.artist || (item.tags && item.tags.length > 0);
+                if (!hasData) continue;
+                loaded += 1;
+                const { title: cleanTitle, embeddedTags } = parseTitleLine(item.title ?? "");
+                const allTags = [...embeddedTags, ...(item.tags ?? [])];
+                const normalised = normaliseAndDedupeTags(allTags, dict);
+                nextEdits[item.path] = {
+                    title: cleanTitle || item.title || "",
+                    tags: normalised,
+                };
+                if (item.artist) artistsSeen.add(item.artist);
+            }
+            setEdits(nextEdits);
+            // Cached sidecars only carry the post artist (no album / album_artist
+            // — those are bulk-edit conventions, not Patreon fields). Hand off to
+            // the shared helper so mixed-vs-unanimous reconciliation stays in one
+            // place; handleLoadCurrentMetadata uses the same call below.
+            applySharedFromSeen("artist", artistsSeen);
+
+            setLoadFeedback(
+                loaded === 0 ? { kind: "empty" } : { kind: "success", loaded, total: files.length },
+            );
+        } catch (err) {
+            setLoadFeedback({ kind: "error", message: getErrorMessage(err) });
+        } finally {
+            setIsLoading(false);
+        }
+    }
+
+    /** Apply a Set<string> of seen values across the selection to one
+     *  shared field: 0 distinct = leave alone, 1 = populate (and drop
+     *  any mixed flag), 2+ = blank the input + flag as `<Mixed values>`. */
+    const applySharedFromSeen = useCallback((field: SharedIdField, seen: Set<string>) => {
+        if (seen.size === 1) {
+            const only = [...seen][0] ?? "";
+            setShared((prev) => ({ ...prev, [field]: only }));
+            setMixedFields((prev) => {
+                const next = new Set(prev);
+                next.delete(field);
+                return next;
+            });
+        } else if (seen.size > 1) {
+            setShared((prev) => ({ ...prev, [field]: "" }));
+            setMixedFields((prev) => {
+                const next = new Set(prev);
+                next.add(field);
+                return next;
+            });
+        }
+    }, []);
+
+    /**
+     * Read each file's on-disk ID3 / FLAC / MP4 tags and populate the
+     * sheet from them. TIT2 gets pipe-split via `splitPipeTitle` so a
+     * previously-tagged file's `<title> | tag1 | tag2 | F4A` lands as
+     * a clean Title input + Tags chips. Shared fields (artist / album /
+     * album_artist) collapse to a single value when all selected files
+     * agree, otherwise surface as `<Mixed values>`.
+     *
+     * Overwrites any per-file edits in flight on purpose — the user
+     * explicitly asked for "what's on disk right now", and the alternative
+     * (merge) would silently keep stale values. Hit Clear first to wipe,
+     * then Load to refresh.
+     */
+    const handleLoadCurrentMetadata = useCallback(async () => {
+        if (files.length === 0 || isLoading) return;
+        setIsLoading(true);
+        setLoadFeedback({ kind: "none" });
+        try {
+            const response = await loadCurrentMetadata(
+                files.map((f) => f.path),
+                root,
+            );
+            const nextEdits: Record<string, PerFileEdit> = { ...edits };
+            const artistsSeen = new Set<string>();
+            const albumsSeen = new Set<string>();
+            const albumArtistsSeen = new Set<string>();
+            let loaded = 0;
+            for (const item of response.items) {
+                const hasData = item.title || item.artist || item.album || item.album_artist;
+                if (!hasData) continue;
+                loaded += 1;
+                const { title, tags } = splitPipeTitle(item.title);
+                nextEdits[item.path] = { title, tags };
+                if (item.artist) artistsSeen.add(item.artist);
+                if (item.album) albumsSeen.add(item.album);
+                if (item.album_artist) albumArtistsSeen.add(item.album_artist);
+            }
+            setEdits(nextEdits);
+            applySharedFromSeen("artist", artistsSeen);
+            applySharedFromSeen("album", albumsSeen);
+            applySharedFromSeen("album_artist", albumArtistsSeen);
+            setLoadFeedback(
+                loaded === 0 ? { kind: "empty" } : { kind: "success", loaded, total: files.length },
+            );
+        } catch (err) {
+            setLoadFeedback({ kind: "error", message: getErrorMessage(err) });
+        } finally {
+            setIsLoading(false);
+        }
+        // edits is intentionally read-without-deps — including it would
+        // refire the callback on every keystroke. We're using its
+        // current value at click time, not subscribing.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [files, root, isLoading, applySharedFromSeen]);
+
+    // Stable identity for the current selection (path-set). Drives the
+    // auto-load ref so we know when the set has changed.
+    const filesKey = useMemo(
+        () =>
+            files
+                .map((f) => f.path)
+                .sort()
+                .join("|"),
+        [files],
+    );
+    const autoLoadedForFilesRef = useRef<string>("");
+
+    /** Wipe every input back to its initial state. Use case: user
+     *  auto-loaded current metadata but wants to start from scratch
+     *  (third-party tagged file, want to retag with their own scheme).
+     *  Doesn't touch librarySubdir — that's app-wide navigation
+     *  state, not bulk-edit input. */
+    function handleClearAll() {
+        setEdits({});
+        setShared(EMPTY_SHARED);
+        setClearFields(new Set());
+        setMixedFields(new Set());
+        setLinkArtists(true);
+        setRename(false);
+        setMoveEnabled(false);
+        setConvertEnabled(false);
+        setLoadFeedback({ kind: "none" });
+        setSubmitError(null);
+        // Mark this file set as handled so the auto-load effect doesn't
+        // immediately undo what the user just cleared.
+        autoLoadedForFilesRef.current = filesKey;
+    }
+
+    // Auto-load current metadata when the sheet opens (or when the
+    // selection changes while it's open), but only if the inputs are
+    // empty — in-flight edits stay put. Reads `edits` / `shared` /
+    // `clearFields` / `mixedFields` once at trigger time to decide
+    // whether to auto-load; we don't want every keystroke to re-fire,
+    // so the rule's check fights what we want here.
+    //
+    // The sync setLoading / setEdits inside the data-fetching call is
+    // the standard React-docs pattern flagged by set-state-in-effect.
+    useEffect(() => {
+        if (!open) {
+            autoLoadedForFilesRef.current = "";
+            return;
+        }
+        // Warm the Dictionary chunk on every BulkEdit open. The button
+        // is in the header so the user might click it immediately, and
+        // the lazy chunk hasn't necessarily loaded yet — without this
+        // the first click stalls until the chunk lands, and the slide-in
+        // animation only starts after that gap. Idempotent.
+        onPrefetchDictionary?.();
+        if (autoLoadedForFilesRef.current === filesKey) return;
+        const hasState =
+            Object.keys(edits).length > 0 ||
+            Boolean(shared.artist || shared.album || shared.album_artist) ||
+            clearFields.size > 0 ||
+            mixedFields.size > 0;
+        autoLoadedForFilesRef.current = filesKey;
+        if (hasState || files.length === 0) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- data-fetching kickoff
+        handleLoadCurrentMetadata();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
+    }, [open, filesKey, handleLoadCurrentMetadata, onPrefetchDictionary]);
+
+    function toggleClear(field: SharedIdField) {
+        const willClear = !clearFields.has(field);
+        setClearFields((prev) => {
+            const next = new Set(prev);
+            if (willClear) next.add(field);
+            else next.delete(field);
+            return next;
+        });
+        // Entering clear mode blanks the input so there's no stale value
+        // sitting behind the disabled state. Exiting just restores typing
+        // — the input was empty under the disabled overlay anyway.
+        if (willClear) {
+            setShared((prev) => ({ ...prev, [field]: "" }));
+        }
+    }
+
+    function patchShared<K extends keyof SharedMetadata>(field: K, value: SharedMetadata[K]) {
+        setShared((prev) => ({ ...prev, [field]: value }));
+        // Typing anything cancels a pending clear on that field — the
+        // user clearly wants to set, not blank. Same logic dismisses the
+        // `<Mixed values>` placeholder: any typed value is an explicit
+        // override, so we drop the field out of mixedFields too.
+        if (field !== "suffix" && value) {
+            const idField = field as SharedIdField;
+            if (clearFields.has(idField)) {
+                setClearFields((prev) => {
+                    const next = new Set(prev);
+                    next.delete(idField);
+                    return next;
+                });
+            }
+            if (mixedFields.has(idField)) {
+                setMixedFields((prev) => {
+                    const next = new Set(prev);
+                    next.delete(idField);
+                    return next;
+                });
+            }
+        }
+    }
+
+    function placeholderForShared(field: SharedIdField): string {
+        if (clearFields.has(field)) return "Will clear on apply";
+        if (mixedFields.has(field)) return "<Mixed values>";
+        return "";
+    }
+
+    // ── Rename preview composition ───────────────────────────────────────────
+    //
+    // Mirrors the single-file `generate()` formula in App.tsx: each file's
+    // canonical name is `<title> - <tag1> - ... - <suffix>.<ext>`, with
+    // every part sanitized and brackets KEPT in the filename (they're only
+    // stripped for the ID3 payload). Empty title means we don't propose a
+    // rename for this file — leaving the row at "no change" in the
+    // preview pane.
+
+    /** Returns `null` when the file shouldn't be renamed (no per-file
+     *  title entered). Returns `""` only if every part sanitized away to
+     *  nothing; the preview renders that as a row-level error. */
+    function composeProposedName(edit: PerFileEdit, ext: string): string | null {
+        if (!edit.title.trim()) return null;
+        const sfx = shared.suffix.trim() || "F4A";
+        const parts = [edit.title, ...edit.tags, sfx].map(sanitizeFilename).filter(Boolean);
+        if (parts.length === 0) return "";
+        return `${parts.join(" - ")}${ext}`;
+    }
+
+    /** Pipe-delimited ID3 title that mirrors the single-file flow's
+     *  outputPipe in App.tsx. Brackets get stripped from the title,
+     *  then tags + suffix join via " | " — the convention the rest of
+     *  the app uses to fold per-file tags into TIT2 (there's no
+     *  dedicated tags frame; the pipe-string IS the tag storage).
+     *  Returns "" when the user hasn't set a title so `_write_metadata`
+     *  takes its skip-on-empty path and leaves the existing title
+     *  alone. */
+    function composeMetadataTitle(edit: PerFileEdit): string {
+        if (!edit.title.trim()) return "";
+        const sfx = shared.suffix.trim() || "F4A";
+        const pipeTitle = stripOuterBrackets(edit.title);
+        return [pipeTitle, ...edit.tags, sfx].join(" | ");
+    }
+
+    interface PreviewRow {
+        file: FileEntry;
+        proposed: string | null;
+        /** Set when the proposed name would exceed the 255-byte FS limit. */
+        tooLong: boolean;
+        /** Set when proposed equals current — UI flags as "no change". */
+        unchanged: boolean;
+    }
+
+    /** Recompute when any input that feeds the canonical name changes.
+     *  `MAX_BYTES` is the Linux filesystem name cap (mirrored on the
+     *  backend's two-phase validator via errno.ENAMETOOLONG). */
+    const previewRows: PreviewRow[] = useMemo(() => {
+        return files.map((file) => {
+            const edit = edits[file.path] ?? EMPTY_EDIT;
+            const proposed = composeProposedName(edit, file.ext);
+            const tooLong = proposed !== null && byteLength(proposed) > MAX_BYTES;
+            const unchanged = proposed !== null && proposed === file.name;
+            return { file, proposed, tooLong, unchanged };
+        });
+        // composeProposedName closes over `edits` + `shared.suffix`; both
+        // dependencies are baked in via the entries we map over so the
+        // useMemo deps cover the visible inputs without a stale-closure
+        // risk.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [files, edits, shared.suffix]);
+
+    // ── Commit-readiness ────────────────────────────────────────────────────
+    //
+    // The footer button enables only when there's something to write.
+    // Mirrors the backend's no-op detection so we don't fire a request
+    // that would be a 200 with all `unchanged` rows.
+
+    const hasPerFileEdit = Object.values(edits).some((e) => e.title || e.tags.length > 0);
+    // When linkArtists is on, the album_artist contribution to the commit
+    // is `shared.artist`, not the (potentially stale) `shared.album_artist`
+    // sitting in state from before the link was toggled. Match the
+    // displayed value so canCommit reflects what the user actually sees.
+    const effectiveAlbumArtist = linkArtists ? shared.artist : shared.album_artist;
+    const hasSharedEdit = Boolean(shared.artist || effectiveAlbumArtist || shared.album);
+    const hasClear = clearFields.size > 0;
+    const hasRename = rename && previewRows.some((r) => r.proposed && !r.unchanged && !r.tooLong);
+    // Move is only meaningful when source is Downloads (library-to-library
+    // stays on /api/move). Empty string with the checkbox on = no-op, so
+    // the user can toggle freely without typing.
+    const effectiveMoveSubdir = moveEnabled && moveAvailable ? librarySubdir.trim() : "";
+    const hasMove = effectiveMoveSubdir !== "";
+    const hasConvert = convertEnabled;
+    const canCommit =
+        hasPerFileEdit || hasSharedEdit || hasClear || hasRename || hasMove || hasConvert;
+    const anyTooLong = rename && previewRows.some((r) => r.tooLong);
+
+    async function handleSubmit() {
+        if (!canCommit || isSubmitting || anyTooLong) return;
+        setIsSubmitting(true);
+        setSubmitError(null);
+        try {
+            // Phase 0 (optional): convert each file via /api/convert.
+            // Runs FIRST so the bulk-write below operates on the new
+            // (post-convert) paths + extensions. Failures here don't
+            // abort the batch — we fall back to the original file so
+            // metadata writes still apply where they can.
+            const workingFiles: FileEntry[] = [];
+            if (convertEnabled) {
+                const quality = convertFormat === "flac" ? "lossless" : convertQuality;
+                setConvertProgress({
+                    current: 0,
+                    total: files.length,
+                    currentFile: "",
+                });
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    if (!file) continue;
+                    setConvertProgress({
+                        current: i + 1,
+                        total: files.length,
+                        currentFile: file.name,
+                    });
+                    try {
+                        const bitrateOverride =
+                            powerMode && convertBitrateKbps != null && convertFormat !== "flac"
+                                ? { bitrate_kbps: convertBitrateKbps }
+                                : {};
+                        const res = await apiPost<{ path: string; new_name: string }>(API.convert, {
+                            path: file.path,
+                            output_format: convertFormat,
+                            quality,
+                            root,
+                            delete_original: deleteOriginal,
+                            ...bitrateOverride,
+                        });
+                        const newExt = "." + (res.new_name.split(".").pop() ?? "");
+                        workingFiles.push({
+                            ...file,
+                            path: res.path,
+                            name: res.new_name,
+                            ext: newExt,
+                        });
+                    } catch {
+                        // Convert failed for this file; keep the original
+                        // so bulk-write still applies what it can.
+                        workingFiles.push(file);
+                    }
+                }
+                setConvertProgress(null);
+            } else {
+                workingFiles.push(...files);
+            }
+
+            // Build the per-item payload. ID3 title gets brackets stripped
+            // (the ID3-vs-filename rule); new_name keeps brackets via
+            // composeProposedName already running on the raw edit.title.
+            // edits are keyed by the ORIGINAL path (typed before convert),
+            // but the bulk-write items reference the post-convert path.
+            const items = workingFiles.map((file, i) => {
+                const originalPath = files[i]?.path ?? file.path;
+                const edit = edits[originalPath] ?? EMPTY_EDIT;
+                const proposed = rename ? composeProposedName(edit, file.ext) : null;
+                return {
+                    path: file.path,
+                    title: composeMetadataTitle(edit),
+                    new_name: proposed ?? "",
+                };
+            });
+            // linkArtists collapses album_artist onto artist at commit
+            // time + drops any pending Clear on album_artist (a link
+            // overrides a clear — the user clearly wants album_artist
+            // to track artist, not be blanked).
+            const effectiveClear = new Set(clearFields);
+            if (linkArtists) effectiveClear.delete("album_artist");
+            await bulkWrite({
+                items,
+                shared: {
+                    artist: shared.artist,
+                    album_artist: linkArtists ? shared.artist : shared.album_artist,
+                    album: shared.album,
+                    clear: [...effectiveClear],
+                },
+                rename,
+                root,
+                to_subdir: effectiveMoveSubdir,
+            });
+            // Wipe edit state before closing so re-opening the same selection
+            // starts fresh — the submitted values are now on disk, so showing
+            // them again as pending inputs would just
+            // confuse the user into re-applying a no-op.
+            setEdits({});
+            setShared(EMPTY_SHARED);
+            setClearFields(new Set());
+            setMixedFields(new Set());
+            setLinkArtists(true); // matches the default — see useState init
+            setRename(false);
+            setMoveEnabled(false);
+            setConvertEnabled(false);
+            // librarySubdir is app-wide navigation state — leave it
+            // where the user landed it so a follow-up Browse / Move
+            // opens at the same spot they just filed files into.
+            setLoadFeedback({ kind: "none" });
+            onClose();
+        } catch (err) {
+            if (err instanceof BulkWriteValidationError) {
+                // Surface the first real per-item failure (skipping the
+                // 'Aborted — other items failed validation' markers the
+                // backend adds for the would-have-been-fine items) so the
+                // user sees the actual cause, not a downstream symptom.
+                const real = err.results.find((r) => !r.ok && !r.error?.startsWith("Aborted"));
+                if (real) {
+                    setSubmitError(`${real.path}: ${real.error}`);
+                } else {
+                    setSubmitError(err.message);
+                }
+            } else {
+                setSubmitError(getErrorMessage(err));
+            }
+        } finally {
+            setIsSubmitting(false);
+            setConvertProgress(null);
+        }
+    }
+
+    // Persist convert preferences so the user's previous choice carries
+    // across sessions (matches the standalone batch-convert mode that
+    // used to live in the FileBrowser before this surface absorbed it).
+    useEffect(() => {
+        try {
+            localStorage.setItem("convertFormat", convertFormat);
+        } catch {
+            // non-fatal
+        }
+    }, [convertFormat]);
+    useEffect(() => {
+        try {
+            localStorage.setItem("convertQuality", convertQuality);
+        } catch {
+            // non-fatal
+        }
+    }, [convertQuality]);
+
+    const count = files.length;
+    const fileWord = count === 1 ? "file" : "files";
+
+    return (
+        <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
+            <SheetContent
+                className="w-full sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl overflow-hidden"
+                showCloseButton={false}
+                onEscapeKeyDown={(e) => {
+                    // Esc inside a text input belongs to the input — blur
+                    // it (so the user can hit Esc again to escalate to
+                    // the Sheet-level cascade) and otherwise leave the
+                    // sheet alone. Without this guard the cascade would
+                    // steal Esc from anyone typing in Title / Tags /
+                    // shared / suffix and feel jumpy: one Esc could wipe
+                    // a "Loaded N of N" banner the user wanted to read.
+                    const active = document.activeElement as HTMLElement | null;
+                    if (
+                        active &&
+                        (active.tagName === "INPUT" ||
+                            active.tagName === "TEXTAREA" ||
+                            active.isContentEditable)
+                    ) {
+                        e.preventDefault();
+                        active.blur();
+                        return;
+                    }
+                    // Cascading Esc, same pattern as LibraryExplorerSheet:
+                    // peel off one layer of transient state at a time
+                    // before letting Escape close the Sheet. Sequence is
+                    // ordered by destruction blast radius — feedback /
+                    // error banners go first (no work lost), then a full
+                    // Clear of in-flight edits (Clear-all semantics),
+                    // then the default close path.
+                    if (submitError) {
+                        e.preventDefault();
+                        setSubmitError(null);
+                        return;
+                    }
+                    if (loadFeedback.kind !== "none") {
+                        e.preventDefault();
+                        setLoadFeedback({ kind: "none" });
+                        return;
+                    }
+                    const hasState =
+                        Object.keys(edits).length > 0 ||
+                        Boolean(shared.artist || shared.album || shared.album_artist) ||
+                        clearFields.size > 0 ||
+                        mixedFields.size > 0 ||
+                        rename ||
+                        moveEnabled;
+                    if (hasState) {
+                        e.preventDefault();
+                        handleClearAll();
+                        return;
+                    }
+                    // Nothing transient to dismiss — let the Sheet close.
+                }}
+            >
+                <SheetTitle className="sr-only">Bulk edit</SheetTitle>
+                <SheetDescription className="sr-only">
+                    Edit metadata across {count} selected {fileWord} and optionally rename to a
+                    canonical format.
+                </SheetDescription>
+
+                <SheetHeaderBar title="Bulk edit" closeLabel="Close bulk edit" onClose={onClose}>
+                    <span className="text-sm text-muted-foreground" aria-live="polite">
+                        {count} {fileWord}
+                    </span>
+                    {/* Dictionary shortcut. Opens the LibrarySettingsSheet on
+                        top of this one — Radix stacks the two right-side
+                        sheets, so the user can promote / alias / inspect
+                        canonical tags without losing in-flight bulk-edit
+                        state. Closing the Dictionary returns focus + view
+                        to this sheet (App.tsx's libraryOpen and bulkEditOpen
+                        are independent). */}
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={onOpenDictionary}
+                        onMouseEnter={onPrefetchDictionary}
+                        onFocus={onPrefetchDictionary}
+                        className="ml-auto gap-1.5"
+                        aria-label="Open dictionary"
+                    >
+                        <BookOpen size={14} aria-hidden />
+                        Dictionary
+                    </Button>
+                </SheetHeaderBar>
+
+                {/* Body (scrollable) */}
+                <div className="flex-1 overflow-y-auto px-5 py-5 flex flex-col gap-7">
+                    <section aria-label="Per-file details" className="flex flex-col gap-3">
+                        <SectionLabel>Per-file details</SectionLabel>
+                        {count === 0 ? (
+                            <p className="text-sm text-muted-foreground italic">
+                                No files selected.
+                            </p>
+                        ) : (
+                            <>
+                                {/* Load-from-cache row. Lives above the table
+                                    because users scan top-down — seeing the
+                                    button first signals "you can pre-fill"
+                                    before they reach for the keyboard. The
+                                    feedback line sits next to the button so
+                                    it never causes a layout shift even when
+                                    cycling through empty / success / error
+                                    states. */}
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={handleLoadCurrentMetadata}
+                                        disabled={isLoading}
+                                    >
+                                        {isLoading ? (
+                                            <Loader2
+                                                size={14}
+                                                aria-hidden
+                                                className="animate-spin"
+                                            />
+                                        ) : (
+                                            <RefreshCw size={14} aria-hidden />
+                                        )}
+                                        Load from file
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={handleLoadFromCache}
+                                        disabled={isLoading}
+                                    >
+                                        {isLoading ? (
+                                            <Loader2
+                                                size={14}
+                                                aria-hidden
+                                                className="animate-spin"
+                                            />
+                                        ) : (
+                                            <RefreshCw size={14} aria-hidden />
+                                        )}
+                                        Load from cached post info
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={handleClearAll}
+                                        disabled={isLoading}
+                                    >
+                                        <Eraser size={14} aria-hidden />
+                                        Clear
+                                    </Button>
+                                    {loadFeedback.kind === "success" && (
+                                        <span
+                                            className="text-xs text-muted-foreground"
+                                            aria-live="polite"
+                                        >
+                                            Loaded {loadFeedback.loaded} of {loadFeedback.total}{" "}
+                                            {loadFeedback.total === 1 ? "file" : "files"}.
+                                        </span>
+                                    )}
+                                    {loadFeedback.kind === "empty" && (
+                                        <span
+                                            className="text-xs text-muted-foreground"
+                                            aria-live="polite"
+                                        >
+                                            No cached info for these files.
+                                        </span>
+                                    )}
+                                    {loadFeedback.kind === "error" && (
+                                        <span
+                                            className="text-xs text-destructive"
+                                            aria-live="polite"
+                                        >
+                                            {loadFeedback.message}
+                                        </span>
+                                    )}
+                                </div>
+                                {/* Stacked per-file blocks. The original 3-column
+                                    table cratered the moment real Patreon ASMR
+                                    filenames hit it — long `[EXCLUSIVE] [27_23] …`
+                                    names ate the row, leaving the Title and Tags
+                                    inputs at ~30px wide. Stacking the filename
+                                    header above full-width inputs gives every
+                                    field room without horizontal scroll. */}
+                                <div className="flex flex-col gap-3">
+                                    {files.map((file, idx) => {
+                                        const edit = editFor(file.path);
+                                        const titleId = `bulk-title-${idx}`;
+                                        // Live filename-length feedback. Mirrors the
+                                        // single-file rename's bytes/255 indicator so
+                                        // the user catches a too-long name while
+                                        // editing the inputs, not after toggling Rename
+                                        // and reading the Preview error. Only renders
+                                        // once a title exists — without one, no rename
+                                        // is proposed for this row, so there's no
+                                        // length to count.
+                                        const proposed = composeProposedName(edit, file.ext);
+                                        const bytes = proposed ? byteLength(proposed) : 0;
+                                        const bytesOver = bytes > MAX_BYTES;
+                                        const bytesWarn = bytes > 200 && !bytesOver;
+                                        return (
+                                            <div
+                                                key={file.path}
+                                                className={
+                                                    idx > 0
+                                                        ? "flex flex-col gap-2 pt-3 border-t border-border/50"
+                                                        : "flex flex-col gap-2"
+                                                }
+                                            >
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            {/* cursor-pointer matches the
+                                                                    FileBrowser's row hover —
+                                                                    the row is the affordance for
+                                                                    the tooltip-revealed full
+                                                                    filename + folder, same
+                                                                    interaction shape as the file
+                                                                    list. Text stays selectable
+                                                                    for copy. */}
+                                                            <span className="flex-1 min-w-0 block font-mono text-xs text-foreground truncate cursor-pointer">
+                                                                {file.name}
+                                                            </span>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent
+                                                            side="right"
+                                                            className="max-w-md"
+                                                        >
+                                                            <div className="flex flex-col gap-0.5 font-mono text-left">
+                                                                <span className="break-all">
+                                                                    {file.name}
+                                                                </span>
+                                                                {file.folder && (
+                                                                    <span className="text-background/70 break-all">
+                                                                        {file.folder}/
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                    {onRemoveFile && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => onRemoveFile(file.path)}
+                                                            className="shrink-0 text-muted-foreground hover:text-destructive transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                                                            aria-label={`Remove ${file.name} from this batch`}
+                                                        >
+                                                            <X size={14} aria-hidden />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <label
+                                                        htmlFor={titleId}
+                                                        className="w-12 shrink-0 text-xs text-muted-foreground"
+                                                    >
+                                                        Title
+                                                    </label>
+                                                    <Input
+                                                        id={titleId}
+                                                        value={edit.title}
+                                                        onChange={(ev) =>
+                                                            patchEdit(file.path, {
+                                                                title: ev.target.value,
+                                                            })
+                                                        }
+                                                        placeholder="Keep existing"
+                                                        className="flex-1 font-mono text-sm"
+                                                    />
+                                                </div>
+                                                <div className="flex items-start gap-2">
+                                                    <span className="w-12 shrink-0 text-xs text-muted-foreground pt-2">
+                                                        Tags
+                                                    </span>
+                                                    <div className="flex flex-col flex-1 min-w-0 gap-1">
+                                                        <TagsField
+                                                            tags={edit.tags}
+                                                            onTagsChange={(next) =>
+                                                                patchEdit(file.path, {
+                                                                    tags: next,
+                                                                })
+                                                            }
+                                                            dict={dict}
+                                                            onPromoteToCanonical={
+                                                                onPromoteToCanonical
+                                                            }
+                                                            onPromoteToAlias={onPromoteToAlias}
+                                                            placeholder="Add a tag"
+                                                            ariaLabel={`Add a tag for ${file.name}`}
+                                                        />
+                                                        {proposed && (
+                                                            <p
+                                                                className={
+                                                                    bytesOver
+                                                                        ? "text-xs text-destructive"
+                                                                        : bytesWarn
+                                                                          ? "text-xs text-warning"
+                                                                          : "text-xs text-muted-foreground"
+                                                                }
+                                                            >
+                                                                <span className="font-mono tabular-nums">
+                                                                    {bytes} / {MAX_BYTES}
+                                                                </span>{" "}
+                                                                bytes
+                                                                {bytesOver
+                                                                    ? ", too long, remove some tags."
+                                                                    : bytesWarn
+                                                                      ? ", approaching limit."
+                                                                      : "."}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </>
+                        )}
+                    </section>
+
+                    <section aria-label="Apply to all" className="flex flex-col gap-3">
+                        <SectionLabel>Apply to all</SectionLabel>
+                        <p className="text-xs text-muted-foreground/80 leading-relaxed -mt-1">
+                            Empty leaves the field as-is on each file. Use Clear to blank it across
+                            the selection.
+                        </p>
+                        <div className="flex flex-col gap-2.5">
+                            {SHARED_ID_FIELDS.map((field) => {
+                                // Album artist mirrors Artist when linkArtists
+                                // is on — disabled input that displays the
+                                // live shared.artist; commit step writes
+                                // shared.artist into both fields. Matches
+                                // RenameSection's existing link pattern.
+                                const isLinked = field === "album_artist" && linkArtists;
+                                const isCleared = clearFields.has(field) && !isLinked;
+                                const inputId = `bulk-shared-${field}`;
+                                const displayValue = isLinked ? shared.artist : shared[field];
+                                return (
+                                    <div key={field} className="flex flex-col gap-1.5">
+                                        <div className="flex items-center gap-2">
+                                            <label
+                                                htmlFor={inputId}
+                                                className="w-28 shrink-0 text-sm text-muted-foreground"
+                                            >
+                                                {SHARED_FIELD_LABELS[field]}
+                                            </label>
+                                            <Input
+                                                id={inputId}
+                                                value={displayValue}
+                                                onChange={(e) => patchShared(field, e.target.value)}
+                                                disabled={isCleared || isLinked}
+                                                placeholder={placeholderForShared(field)}
+                                                className="flex-1 font-mono text-sm"
+                                            />
+                                            <Button
+                                                type="button"
+                                                variant={isCleared ? "secondary" : "ghost"}
+                                                size="sm"
+                                                onClick={() => toggleClear(field)}
+                                                disabled={isLinked}
+                                                aria-pressed={isCleared}
+                                                aria-label={
+                                                    isCleared
+                                                        ? `Cancel clearing ${SHARED_FIELD_LABELS[field]}`
+                                                        : `Clear ${SHARED_FIELD_LABELS[field]} on all files`
+                                                }
+                                                className="shrink-0"
+                                            >
+                                                {isCleared ? "Clearing" : "Clear"}
+                                            </Button>
+                                        </div>
+                                        {field === "album_artist" && (
+                                            <label
+                                                htmlFor="bulk-link-artists"
+                                                className="flex items-center gap-2 cursor-pointer select-none w-fit pl-[7.5rem]"
+                                            >
+                                                <Checkbox
+                                                    id="bulk-link-artists"
+                                                    checked={linkArtists}
+                                                    onCheckedChange={(v) =>
+                                                        setLinkArtists(v === true)
+                                                    }
+                                                />
+                                                <span className="text-sm text-muted-foreground">
+                                                    Same as artist
+                                                </span>
+                                            </label>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                            {/* Suffix is filename-composition only — no ID3 write,
+                                so no Clear toggle. Sits below the three ID3 rows
+                                with extra top padding to mark the grouping
+                                without a horizontal rule. */}
+                            <div className="flex items-center gap-2 pt-2">
+                                <label
+                                    htmlFor="bulk-shared-suffix"
+                                    className="w-28 shrink-0 text-sm text-muted-foreground"
+                                >
+                                    Suffix
+                                </label>
+                                <Input
+                                    id="bulk-shared-suffix"
+                                    value={shared.suffix}
+                                    onChange={(e) => patchShared("suffix", e.target.value)}
+                                    placeholder="F4A"
+                                    className="flex-1 font-mono text-sm"
+                                />
+                            </div>
+                        </div>
+                    </section>
+
+                    {moveAvailable && (
+                        <section aria-label="Move to library" className="flex flex-col gap-3">
+                            <SectionLabel>Move to library</SectionLabel>
+                            <label
+                                htmlFor="bulk-move-toggle"
+                                className="flex items-start gap-3 cursor-pointer"
+                            >
+                                <Checkbox
+                                    id="bulk-move-toggle"
+                                    checked={moveEnabled}
+                                    onCheckedChange={(v) => setMoveEnabled(v === true)}
+                                    className="mt-0.5"
+                                />
+                                <span className="flex flex-col gap-1 min-w-0">
+                                    <span className="text-sm text-foreground">
+                                        Move into a library subfolder
+                                    </span>
+                                    <span className="text-xs text-muted-foreground leading-relaxed">
+                                        Each file moves into
+                                        <code className="font-mono text-foreground/80 mx-1">
+                                            LIBRARY_PATH/&lt;subfolder&gt;/
+                                        </code>
+                                        after metadata + rename apply. Browse to the destination
+                                        below — or create a new folder there with the same
+                                        affordance the single-file Move flow uses.
+                                    </span>
+                                </span>
+                            </label>
+                            {moveEnabled && (
+                                <div className="flex flex-col gap-2">
+                                    <LibrarySubdirPicker
+                                        subdir={librarySubdir}
+                                        onSubdirChange={onLibrarySubdirChange}
+                                        onError={(msg) =>
+                                            // Reuse the existing submit-error
+                                            // surface in the footer so picker
+                                            // failures don't need a parallel
+                                            // banner. Empty string clears.
+                                            setSubmitError(msg || null)
+                                        }
+                                    />
+                                    <span className="text-xs text-muted-foreground">
+                                        Moving to:{" "}
+                                        <span className="font-mono text-foreground break-all">
+                                            {librarySubdir
+                                                ? `Library / ${librarySubdir}`
+                                                : "Library"}
+                                        </span>
+                                    </span>
+                                </div>
+                            )}
+                        </section>
+                    )}
+
+                    <section aria-label="Convert" className="flex flex-col gap-3">
+                        <SectionLabel>Convert</SectionLabel>
+                        <label
+                            htmlFor="bulk-convert-toggle"
+                            className="flex items-start gap-3 cursor-pointer"
+                        >
+                            <Checkbox
+                                id="bulk-convert-toggle"
+                                checked={convertEnabled}
+                                onCheckedChange={(v) => setConvertEnabled(v === true)}
+                                className="mt-0.5"
+                            />
+                            <span className="flex flex-col gap-1 min-w-0">
+                                <span className="text-sm text-foreground">
+                                    Also convert these files
+                                </span>
+                                <span className="text-xs text-muted-foreground leading-relaxed">
+                                    Converts each file to your chosen format first. Useful for
+                                    formats like WAV or M4A that can&apos;t store tags directly;
+                                    converting to MP3, OGG, or FLAC lets the tag fields below save
+                                    into the file.
+                                </span>
+                            </span>
+                        </label>
+
+                        {convertEnabled && (
+                            <div className="flex flex-col gap-3 pl-7">
+                                <ConversionPanel
+                                    formats={["mp3", "flac", "ogg"]}
+                                    format={convertFormat}
+                                    quality={convertQuality}
+                                    deleteOriginal={deleteOriginal}
+                                    onFormatChange={setConvertFormat}
+                                    onQualityChange={setConvertQuality}
+                                    onDeleteChange={setDeleteOriginal}
+                                    checkboxId="bulk-convert-delete-original"
+                                    powerMode={powerMode}
+                                    bitrateKbps={convertBitrateKbps}
+                                    onBitrateChange={setConvertBitrateKbps}
+                                />
+                            </div>
+                        )}
+                    </section>
+
+                    <section aria-label="Rename" className="flex flex-col gap-3">
+                        <SectionLabel>Rename</SectionLabel>
+                        <label
+                            htmlFor="bulk-rename-toggle"
+                            className="flex items-start gap-3 cursor-pointer"
+                        >
+                            <Checkbox
+                                id="bulk-rename-toggle"
+                                checked={rename}
+                                onCheckedChange={(v) => setRename(v === true)}
+                                className="mt-0.5"
+                            />
+                            <span className="flex flex-col gap-1 min-w-0">
+                                <span className="text-sm text-foreground">
+                                    Rename files to the canonical format
+                                </span>
+                                <span className="text-xs text-muted-foreground leading-relaxed">
+                                    {`Each file gets renamed to `}
+                                    <code className="font-mono text-foreground/80">
+                                        {`<title> - <tag> - … - <suffix>.<ext>`}
+                                    </code>
+                                    . Brackets in the title are kept in the filename and stripped
+                                    from the ID3 title — same rule as the single-file Generate flow.
+                                    Rows with no per-file title stay as-is.
+                                </span>
+                            </span>
+                        </label>
+
+                        {rename && count > 0 && (
+                            <div className="rounded-md border border-border overflow-hidden mt-1">
+                                <div className="px-3 py-2 text-[10px] font-medium tracking-[0.08em] uppercase text-muted-foreground/80 bg-muted/30 border-b border-border">
+                                    Preview (
+                                    {previewRows.filter((r) => r.proposed && !r.unchanged).length}{" "}
+                                    of {count} will rename)
+                                </div>
+                                {/* Stacked rows. Side-by-side current → proposed
+                                    truncated both names down to ~30 chars on a
+                                    sheet of this width with real-world Patreon
+                                    ASMR filenames in the mix. Stacking gives
+                                    each name its own line so the user can
+                                    read what they're about to commit. */}
+                                <ul className="divide-y divide-border">
+                                    {previewRows.map((row) => (
+                                        <li
+                                            key={row.file.path}
+                                            className="flex flex-col gap-1 px-3 py-2 font-mono text-xs"
+                                        >
+                                            <span className="text-muted-foreground break-all">
+                                                {row.file.name}
+                                            </span>
+                                            <span className="flex items-start gap-1.5 break-all">
+                                                <span
+                                                    aria-hidden
+                                                    className="text-muted-foreground/60 shrink-0"
+                                                >
+                                                    →
+                                                </span>
+                                                {row.tooLong ? (
+                                                    <span className="inline-flex items-start gap-1 text-destructive">
+                                                        <AlertCircle
+                                                            size={12}
+                                                            aria-hidden
+                                                            className="shrink-0 mt-0.5"
+                                                        />
+                                                        <span>Name too long (max 255 bytes)</span>
+                                                    </span>
+                                                ) : row.proposed === null || row.unchanged ? (
+                                                    <span className="text-muted-foreground/70 italic">
+                                                        no change
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-foreground">
+                                                        {row.proposed}
+                                                    </span>
+                                                )}
+                                            </span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+                    </section>
+                </div>
+
+                {/* Footer — Cancel + the gated commit. Button is enabled only
+                    when there's actual work to do (per-file edit, shared
+                    value, clear toggle, or proposed rename). The commit
+                    fires PATCH /api/files/bulk-write directly; the preview
+                    pane above is the dry-run safety net. Validation errors
+                    surface inline next to Cancel. */}
+                <div className="flex items-center justify-end gap-3 px-5 py-3 border-t border-border shrink-0">
+                    {submitError && (
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <span
+                                    className="text-xs text-destructive flex-1 min-w-0 truncate cursor-help"
+                                    aria-live="polite"
+                                >
+                                    {submitError}
+                                </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-md">
+                                <span className="break-all">{submitError}</span>
+                            </TooltipContent>
+                        </Tooltip>
+                    )}
+                    <Button variant="ghost" size="sm" onClick={onClose} disabled={isSubmitting}>
+                        Cancel
+                    </Button>
+                    <Button
+                        variant="default"
+                        size="sm"
+                        onClick={handleSubmit}
+                        disabled={!canCommit || isSubmitting || anyTooLong}
+                        aria-label={
+                            !canCommit
+                                ? "No edits to apply yet"
+                                : anyTooLong
+                                  ? "One or more proposed names exceed the filesystem limit"
+                                  : rename
+                                    ? "Apply metadata and rename"
+                                    : "Apply metadata"
+                        }
+                    >
+                        {isSubmitting ? (
+                            <Loader2 size={14} aria-hidden className="animate-spin" />
+                        ) : null}
+                        {isSubmitting
+                            ? convertProgress
+                                ? `Converting (${convertProgress.current} of ${convertProgress.total})…`
+                                : "Applying…"
+                            : "Apply changes"}
+                    </Button>
+                </div>
+            </SheetContent>
+        </Sheet>
+    );
+}

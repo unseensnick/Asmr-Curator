@@ -13,6 +13,7 @@ import os
 import tempfile
 
 import pytest
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -21,3 +22,20 @@ def _baseline_env_paths():
         os.environ.setdefault("DOWNLOAD_PATH", dl)
         os.environ.setdefault("LIBRARY_PATH", lib)
         yield
+
+
+@pytest.fixture
+def client(monkeypatch, tmp_path):
+    """TestClient wired against fresh DOWNLOAD_PATH + LIBRARY_PATH dirs.
+    Returns (client, download_path, library_path) so tests can stage files
+    on disk and assert post-write layout.
+    """
+    download = tmp_path / "downloads"
+    library = tmp_path / "library"
+    download.mkdir()
+    library.mkdir()
+    from backend import main
+
+    monkeypatch.setattr(main, "DOWNLOAD_PATH", download)
+    monkeypatch.setattr(main, "LIBRARY_PATH", library)
+    return TestClient(main.app), download, library

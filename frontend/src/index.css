@@ -159,6 +159,17 @@
     }
 }
 
+@layer utilities {
+    /* Shared focus ring for keyboard-only outlines. The ~40 inline
+       `focus-visible:ring-2 focus-visible:ring-ring/40` instances across
+       the codebase drift in opacity (`/40`, `/45`, `/50`) and length —
+       this utility centralises the shape so new affordances + existing
+       sites converge on one canonical look as they get touched. */
+    .focus-ring {
+        @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40;
+    }
+}
+
 /* ── Custom scrollbars ───────────────────────────────────────────────────────
    WebKit (Chrome, Edge, Safari) */
 ::-webkit-scrollbar {

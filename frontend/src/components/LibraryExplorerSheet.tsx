@@ -28,6 +28,7 @@ import {
     X,
 } from "lucide-react";
 
+import SheetHeaderBar from "@/components/SheetHeaderBar";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -48,6 +49,7 @@ import {
 } from "@/components/ui/context-menu";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDragSelect } from "@/hooks/useDragSelect";
 import { API, apiGet, apiPost, buildQueryString, type FileRoot, moveBatchStream } from "@/lib/api";
 import { METADATA_COMPATIBLE_EXTS, NEEDS_CONVERSION_EXTS } from "@/lib/audioFormats";
@@ -55,32 +57,21 @@ import { selectAll, selectionFromClick } from "@/lib/explorerSelection";
 import type { FileEntry, ListedDirResponse } from "@/lib/types";
 import { deferToNextMacrotask, getErrorMessage } from "@/lib/utils";
 
-/** Debounce window for the inline filter input. Tighter than the
- *  FileBrowser tab's search because the user expects in-place filter
- *  feel, not a search-box round-trip. */
+/** Tighter than the FileBrowser tab's search debounce because this is
+ *  an in-place filter, not a network round-trip. */
 const LIBRARY_FILTER_DEBOUNCE_MS = 200;
 
 interface LibraryExplorerSheetProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    /** Called when the user clicks a FILE row in the explorer. Parent uses
-     *  this to switch the FileBrowser to the matching tab (library or
-     *  downloads) and select the file so the existing rename / convert /
-     *  move flows take over. */
     onSelectFile: (file: FileEntry, root: FileRoot) => void;
-    /** Shared library-subdir position. Controlled from FileBrowser so
-     *  navigating here updates the Move-to-library picker in
-     *  SelectedFilePanel (and vice versa). Downloads has its own local
-     *  state — only the library side is shared, since the move picker is
-     *  library-only. */
+    /** Shared library subdir; Downloads navigation stays local. */
     librarySubdir: string;
     onLibrarySubdirChange: (subdir: string) => void;
 }
 
-// Path sentinel used by the DeleteCandidate state to route through a
-// bulk-delete code path in confirmDelete (loops /api/delete per item)
-// without inventing a parallel dialog component for what's a small
-// branch on the same prompt.
+/** Sentinel path used by DeleteCandidate to route the bulk path through
+ *  the same AlertDialog without spawning a parallel dialog. */
 const BULK_DELETE_SENTINEL = "__bulk:delete";
 
 function rootLabel(root: FileRoot): string {
@@ -93,10 +84,8 @@ interface Entry {
     ext: string | null;
     path: string;
     needs_conversion?: boolean;
-    /** Search-mode only: relative-to-current-subdir folder hint rendered
-     *  as a small caption under the filename so the user can disambiguate
-     *  results that live deeper in the tree. Folder-listing rows leave
-     *  this undefined. */
+    /** Search-mode caption shown under the filename for results that
+     *  live deeper in the tree. Undefined for folder-listing rows. */
     folderHint?: string;
 }
 
@@ -109,40 +98,21 @@ interface SearchResponse {
 
 interface DeleteCandidate {
     entry: Entry;
-    /** Number of items inside a folder. -1 = couldn't enumerate, 0 = empty,
-     *  >0 = has contents (drives recursive delete + the "N items inside"
-     *  copy in the AlertDialog). Always 0 for file candidates. */
+    /** Folder content count: -1 couldn't enumerate, 0 empty, >0 has contents
+     *  (drives the recursive-delete branch + the "N items inside" copy).
+     *  Always 0 for file candidates. */
     contentsCount: number;
-    /** Bulk-delete only: the first few selected entry names + the total
-     *  selection size. Surfaced in the AlertDialog so the user can
-     *  sanity-check what's about to be removed before confirming —
-     *  drag-select can grab one extra row by accident otherwise. */
+    /** Bulk-delete preview: first few selected names + total. Lets the
+     *  user sanity-check before confirm — drag-select grabs accidents. */
     bulkPreview?: { names: string[]; total: number };
 }
 
 /**
- * Right-side Sheet that lets the user navigate both filesystem roots
- * (LIBRARY_PATH and DOWNLOAD_PATH) folder-by-folder. A persistent left
- * rail shows Library + Downloads as two root buttons, so switching
- * roots is always one click away — no top-level "walk in / walk out"
- * indirection. Per-root affordances:
- *
- *   • Library — full CRUD: rename, delete, new folder, recursive search,
- *     OS-style multi-select with cut/paste.
- *   • Downloads — read + rename + delete + recursive search. No new
- *     folder (the backend's `/api/mkdir` is library-only by design;
- *     downloads is transient ingest staging, not a curated tree).
- *
- * Files and folders both support right-click → Delete with confirmation.
- * Folder deletes preflight `/api/files?subdir=<folder>` to count contents,
- * so the AlertDialog can show "Delete empty folder?" vs "Delete folder
- * AND N items inside?". The backend's /api/delete endpoint enforces the
- * same semantics (rmdir for empty, shutil.rmtree only when recursive=true).
- *
- * Future enhancements:
- *   • Per-row Move from Downloads into a chosen Library subfolder
- *     (would subsume the inline move picker in SelectedFilePanel).
- *   • Drag-and-drop reorganise.
+ * Right-side Sheet for browsing both filesystem roots folder-by-folder
+ * with a persistent left rail switcher. Library gets full CRUD (rename,
+ * delete, new folder, search, multi-select with cut/paste). Downloads is
+ * read + rename + delete + search; no new folder because /api/mkdir is
+ * library-only (Downloads is transient ingest staging).
  */
 export default function LibraryExplorerSheet({
     open,
@@ -249,11 +219,19 @@ export default function LibraryExplorerSheet({
     }, [menuTarget]);
     useEffect(() => {
         newFolderOpenRef.current = newFolderOpen;
+        if (!newFolderOpen) return;
         // Auto-focus the inline input when the new-folder row opens.
-        // Replaces `<Input autoFocus />` (jsx-a11y/no-autofocus); the
-        // behaviour — type immediately after clicking "New folder" — is
-        // preserved.
-        if (newFolderOpen) newFolderInputRef.current?.focus();
+        // Replaces `<Input autoFocus />` (jsx-a11y/no-autofocus). The rAF
+        // defers past Radix's focus management — for the toolbar button
+        // path the click's default focus settles on the button after
+        // commit, and for the ContextMenu path Radix returns focus to the
+        // trigger when the menu closes. Either way, the synchronous focus
+        // call inside the effect was getting clobbered. Waiting one frame
+        // lets that settle so our focus() wins.
+        const id = requestAnimationFrame(() => {
+            newFolderInputRef.current?.focus();
+        });
+        return () => cancelAnimationFrame(id);
     }, [newFolderOpen]);
     useEffect(() => {
         rootRef.current = root;
@@ -345,37 +323,18 @@ export default function LibraryExplorerSheet({
     }, []);
 
     // Lazy first load + reload on subdir/root change while open.
-    //
-    // NOTE(unseensnick): `loadSubdir` does a synchronous setLoading(true)
-    // before kicking off the fetch — the rule flags this as
-    // set-state-in-effect, but it's the standard data-fetching pattern
-    // recommended in the React docs. The synchronous flag is what shows
-    // the spinner before the network response arrives; moving it into
-    // `.then` (the only fix the rule would accept) would lose the
-    // pre-fetch spinner. Re-evaluate if React lands a stable
-    // `useEvent` / data-loader story.
-
     useEffect(() => {
         if (!open) return;
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- see NOTE above
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- pre-fetch spinner
         loadSubdir(subdir, root);
     }, [open, root, subdir, loadSubdir]);
 
-    // Recursive search effect. Empty filter → folder-listing mode
-    // (searchResults stays null). Non-empty filter → debounce 200ms,
-    // then GET /api/files/search scoped to the current subdir so the
-    // user finds matches buried deeper without losing their place. The
-    // `stale` token discards results from a superseded request.
-    //
-    // NOTE(unseensnick): the early-clear branches set searchResults +
-    // searchBusy synchronously when filter goes empty or sheet closes.
-    // `react-hooks/set-state-in-effect` flags it, but the alternative
-    // (carrying the previous results forward visually until the next
-    // user action) is worse UX. Standard debounced-search pattern.
-
+    // Recursive search: empty filter shows the folder listing,
+    // non-empty debounces 200ms then GETs /api/files/search scoped to
+    // the current subdir. `stale` discards superseded requests.
     useEffect(() => {
         if (!open) {
-            // eslint-disable-next-line react-hooks/set-state-in-effect -- see NOTE above
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- close-time cleanup
             setSearchResults(null);
             setSearchBusy(false);
             return;
@@ -465,6 +424,11 @@ export default function LibraryExplorerSheet({
     // lets Radix's own cleanup attempt first; we only step in if it
     // didn't finish. Re-evaluate on the next radix-ui upgrade and drop
     // if the upstream behaviour is fixed.
+    // `renamePath` deliberately omitted: it changes per keystroke, but the
+    // aria-hidden race only fires on overlay open/close transitions — not
+    // on inline input edits. Including it would run the DOM sweep on every
+    // character typed during a rename. The other deps cover the actual
+    // overlay-mount transitions (menu open/close, cut clipboard, etc.).
     useEffect(() => {
         if (!open) return;
         return deferToNextMacrotask(() => {
@@ -477,24 +441,13 @@ export default function LibraryExplorerSheet({
                     }
                 });
         });
-    }, [open, menuTarget, cutPaths, moveNotice, deleteCandidate, moveBusy, renamePath]);
+    }, [open, menuTarget, cutPaths, moveNotice, deleteCandidate, moveBusy]);
 
-    // File-explorer hotkeys: N / F2 / Del.
-    //
-    // Why not Ctrl/Cmd+N? Every major browser reserves it for "new
-    // window" at the chrome level — preventDefault on the page can't
-    // beat that (Firefox in particular doesn't even hand the keystroke
-    // to JS). Single-letter `n` is reliably preventable, matches the
-    // app-shortcut convention used by Gmail/Linear/Notion, and stays
-    // out of the way while the user is typing because we gate on the
-    // event target not being an editable element. F2 and Del are the
-    // OS file-explorer conventions and have no browser conflict.
-    //
-    // F2 / Del act on whatever the cursor is hovering, falling back to
-    // the last right-clicked row. There's no "selected without
-    // activated" state in this explorer (single-click drills), so hover
-    // is the natural anchor for keyboard actions — pointing at a row is
-    // the user's signal "I mean this one."
+    // N / F2 / Del. Plain `n` (not Ctrl/Cmd+N) because every major
+    // browser reserves Ctrl/Cmd+N for "new window" at chrome level —
+    // preventDefault can't reclaim it. F2 / Del act on the hovered row
+    // (or last right-clicked); single-click drills here, so there's no
+    // selected-without-activated state to anchor on instead.
     useEffect(() => {
         if (!open) return;
         const handler = (e: KeyboardEvent) => {
@@ -1086,22 +1039,16 @@ export default function LibraryExplorerSheet({
                      *  + main split. Lives outside the ContextMenu wrapper
                      *  so right-click on the title bar uses the browser
                      *  default (the file menu is content-only). */}
-                    <div className="flex items-center gap-3 px-5 py-4 border-b border-border shrink-0">
-                        <span className="text-sm font-medium tracking-wide text-foreground">
-                            Browse files
-                        </span>
+                    <SheetHeaderBar
+                        title="Browse files"
+                        closeLabel="Close library browser"
+                        onClose={() => handleOpenChange(false)}
+                    >
                         {visible && (
                             <span
-                                // /80 (not /70) so the small mono numerals
-                                // clear WCAG AA on the cream-tinted light-
-                                // mode surface — the audit flagged /70 as
-                                // borderline at this size.
+                                // /80 (not /70) clears WCAG AA on the
+                                // cream-tinted light-mode surface.
                                 className="font-mono text-xs tabular-nums text-muted-foreground/80"
-                                title={
-                                    selectedPaths.size > 1
-                                        ? `${selectedPaths.size} selected`
-                                        : `${visible.length} ${visible.length === 1 ? "item" : "items"}`
-                                }
                             >
                                 {selectedPaths.size > 1
                                     ? `${selectedPaths.size} selected`
@@ -1111,16 +1058,7 @@ export default function LibraryExplorerSheet({
                                     : ""}
                             </span>
                         )}
-                        <button
-                            type="button"
-                            onClick={() => handleOpenChange(false)}
-                            className="ml-auto text-muted-foreground hover:text-foreground transition-colors p-1 -m-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                            aria-label="Close library browser"
-                            title="Close"
-                        >
-                            <X size={18} aria-hidden />
-                        </button>
-                    </div>
+                    </SheetHeaderBar>
 
                     {/* Body — horizontal split. Left rail = root selector
                      *  (Library / Downloads), always visible so root
@@ -1148,7 +1086,12 @@ export default function LibraryExplorerSheet({
                             />
                         </aside>
 
-                        <ContextMenu>
+                        {/* modal={false}: skip Radix's aria-hide-siblings + focus-trap
+                            so the menu's open state doesn't race the New folder
+                            input's focus and trip the "Blocked aria-hidden on
+                            a focused ancestor" warning on the Sheet content.
+                            Outside-click dismiss still works via DismissableLayer. */}
+                        <ContextMenu modal={false}>
                             <ContextMenuTrigger asChild>
                                 <div
                                     className="flex flex-col flex-1 min-w-0"
@@ -1193,28 +1136,32 @@ export default function LibraryExplorerSheet({
                                                     setNewFolderName("");
                                                 }}
                                                 className="gap-1.5 shrink-0"
-                                                title="Create a new folder here (N)"
                                                 aria-pressed={newFolderOpen}
+                                                aria-label="Create a new folder here (keyboard: N)"
                                             >
                                                 <FolderPlus size={12} aria-hidden />
                                                 <span className="hidden sm:inline">New folder</span>
                                             </Button>
                                         )}
-                                        <Button
-                                            size="sm"
-                                            variant="ghost"
-                                            onClick={() => loadSubdir(subdir, root)}
-                                            disabled={loading}
-                                            className="shrink-0"
-                                            title="Refresh this folder"
-                                            aria-label="Refresh"
-                                        >
-                                            <RefreshCw
-                                                size={12}
-                                                aria-hidden
-                                                className={loading ? "animate-spin" : ""}
-                                            />
-                                        </Button>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    onClick={() => loadSubdir(subdir, root)}
+                                                    disabled={loading}
+                                                    className="shrink-0"
+                                                    aria-label="Refresh this folder"
+                                                >
+                                                    <RefreshCw
+                                                        size={12}
+                                                        aria-hidden
+                                                        className={loading ? "animate-spin" : ""}
+                                                    />
+                                                </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="bottom">Refresh</TooltipContent>
+                                        </Tooltip>
                                     </div>
 
                                     {/* Breadcrumb row: leads with the active root (Library
@@ -1381,9 +1328,11 @@ export default function LibraryExplorerSheet({
                                         </div>
                                     )}
 
-                                    {/* Error */}
+                                    {/* Error — recoverable shape (warning, not destructive)
+                                     *  since this is "load / save / move didn't work" not
+                                     *  "you triggered a dangerous action." */}
                                     {error && (
-                                        <p className="px-5 py-2 text-sm text-destructive bg-destructive/10 border-b border-border shrink-0">
+                                        <p className="px-5 py-2 text-sm text-foreground/90 bg-warning/10 border-b border-warning/30 shrink-0">
                                             {error}
                                         </p>
                                     )}
@@ -1533,8 +1482,21 @@ export default function LibraryExplorerSheet({
                                     <>
                                         <ContextMenuItem
                                             onSelect={() => {
-                                                setNewFolderOpen(true);
-                                                setNewFolderName("");
+                                                // rAF defers past Radix
+                                                // ContextMenu's focus-return
+                                                // step, which otherwise lands
+                                                // focus on the trigger area
+                                                // AFTER our newFolderInputRef
+                                                // focus effect runs — leaving
+                                                // the input mounted but
+                                                // unfocused. Same pattern the
+                                                // Rename / Cut / Paste items
+                                                // already use for the same
+                                                // reason.
+                                                requestAnimationFrame(() => {
+                                                    setNewFolderOpen(true);
+                                                    setNewFolderName("");
+                                                });
                                             }}
                                         >
                                             <FolderPlus aria-hidden />

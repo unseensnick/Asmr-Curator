@@ -28,6 +28,7 @@ flowchart TD
         MAIN["main.py<br/><i>app + shared helpers</i>"]
         ROUTES["routes/*.py<br/><i>system &middot; extract &middot; files &middot; convert<br/>dictionary &middot; settings &middot; patreon</i>"]
         DB["database.py"]
+        AM["audio_metadata.py<br/><i>mutagen ID3/FLAC/MP4</i>"]
         PF["patreon_fetch.py<br/><i>patreon-dl subprocess</i>"]
         DF["drive_fetch.py<br/><i>Playwright</i>"]
     end
@@ -50,7 +51,7 @@ flowchart TD
     UI    -->|"/api/*"| MAIN
     EXT   -->|"cookie sync"| MAIN
     MAIN  --> ROUTES
-    ROUTES --> DB & PF & DF
+    ROUTES --> DB & AM & PF & DF
     ROUTES --> OLLAMA & FFMPEG
     ROUTES --> LIB & DL
     PF --> PATREON
@@ -61,7 +62,7 @@ flowchart TD
 
     class UI,EXT client
     class MAIN,ROUTES api
-    class DB,PF,DF svc
+    class DB,AM,PF,DF svc
     class OLLAMA,FFMPEG,PATREON,DRIVE ext
     class SQLITE,LIB,DL store
 ```
@@ -78,7 +79,7 @@ flowchart TD
 
 ## Backend route groups (under `backend/routes/`)
 
-Routes are split by domain into `backend/routes/*.py`. Each module exports an `APIRouter`; `backend/main.py` constructs the app, holds the shared helpers (validators, metadata writer, ingest path builder) + module-level state, and registers the routers via `app.include_router(...)`. Route modules import shared helpers from `backend.main`. The Drive-scrape semaphore lives next to its only caller in `backend/routes/patreon.py`.
+Routes are split by domain into `backend/routes/*.py`. Each module exports an `APIRouter`; `backend/main.py` constructs the app, holds shared helpers (validators, env paths, ingest path builder) + module-level state, and registers the routers via `app.include_router(...)`. Audio-metadata read/write/clear lives in `backend/audio_metadata.py` (re-exported from `main.py` under the legacy underscored names for routes that import via the older path). Route modules import shared helpers from `backend.main`. The Drive-scrape semaphore lives next to its only caller in `backend/routes/patreon.py`.
 
 - `/api/extract`, `/api/preview-tags` — Ollama integration (vision LLM).
 - `/api/dictionary`, `/api/vocabulary/*`, `/api/suppressed/*` — dictionary CRUD.
@@ -96,7 +97,8 @@ Routes are split by domain into `backend/routes/*.py`. Each module exports an `A
 - **`backend/main.py`** — FastAPI app construction, lifespan, SPA fallback, shared dependencies (validators, env paths, helpers), router registration. Route handlers live under `backend/routes/`.
 - **`backend/routes/`** — one module per domain (`system`, `extract`, `files`, `convert`, `dictionary`, `settings`, `patreon`). Each exports an `APIRouter` named `router`. Imports shared helpers from `backend.main`.
 - **`backend/database.py`** — SQLite schema, seeding (`DEFAULT_VOCABULARY`, `DEFAULT_SUPPRESSED`), all CRUD helpers. No ORM. Stores the Patreon session cookie under `PATREON_COOKIE_KEY`.
-- **`backend/patreon_fetch.py`** — subprocess wrapper around `patreon-dl`; reads cookie from the DB. After patreon-dl writes into its nested tree under `DOWNLOAD_PATH/.patreon-dl/`, `_flatten_audio` moves each post's audio out to `DOWNLOAD_PATH/<creator>/<post_id> - <title>/<file>` (path built by `audio_utils.flatten_dest_parts`, also used by the Drive + external-audio ingest endpoints in `backend/routes/patreon.py` so all writers land in the same shape). Legacy `<post_id>/<file>` from earlier runs is still recognised by the cached-sidecar lookup so re-fetches don't miss it.
+- **`backend/audio_metadata.py`** — mutagen-backed read / write / clear of the four standard fields (title, artist, album, album_artist) across ID3 (MP3), Vorbis comments (FLAC, OGG), and MP4 atoms (M4A, AAC). One `_Handle` class hides per-format dispatch; the public `read_metadata` / `write_metadata` / `clear_metadata` functions are uniform loops over a `FIELDS` tuple. Used by `routes/files.py` (single-file rename, bulk-write) and `routes/patreon.py` (post-ingest write) via re-exports from `backend.main`.
+- **`backend/patreon_fetch.py`** — subprocess wrapper around `patreon-dl`; reads cookie from the DB; emits parsed phase events through an `on_progress` callback so the route can bridge them into SSE. After patreon-dl writes into its nested tree under `DOWNLOAD_PATH/.patreon-dl/`, `_flatten_audio` moves each post's audio out to `DOWNLOAD_PATH/<creator>/<post_id> - <title>/<file>` (path built by `audio_utils.flatten_dest_parts`, also used by the Drive + external-audio ingest endpoints in `backend/routes/patreon.py` so all writers land in the same shape). Legacy `<post_id>/<file>` from earlier runs is still recognised by the cached-sidecar lookup so re-fetches don't miss it.
 - **`backend/drive_fetch.py`** — Playwright-driven Drive scrape behind `/api/patreon/ingest-drive-link`. Loads the Drive viewer with the synced Google cookie, intercepts the playback URL, streams the audio. Serialises per-account via a semaphore — Google's mid-stream cookie rotation can't be raced.
 - **`backend/audio_utils.py`** — pure helpers shared between the FastAPI handlers and `drive_fetch.py`: URL cleaning, filename derivation, audio-stream preference. Lives separately so the Playwright module imports it without a circular dependency back into FastAPI.
 - **`frontend/src/App.tsx`** — root layout, dark mode, global state (dict, extracted tags, selected file), orchestrates all panels. No state library.
