@@ -4,7 +4,7 @@ fastapi==0.136.1
 # everything from the 0.5x branch. FastAPI 0.136.1's bound is now
 # `starlette>=0.46.0` (open-ended on the upper side), so no manual
 # narrowing is needed.
-starlette==1.0.0
+starlette==1.0.1
 uvicorn[standard]==0.47.0
 httpx==0.28.1
 mutagen==1.47.0
