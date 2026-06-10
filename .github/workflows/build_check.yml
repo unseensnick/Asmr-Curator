@@ -130,7 +130,13 @@ jobs:
           cache-dependency-path: backend/requirements.txt
 
       - name: Install backend dependencies
-        run: pip install -r backend/requirements.txt
+        # Upgrade pip first so the pip-audit step below doesn't flag the
+        # runner's bundled pip itself (e.g. pip 26.1.1 / PYSEC-2026-196,
+        # fixed in 26.1.2). The audit runs in env mode and scans every
+        # installed package, pip included.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
 
       - name: Install test + lint dependencies
         # Mirrors backend/pyproject.toml's [dependency-groups].dev — the
