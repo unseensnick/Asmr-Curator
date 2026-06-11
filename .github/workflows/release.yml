@@ -84,6 +84,13 @@ jobs:
           # consumers on cosign verification.
           provenance: false
           sbom: false
+          # Reuse unchanged layers across builds via the GitHub Actions cache:
+          # ephemeral runners have no local layer cache, so without this every
+          # release rebuilds all layers from scratch with new digests and the
+          # user re-pulls the whole image. With it, only the layers that actually
+          # changed get new digests, so an update pulls just those.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: |
             ${{ env.IMAGE }}:${{ github.event.inputs.version }}
             ${{ env.IMAGE }}:latest
