@@ -19,7 +19,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from backend.audio_utils import AUDIO_FORMATS_CONFIG, flatten_dest_parts, unique_destination
 
@@ -95,6 +95,17 @@ _RESERVED_VANITY_PATHS = frozenset(
         "auth",
     }
 )
+
+# patreon-dl's CLI accepts single posts only as `patreon.com/posts/<slug-or-id>`
+# (no creator vanity) and creators only with a trailing `/posts`
+# (`patreon.com/<vanity>/posts`, `patreon.com/(c|cw)/<vanity>/posts`). The
+# address-bar forms users paste — a vanity-bearing single post and a suffixless
+# creator page — are rejected with "Unknown URL". `_normalize_target_url`
+# rewrites them. `_POST_SEGMENT_RE` pulls the post slug/id out of any
+# `…/posts/<x>` path; `_CREATOR_C_PREFIX_RE` recognises the `/c/` and `/cw/`
+# creator prefixes that need the `/posts` suffix appended.
+_POST_SEGMENT_RE = re.compile(r"/posts/([^/?#]+)", re.IGNORECASE)
+_CREATOR_C_PREFIX_RE = re.compile(r"^/(?:c|cw)/[^/?#]+$", re.IGNORECASE)
 
 # URL patterns for `attributes.content` HTML. Creators store links in
 # several shapes; we scan all of them and let EXTERNAL_HOST_ALLOWLIST
@@ -336,6 +347,12 @@ def fetch(
       asyncio queue. Called from the drain thread — caller must be threadsafe.
       `None` skips parsing entirely.
     """
+    # Rewrite address-bar URL shapes into the forms patreon-dl's CLI accepts
+    # (see _normalize_target_url) before either the cached-sidecar fast path or
+    # the subprocess sees them — otherwise a vanity-bearing post URL fails arg
+    # parsing with "Unknown URL" → exit code 1.
+    url = _normalize_target_url(url)
+
     if not shutil.which(PATREON_DL_BIN):
         raise PatreonFetchError(
             f"patreon-dl binary not found on PATH (looked for '{PATREON_DL_BIN}'). "
@@ -611,6 +628,54 @@ def _write_config(opts: PatreonFetchOptions) -> str:
         Path(path).unlink(missing_ok=True)
         raise
     return path
+
+
+def _normalize_target_url(url: str) -> str:
+    """Rewrite a user-pasted Patreon URL into a form patreon-dl v3 accepts.
+
+    patreon-dl recognises single posts only as `patreon.com/posts/<x>` (no
+    creator vanity) and creators only with a trailing `/posts`. The forms a
+    browser hands users — `patreon.com/<vanity>/posts/<slug>-<id>` and the
+    suffixless `patreon.com/<vanity>` / `patreon.com/c/<vanity>` — are rejected
+    with "Unknown URL", which surfaces as `patreon-dl exited with code 1`.
+
+    Collapse any vanity-bearing single post to the canonical `/posts/<x>` and
+    append the missing `/posts` to bare creator pages. URLs we don't recognise
+    (collections, shop products, non-Patreon hosts) pass through unchanged so
+    patreon-dl applies its own validation. Query + fragment are dropped on the
+    rewritten paths — patreon-dl strips them before matching anyway, and our
+    date/tier filters travel via the config file, not the URL.
+    """
+    if not isinstance(url, str) or not url:
+        return url
+    parts = urlparse(url.strip())
+    host = (parts.hostname or "").lower()
+    if host != "patreon.com" and not host.endswith(".patreon.com"):
+        return url
+
+    path = parts.path.rstrip("/")
+    rebuild = lambda new_path: urlunparse(  # noqa: E731 — local, single-use
+        (parts.scheme or "https", parts.netloc, new_path, "", "", "")
+    )
+
+    # Single post: collapse any vanity / c-prefix down to /posts/<x>.
+    m = _POST_SEGMENT_RE.search(path)
+    if m:
+        return rebuild(f"/posts/{m.group(1)}")
+
+    # Already a creator posts page — leave it (patreon-dl accepts it as-is).
+    if path.endswith("/posts"):
+        return url
+
+    # Bare creator page (`/c/<vanity>`, `/cw/<vanity>`, or `/<vanity>`):
+    # patreon-dl needs the `/posts` suffix.
+    if _CREATOR_C_PREFIX_RE.match(path):
+        return rebuild(f"{path}/posts")
+    segments = [s for s in path.split("/") if s]
+    if len(segments) == 1 and segments[0].lower() not in _RESERVED_VANITY_PATHS:
+        return rebuild(f"/{segments[0]}/posts")
+
+    return url
 
 
 def _post_id_from_url(url: str) -> str | None:

@@ -19,6 +19,7 @@ from backend.patreon_fetch import (
     _find_cached_post,
     _flatten_audio,
     _is_allowlisted_host,
+    _normalize_target_url,
     _post_id_from_url,
     _vanity_from_url,
     _walk_prosemirror_nodes,
@@ -68,6 +69,63 @@ class TestPostIdFromUrl:
     def test_is_case_insensitive(self):
         # User might paste a URL with capitalized host.
         assert _post_id_from_url("https://PATREON.COM/posts/x-222") == "222"
+
+
+# ── _normalize_target_url ──────────────────────────────────────────────────
+
+
+class TestNormalizeTargetUrl:
+    def test_strips_vanity_from_single_post(self):
+        # The reported bug: address-bar post URL carries the creator vanity,
+        # which patreon-dl rejects with "Unknown URL".
+        url = "https://www.patreon.com/testartistasmr/posts/some-slug-91850144"
+        assert _normalize_target_url(url) == "https://www.patreon.com/posts/some-slug-91850144"
+
+    def test_canonical_post_url_is_unchanged(self):
+        url = "https://www.patreon.com/posts/some-slug-91850144"
+        assert _normalize_target_url(url) == url
+
+    def test_bare_id_post_url_is_unchanged(self):
+        url = "https://www.patreon.com/posts/91850144"
+        assert _normalize_target_url(url) == url
+
+    def test_strips_c_prefix_from_single_post(self):
+        url = "https://www.patreon.com/c/testartistasmr/posts/some-slug-12345"
+        assert _normalize_target_url(url) == "https://www.patreon.com/posts/some-slug-12345"
+
+    def test_drops_query_string_from_rewritten_post(self):
+        url = "https://www.patreon.com/testartistasmr/posts/some-slug-12345?source=share"
+        assert _normalize_target_url(url) == "https://www.patreon.com/posts/some-slug-12345"
+
+    def test_appends_posts_to_bare_creator_vanity(self):
+        url = "https://www.patreon.com/testartistasmr"
+        assert _normalize_target_url(url) == "https://www.patreon.com/testartistasmr/posts"
+
+    def test_appends_posts_to_c_prefixed_creator(self):
+        url = "https://www.patreon.com/c/testartistasmr"
+        assert _normalize_target_url(url) == "https://www.patreon.com/c/testartistasmr/posts"
+
+    def test_creator_posts_page_is_unchanged(self):
+        url = "https://www.patreon.com/testartistasmr/posts"
+        assert _normalize_target_url(url) == url
+
+    def test_reserved_path_is_not_treated_as_vanity(self):
+        # `patreon.com/home` is a Patreon UI route, not a creator — leave it
+        # so patreon-dl reports its own error rather than fetching "home/posts".
+        url = "https://www.patreon.com/home"
+        assert _normalize_target_url(url) == url
+
+    def test_non_patreon_host_is_unchanged(self):
+        url = "https://example.com/testartistasmr/posts/foo-123"
+        assert _normalize_target_url(url) == url
+
+    def test_collection_url_is_unchanged(self):
+        # patreon-dl accepts `patreon.com/collection/<id>` as-is; don't append.
+        url = "https://www.patreon.com/collection/12345"
+        assert _normalize_target_url(url) == url
+
+    def test_non_string_input_is_returned_as_is(self):
+        assert _normalize_target_url(None) == None  # type: ignore[arg-type]  # noqa: E711
 
 
 # ── _anchor_text ───────────────────────────────────────────────────────────

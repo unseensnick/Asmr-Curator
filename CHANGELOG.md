@@ -11,6 +11,15 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
+### Fixes
+
+- **Pasting a Patreon post URL straight from the address bar now works.** Links like `patreon.com/<creator>/posts/...` (and bare creator pages without the `/posts` suffix) used to fail with "patreon-dl exited with code 1"; the URL is now normalised to the form patreon-dl accepts before fetching.
+- **Live fetch progress no longer occasionally drops to just the final result.** On very fast Patreon fetches, the progress stream could close having shown only the completion frame; progress events now stay in order through to completion.
+
+### Other
+
+- **Patched moderate/high-severity dependency advisories.** Backend `starlette` 1.0.1 → 1.3.1 (multipart-handling DoS CVEs); frontend `vite`, `hono`, `js-yaml`, and `@babel/core` bumped to their patched releases. `pip-audit` and `npm audit` both report zero vulnerabilities.
+
 ## [2.1.0]
 
 ### Additions
