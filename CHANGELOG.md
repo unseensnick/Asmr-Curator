@@ -11,6 +11,8 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
+## [2.1.1]
+
 ### Fixes
 
 - **Pasting a Patreon post URL straight from the address bar now works.** Links like `patreon.com/<creator>/posts/...` (and bare creator pages without the `/posts` suffix) used to fail with "patreon-dl exited with code 1"; the URL is now normalised to the form patreon-dl accepts before fetching.
