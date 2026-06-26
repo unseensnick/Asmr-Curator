@@ -156,9 +156,14 @@ async def patreon_fetch_endpoint(body: PatreonFetchIn):
     DONE_SENTINEL = object()
     loop = asyncio.get_running_loop()
 
-    def push_threadsafe(event: dict) -> None:
-        # patreon_fetch.fetch runs in a worker thread; the queue lives on
-        # the FastAPI event loop. call_soon_threadsafe is the bridge.
+    def push(event: object) -> None:
+        # Single writer for the queue. patreon_fetch.fetch runs in a worker
+        # thread and pushes progress events from there; the terminal
+        # `done`/`error`/sentinel frames are pushed from this coroutine. Both
+        # route through call_soon_threadsafe so every frame lands on the loop
+        # via one FIFO — otherwise a fast fetch can race the `done` frame ahead
+        # of progress events still queued from the thread, and the stream
+        # closes having emitted only `done`.
         loop.call_soon_threadsafe(queue.put_nowait, event)
 
     async def runner() -> None:
@@ -173,7 +178,7 @@ async def patreon_fetch_endpoint(body: PatreonFetchIn):
                 published_after=published_after,
                 published_before=published_before,
                 dry_run=body.dry_run,
-                on_progress=push_threadsafe,
+                on_progress=push,
             )
             posts = [_serialise_post(p, download_path) for p in result.posts]
             done_event: dict = {
@@ -202,15 +207,15 @@ async def patreon_fetch_endpoint(body: PatreonFetchIn):
                     "the log tail to confirm which."
                 )
                 done_event["log_tail"] = result.log_tail
-            await queue.put(done_event)
+            push(done_event)
         except PatreonFetchError as e:
-            await queue.put({"state": "error", "message": str(e)})
+            push({"state": "error", "message": str(e)})
         except Exception:
             # Log full traceback server-side; surface only a generic message
             # to the client. Stringifying the bare exception risks leaking
             # internal paths or third-party error shapes (error-handling.md).
             log.exception("patreon fetch: unexpected failure")
-            await queue.put(
+            push(
                 {
                     "state": "error",
                     "message": (
@@ -219,7 +224,7 @@ async def patreon_fetch_endpoint(body: PatreonFetchIn):
                 }
             )
         finally:
-            await queue.put(DONE_SENTINEL)
+            push(DONE_SENTINEL)
 
     async def event_stream():
         task = asyncio.create_task(runner())
