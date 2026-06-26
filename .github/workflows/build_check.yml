@@ -143,7 +143,7 @@ jobs:
         # subset CI needs for lint + tests + coverage. hypothesis is
         # required by tests/test_properties.py; new dev deps that show
         # up in test files must be added here too.
-        run: pip install pytest pytest-asyncio pytest-cov hypothesis "ruff>=0.8.0"
+        run: pip install pytest pytest-asyncio pytest-cov hypothesis "httpx2>=2.5.0" "ruff>=0.8.0"
 
       - name: Install pip-audit
         run: pip install pip-audit
