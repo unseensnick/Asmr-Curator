@@ -640,7 +640,9 @@ def _normalize_target_url(url: str) -> str:
     with "Unknown URL", which surfaces as `patreon-dl exited with code 1`.
 
     Collapse any vanity-bearing single post to the canonical `/posts/<x>` and
-    append the missing `/posts` to bare creator pages. URLs we don't recognise
+    append the missing `/posts` to bare creator pages. Schemeless pastes
+    (`patreon.com/…`) are handled too — a scheme is added before matching, since
+    `urlparse` otherwise leaves the hostname empty. URLs we don't recognise
     (collections, shop products, non-Patreon hosts) pass through unchanged so
     patreon-dl applies its own validation. Query + fragment are dropped on the
     rewritten paths — patreon-dl strips them before matching anyway, and our
@@ -648,7 +650,12 @@ def _normalize_target_url(url: str) -> str:
     """
     if not isinstance(url, str) or not url:
         return url
-    parts = urlparse(url.strip())
+    raw = url.strip()
+    # Schemeless pastes ("patreon.com/…") leave urlparse's hostname empty (the
+    # whole string lands in .path), so add a scheme before parsing. We only
+    # commit to a rewrite once the host is confirmed to be Patreon.
+    candidate = raw if "://" in raw else f"https://{raw}"
+    parts = urlparse(candidate)
     host = (parts.hostname or "").lower()
     if host != "patreon.com" and not host.endswith(".patreon.com"):
         return url
@@ -663,9 +670,10 @@ def _normalize_target_url(url: str) -> str:
     if m:
         return rebuild(f"/posts/{m.group(1)}")
 
-    # Already a creator posts page — leave it (patreon-dl accepts it as-is).
+    # Already a creator posts page — re-emit canonically (this also supplies a
+    # scheme when the paste lacked one).
     if path.endswith("/posts"):
-        return url
+        return rebuild(path)
 
     # Bare creator page (`/c/<vanity>`, `/cw/<vanity>`, or `/<vanity>`):
     # patreon-dl needs the `/posts` suffix.

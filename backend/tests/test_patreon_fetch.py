@@ -124,6 +124,16 @@ class TestNormalizeTargetUrl:
         url = "https://www.patreon.com/collection/12345"
         assert _normalize_target_url(url) == url
 
+    def test_schemeless_single_post_gets_scheme_and_vanity_stripped(self):
+        # Address-bar pastes without a scheme leave urlparse's host empty;
+        # normalisation must still strip the vanity and supply a scheme.
+        url = "patreon.com/testartistasmr/posts/some-slug-91850144"
+        assert _normalize_target_url(url) == "https://patreon.com/posts/some-slug-91850144"
+
+    def test_schemeless_bare_creator_gets_scheme_and_posts_suffix(self):
+        url = "patreon.com/testartistasmr"
+        assert _normalize_target_url(url) == "https://patreon.com/testartistasmr/posts"
+
     def test_non_string_input_is_returned_as_is(self):
         assert _normalize_target_url(None) == None  # type: ignore[arg-type]  # noqa: E711
 
