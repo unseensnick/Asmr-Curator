@@ -13,10 +13,11 @@ interface MoveToLibrarySectionProps {
     selected: FileEntry;
     fromRoot: FileRoot;
     pendingNewName: string | null;
-    /** Current metadata field values, sent alongside `new_name` when the
-     *  rename-during-move checkbox is ticked. Matches the backend's
-     *  `MetadataIn` shape — backend writes tags after the move when the
-     *  destination is a metadata-compatible audio file. */
+    /** Current metadata field values, sent when the write-tags checkbox is
+     *  ticked. Matches the backend's `MetadataIn` shape — backend writes
+     *  tags after the move when the destination is a metadata-compatible
+     *  audio file. Independent of the rename toggle: a move can write tags
+     *  without renaming, and rename without touching tags. */
     pendingMetadata: {
         title: string;
         artist: string;
@@ -55,6 +56,11 @@ export default function MoveToLibrarySection({
     // which silently combined the two operations and was easy to miss
     // when the user only intended to move.
     const [applyRename, setApplyRename] = useState(false);
+    // Independent of the rename toggle so tags can be written during a move
+    // that leaves the filename alone.
+    const [applyMetadata, setApplyMetadata] = useState(false);
+
+    const hasMetadata = Object.values(pendingMetadata).some((v) => v.trim() !== "");
 
     async function handleMove() {
         setMoving(true);
@@ -67,6 +73,8 @@ export default function MoveToLibrarySection({
             };
             if (applyRename && pendingNewName) {
                 body.new_name = pendingNewName;
+            }
+            if (applyMetadata && hasMetadata) {
                 body.metadata = pendingMetadata;
             }
             const data = await apiPost<MoveResponse>(API.move, body);
@@ -110,7 +118,8 @@ export default function MoveToLibrarySection({
                         onError={onError}
                     />
 
-                    {/* Optional rename-during-move toggle */}
+                    {/* Rename and tag-write are independent opt-ins — either,
+                     *  both, or neither can ride along with the move. */}
                     {pendingNewName && (
                         <label className="flex items-start gap-2 cursor-pointer select-none">
                             <Checkbox
@@ -122,6 +131,23 @@ export default function MoveToLibrarySection({
                                 Rename to{" "}
                                 <span className="font-mono text-foreground">{pendingNewName}</span>{" "}
                                 during the move.
+                            </span>
+                        </label>
+                    )}
+
+                    {hasMetadata && (
+                        <label
+                            htmlFor="move-apply-metadata"
+                            className="flex items-start gap-2 cursor-pointer select-none"
+                        >
+                            <Checkbox
+                                id="move-apply-metadata"
+                                checked={applyMetadata}
+                                onCheckedChange={(v) => setApplyMetadata(v === true)}
+                                className="mt-0.5 shrink-0"
+                            />
+                            <span className="text-xs text-muted-foreground leading-relaxed">
+                                Write the tags above during the move.
                             </span>
                         </label>
                     )}

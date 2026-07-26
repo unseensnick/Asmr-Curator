@@ -1,0 +1,59 @@
+name: Docs lint
+
+# Enforces the CHANGELOG and version-lockstep conventions (see .claude/rules/project-workflow.md
+# "Changelog" and .claude/rules/release-prep.md). Mirrors the local .githooks/pre-commit so PRs are
+# checked even when the hook isn't installed. Only the [Unreleased] section is linted; released
+# sections are a historical record and are never rewritten.
+
+on:
+  pull_request:
+    paths: ['CHANGELOG.md', 'frontend/package.json', 'backend/pyproject.toml']
+  push:
+    branches: [main]
+    paths: ['CHANGELOG.md', 'frontend/package.json', 'backend/pyproject.toml']
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone repo
+        uses: actions/checkout@v7
+
+      - name: Lint CHANGELOG.md [Unreleased]
+        run: |
+          set -u
+          issues=$(awk '
+            /^## \[Unreleased\]/ { u=1; next }
+            /^## \[/             { u=0 }
+            !u                  { next }
+            /^### /             { sec=$0; sub(/^### /,"",sec); next }
+            /^\*\*/             { next }
+            /^- / {
+              if (length($0) > 420)
+                print "  - over the length cap (>420 chars): " $0
+              if (sec != "Other" && $0 !~ /^- \*\*[^*]+[.!?]\*\*/)
+                print "  - needs a self-contained bold headline ending in . ! or ? (Other is exempt): " $0
+              if (index($0, "—") > 0)
+                print "  - contains an em dash; use commas, parentheses, periods or colons: " $0
+            }
+          ' CHANGELOG.md)
+          if [ -n "$issues" ]; then
+            echo "::error::CHANGELOG [Unreleased] entry issues:"
+            echo "$issues"
+            exit 1
+          fi
+
+      - name: Check version lockstep
+        run: |
+          set -u
+          fe=$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' frontend/package.json | head -1)
+          be=$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' backend/pyproject.toml | head -1)
+          if [ "$fe" != "$be" ]; then
+            echo "::error::version lockstep broken: frontend/package.json is $fe, backend/pyproject.toml is $be."
+            exit 1
+          fi
+          echo "version lockstep OK ($fe)"

@@ -62,9 +62,26 @@ DOWNLOAD_HEARTBEAT_S = 0.5
 # a long download can't be idle-killed mid-stream by the timer.
 BROWSER_IDLE_TIMEOUT_S = float(os.environ.get("DRIVE_BROWSER_IDLE_TIMEOUT_S", "300"))
 
-# 4 h default covers a ~3 h m4a (~170-250 MB) at the observed ~37 KB/s
-# floor for Drive throughput from headless Chromium. The signed URL's own
-# `expire=` is ~6 h, so values >5 h are pointless — Drive will 403 first.
+# Generous default: a ~3 h m4a is 170-250 MB, and Drive's throughput for the
+# same file varies by two orders of magnitude. Measured on one 43 MB file:
+# 2967 KB/s and 2434 KB/s on healthy sessions, 31 KB/s on a throttled one —
+# 15 seconds versus 23 minutes.
+#
+# The throttling correlates with re-downloading the same file soon after a
+# previous pull; leaving it a while restores full speed. The 31-byte
+# `application/vnd.yt-ump` stub appears under the same conditions, so both
+# are best read as Drive rate-limiting a repeated request rather than
+# anything wrong here.
+#
+# Before blaming this module for a slow download, read the in-page split on
+# the throughput log line. Across every run measured, base64 + CDP bridge
+# together cost under 2 s regardless of total time — the variance is all
+# "waiting on Drive". Transcoding is likewise unrelated: it runs strictly
+# after the download, and the same file clocked 2967 KB/s with conversion on
+# and 2434 KB/s with it off.
+#
+# The signed URL's own `expire=` is ~6 h, so values >5 h are pointless —
+# Drive will 403 first.
 DOWNLOAD_TIMEOUT_S = float(os.environ.get("DRIVE_DOWNLOAD_TIMEOUT_S", "14400"))
 
 # Drive's CDN occasionally returns just the m4a init segment (~1 KB) instead
@@ -406,7 +423,11 @@ async def _dump_diagnostics(page, file_id: str, observed: list[str]) -> Path | N
     # rather than silently dump diagnostics into the CWD.
     download_path = Path(os.environ["DOWNLOAD_PATH"]).resolve()
     debug_root = download_path / ".drive-debug"
-    out_dir = debug_root / f"{file_id}-{int(time.time())}"
+    # `drive_id_from_url` keeps the ?id= value byte-for-byte so signed URLs
+    # survive intact, which means it can carry `/` and `..`. Sanitise before
+    # it becomes a path component or mkdir(parents=True) escapes DOWNLOAD_PATH.
+    safe_id = audio_utils.safe_filename_component(file_id) or "unknown"
+    out_dir = debug_root / f"{safe_id}-{int(time.time())}"
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -603,6 +624,9 @@ async def fetch_drive_audio(
     # killed by a 300 s idle timer fired mid-stream.
     _cancel_idle_close()
     page = await context.new_page()
+    # Sibling page used for the download fetch; created after capture. Bound
+    # here so the `finally` can close it however we exit.
+    download_page = None
     # Track every response-handler task we spawn so we can drain them in
     # the `finally` below — otherwise the handlers can outlive the page
     # they observe, and any exception inside them surfaces only as
@@ -707,6 +731,19 @@ async def fetch_drive_audio(
             },
         )
 
+        # Download from a SEPARATE page in the same context, not the player
+        # page. The player negotiates a UMP (`application/vnd.yt-ump`)
+        # session for its tab, and a competing fetch issued from that same
+        # page is answered with a 31-byte UMP frame instead of the audio. A
+        # sibling page on the same origin shares the context's cookies and
+        # TLS fingerprint — which is what the signed URL is bound to — but
+        # carries no player session, and gets the plain `audio/mp4` body.
+        # The player page stays open for `_dump_diagnostics`.
+        download_page = await context.new_page()
+        await download_page.goto(
+            "https://drive.google.com/", wait_until="domcontentloaded", timeout=30_000
+        )
+
         # ── Download via in-page fetch streamed through expose_function ───
         # In-page `fetch(url)` routes via Chromium's stack with the player's
         # TLS/cookies/origin (the fingerprint the URL was minted for). The JS
@@ -742,6 +779,13 @@ async def fetch_drive_audio(
                 cl = payload.get("contentLength")
                 if isinstance(cl, (int, float)) and cl > 0:
                     total_holder["n"] = int(cl)
+                # Keep the content-type: it is the difference between the
+                # failure modes. `audio/mp4` is the real body; a short
+                # `application/vnd.yt-ump` or `text/plain` body means Drive
+                # answered with a stub or a redirect pointer instead, and
+                # guessing which produced years of "init segment" messages
+                # that named the wrong cause.
+                download_state["content_type"] = headers.get("content-type", "?")
                 status = payload.get("status")
                 if not payload.get("ok"):
                     download_state["error"] = (
@@ -785,6 +829,12 @@ async def fetch_drive_audio(
                 bytes_holder["n"] += len(decoded)
                 return
             if kind == "done":
+                # In-page timing breakdown, logged next to the throughput line.
+                download_state["timing"] = {
+                    "read_ms": payload.get("readMs"),
+                    "encode_ms": payload.get("encodeMs"),
+                    "bridge_ms": payload.get("bridgeMs"),
+                }
                 download_done_evt.set()
                 return
             if kind == "error":
@@ -792,7 +842,7 @@ async def fetch_drive_audio(
                 download_done_evt.set()
                 return
 
-        await page.expose_function("__driveDownload", _on_drive_msg)
+        await download_page.expose_function("__driveDownload", _on_drive_msg)
 
         # Sub-threshold body → retry. State holders are mutated in place
         # so the _on_drive_msg closure stays valid across attempts.
@@ -800,6 +850,7 @@ async def fetch_drive_audio(
         part: Path | None = None
         bytes_written = 0
         last_short_bytes: int | None = None
+        last_content_type: str | None = None
         for attempt in range(1, MAX_DOWNLOAD_ATTEMPTS + 1):
             # Reset per-attempt state in place (don't rebind names —
             # _on_drive_msg captures these via closure).
@@ -844,7 +895,7 @@ async def fetch_drive_audio(
             # Chromiums. `cache: 'no-store'` + random query nonce defeat
             # the player's service-worker cache so retries hit the network.
             fetch_task = asyncio.create_task(
-                page.evaluate(
+                download_page.evaluate(
                     """
                 async (url) => {
                     try {
@@ -863,17 +914,83 @@ async def fetch_drive_audio(
                         });
                         if (!res.ok) return;
                         const reader = res.body.getReader();
+
+                        // Base64 in 8 KB blocks. Appending one char at a
+                        // time built a multi-MB string byte by byte, which
+                        // dominated the transfer.
+                        const toBase64 = (bytes) => {
+                            let bin = '';
+                            const BLOCK = 8192;
+                            for (let i = 0; i < bytes.length; i += BLOCK) {
+                                bin += String.fromCharCode.apply(
+                                    null, bytes.subarray(i, i + BLOCK),
+                                );
+                            }
+                            return btoa(bin);
+                        };
+
+                        // Batch before crossing the bridge. Every
+                        // __driveDownload call is an awaited round trip over
+                        // the CDP websocket into the Python event loop, so one
+                        // call per ~64 KB reader chunk spends the transfer
+                        // waiting on round trips instead of on Drive.
+                        //
+                        // Don't read a slow download as bridge cost. The
+                        // timing split below puts base64 + bridge under 2s
+                        // even on multi-minute transfers; a slow pull is
+                        // Google throttling a repeat download, not this code.
+                        //
+                        // 512 KB, not larger: the byte counter only advances
+                        // when a batch lands, so an oversized batch makes a
+                        // small file sit at 0 and then jump, and a multi-MB
+                        // base64 payload is its own cost to serialise across
+                        // the bridge. This still cuts round trips 8x.
+                        const FLUSH_BYTES = 512 * 1024;
+                        let pending = [];
+                        let pendingLen = 0;
+                        // Split the wall clock three ways so a slow download
+                        // can be attributed rather than guessed at: waiting on
+                        // Drive, encoding to base64, or crossing the bridge
+                        // into Python. Reported on the `done` frame.
+                        let readMs = 0;
+                        let encodeMs = 0;
+                        let bridgeMs = 0;
+
+                        const flush = async () => {
+                            if (!pendingLen) return;
+                            const merged = new Uint8Array(pendingLen);
+                            let off = 0;
+                            for (const part of pending) {
+                                merged.set(part, off);
+                                off += part.length;
+                            }
+                            pending = [];
+                            pendingLen = 0;
+                            const t0 = performance.now();
+                            const encoded = toBase64(merged);
+                            const t1 = performance.now();
+                            encodeMs += t1 - t0;
+                            await window.__driveDownload({ kind: 'chunk', data: encoded });
+                            bridgeMs += performance.now() - t1;
+                        };
+
                         while (true) {
+                            const tRead = performance.now();
                             const { done, value } = await reader.read();
+                            readMs += performance.now() - tRead;
                             if (done) {
-                                await window.__driveDownload({ kind: 'done' });
+                                await flush();
+                                await window.__driveDownload({
+                                    kind: 'done',
+                                    readMs: Math.round(readMs),
+                                    encodeMs: Math.round(encodeMs),
+                                    bridgeMs: Math.round(bridgeMs),
+                                });
                                 return;
                             }
-                            let bin = '';
-                            for (let i = 0; i < value.length; i++) {
-                                bin += String.fromCharCode(value[i]);
-                            }
-                            await window.__driveDownload({ kind: 'chunk', data: btoa(bin) });
+                            pending.push(value);
+                            pendingLen += value.length;
+                            if (pendingLen >= FLUSH_BYTES) await flush();
                         }
                     } catch (e) {
                         await window.__driveDownload({
@@ -932,33 +1049,62 @@ async def fetch_drive_audio(
             # Success: full body landed. Break out and rename .part →
             # target below.
             if bytes_written >= SHORT_BODY_THRESHOLD_BYTES:
+                elapsed = max(time.monotonic() - download_started, 1e-6)
+                timing = download_state.get("timing") or {}
+                log.info(
+                    "drive-fetch: downloaded %d bytes in %.1fs (%.0f KB/s) — "
+                    "in-page: waiting on Drive %sms, base64 %sms, bridge %sms",
+                    bytes_written,
+                    elapsed,
+                    bytes_written / 1024 / elapsed,
+                    timing.get("read_ms", "?"),
+                    timing.get("encode_ms", "?"),
+                    timing.get("bridge_ms", "?"),
+                )
                 break
 
             # Short body. If we have attempts left, log + unlink + retry.
             # Otherwise fall through to the post-loop error path.
             last_short_bytes = bytes_written
+            last_content_type = download_state.get("content_type")
             part.unlink(missing_ok=True)
             target = None
             part = None
             if attempt < MAX_DOWNLOAD_ATTEMPTS:
                 log.info(
-                    "drive-fetch: attempt %d/%d returned %d bytes (likely init segment); retrying",
+                    "drive-fetch: attempt %d/%d returned %d bytes as %s; retrying on a fresh page",
                     attempt,
                     MAX_DOWNLOAD_ATTEMPTS,
                     last_short_bytes,
+                    last_content_type or "?",
                 )
-                # Tiny pause so we don't hammer Drive's CDN in a tight loop.
-                await asyncio.sleep(0.5)
+                # Retry on a NEW page rather than reusing this one. The stub
+                # is tied to the page's playback session — the same URL that
+                # answers `application/vnd.yt-ump` here returns `audio/mp4`
+                # from a page that has no session — so reusing one page means
+                # all four attempts inherit whatever state produced the stub.
+                with contextlib.suppress(Exception):
+                    await download_page.close()
+                download_page = await context.new_page()
+                await download_page.goto(
+                    "https://drive.google.com/", wait_until="domcontentloaded", timeout=30_000
+                )
+                await download_page.expose_function("__driveDownload", _on_drive_msg)
+                # Longer each time: the stub state clears on its own, and
+                # hammering the same second never gave it the chance.
+                await asyncio.sleep(min(2.0 * attempt, 10.0))
 
         # If the loop exited without a full body, raise with diagnostics.
         if target is None or part is None or bytes_written < SHORT_BODY_THRESHOLD_BYTES:
             debug_dir = await _dump_diagnostics(page, file_id, observed_google)
+            served = last_content_type or download_state.get("content_type") or "an unknown type"
             raise DriveFetchError(
-                f"Downloaded only {last_short_bytes or bytes_written} bytes "
-                f"after {MAX_DOWNLOAD_ATTEMPTS} attempts — Drive served the "
-                "init segment instead of the full audio every time. This "
-                "usually clears on its own: wait a minute or two and click "
-                f"Download again. Diagnostics: {debug_dir if debug_dir else '(could not write)'}",
+                f"Drive kept answering with {served} instead of the audio "
+                f"({last_short_bytes or bytes_written} bytes) across "
+                f"{MAX_DOWNLOAD_ATTEMPTS} attempts. This is Drive's own "
+                "playback session getting stuck, not the file — it clears by "
+                "itself, so leave it a minute and click Download again. "
+                f"Diagnostics: {debug_dir if debug_dir else '(could not write)'}",
                 code="fetch_failed",
                 debug_dir=debug_dir,
             )
@@ -990,8 +1136,11 @@ async def fetch_drive_audio(
         if response_tasks:
             with contextlib.suppress(Exception):
                 await asyncio.gather(*response_tasks, return_exceptions=True)
-        # Close the page but keep the shared context alive so cookie
+        # Close both pages but keep the shared context alive so cookie
         # rotations from this playback propagate to the next queued scrape.
+        if download_page is not None:
+            with contextlib.suppress(Exception):
+                await download_page.close()
         with contextlib.suppress(Exception):
             await page.close()
         # Re-arm the idle-close timer now that the scrape is done.

@@ -90,6 +90,38 @@ browserApi.alarms.onAlarm.addListener((alarm) => {
 //     scrape hands these to Playwright's `context.add_cookies()`, which
 //     needs per-cookie shape rather than a header.
 
+// Origins the sync needs. Firefox MV3 does NOT grant host_permissions at
+// install — they're opt-in, and until the user grants them `cookies.getAll`
+// returns [] and `fetch` to the backend throws NetworkError. Both look
+// identical to "you're not logged in" / "the server is down", which sent
+// more than one person hunting in the wrong place. Check up front instead
+// and let the caller offer a one-click grant.
+const PATREON_ORIGINS = ["https://*.patreon.com/*"];
+const GOOGLE_ORIGINS = ["https://*.google.com/*"];
+
+function backendOriginPattern(backendUrl) {
+  try {
+    return `${new URL(backendUrl).origin}/*`;
+  } catch {
+    return null;
+  }
+}
+
+async function missingOrigins(backendUrl) {
+  const wanted = [...PATREON_ORIGINS, ...GOOGLE_ORIGINS];
+  const backendPattern = backendOriginPattern(backendUrl);
+  if (backendPattern) wanted.push(backendPattern);
+
+  const missing = [];
+  for (const origin of wanted) {
+    // One at a time: `contains` is all-or-nothing, so a combined query can't
+    // say WHICH origin is missing.
+    const granted = await browserApi.permissions.contains({ origins: [origin] });
+    if (!granted) missing.push(origin);
+  }
+  return missing;
+}
+
 async function pushPatreonCookies(backendUrl) {
   const cookies = await browserApi.cookies.getAll({ domain: ".patreon.com" });
   if (!cookies.length) {
@@ -135,6 +167,23 @@ async function pushGoogleCookies(backendUrl) {
 
 async function syncCookie() {
   const backendUrl = await getBackendUrl();
+
+  // Bail before touching cookies or the network — an ungranted origin makes
+  // both fail with misleading errors. `needsPermission` tells the popup to
+  // offer the grant prompt; only an extension page can call
+  // `permissions.request()`, and only from a user gesture.
+  const missing = await missingOrigins(backendUrl);
+  if (missing.length) {
+    return {
+      ok: false,
+      needsPermission: true,
+      origins: missing,
+      error:
+        "Access not granted yet. Firefox requires you to approve this " +
+        "extension's site access before it can read cookies or reach the backend.",
+    };
+  }
+
   let patreon, google;
   try {
     patreon = await pushPatreonCookies(backendUrl);

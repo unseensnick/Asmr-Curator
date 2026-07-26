@@ -5,6 +5,7 @@
  *     - `backendUrl`  base URL of the local ASMR Curator backend,
  *                     e.g. http://localhost:8000
  *
+
  *   local storage (per-machine cache, not synced)
  *     - `latestExtensionInfo`  { version, checkedAt } — last GitHub
  *                              release version observed by the daily
@@ -31,6 +32,7 @@
   async function setBackendUrl(url) {
     return browserApi.storage.sync.set({ backendUrl: url });
   }
+
 
   async function getLatestExtensionInfo() {
     const { latestExtensionInfo } = await browserApi.storage.local.get({

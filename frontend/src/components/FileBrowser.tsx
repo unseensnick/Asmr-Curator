@@ -253,7 +253,17 @@ export default function FileBrowser({
     }, [root, cleanupDragSelect]);
 
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Monotonic id per loadFiles call; only the newest may write state.
+    const loadSeqRef = useRef(0);
     const rootRef = useRef<HTMLDivElement | null>(null);
+
+    // Cancel the pending search debounce on unmount so it can't fire a
+    // request against a component that's gone.
+    useEffect(() => {
+        return () => {
+            if (debounceRef.current) clearTimeout(debounceRef.current);
+        };
+    }, []);
 
     useEffect(() => {
         localStorage.setItem("convertFormat", convertFormat);
@@ -280,6 +290,15 @@ export default function FileBrowser({
     }
 
     async function loadFiles(q: string, mode: SearchMode, rt: FileRoot) {
+        // Only the newest load may write state. The debounced search, the
+        // mode toggle, the root tabs and the librarySubdir effect all call
+        // this independently, so switching to Downloads while a Library
+        // search is still in flight used to let the slower response land
+        // last and paint the wrong root's files — with the selection and
+        // bulk-edit actions then pointed at them.
+        const seq = ++loadSeqRef.current;
+        const isCurrent = () => loadSeqRef.current === seq;
+
         setLoading(true);
         setError("");
         try {
@@ -291,6 +310,7 @@ export default function FileBrowser({
                 const data = await apiGet<ListedDirResponse>(
                     API.files + buildQueryString({ root: rt, subdir: librarySubdir }),
                 );
+                if (!isCurrent()) return;
                 setSubdirEntries(data.entries);
                 setFiles(
                     data.entries
@@ -312,20 +332,22 @@ export default function FileBrowser({
                             root: rt,
                         }),
                 );
+                if (!isCurrent()) return;
                 setSubdirEntries(null);
                 setFiles(data.files);
             }
         } catch (e) {
+            if (!isCurrent()) return;
             const where = rt === "library" ? "Library" : "Downloads";
             setError(
                 `Couldn't load the ${where} folder. Check the folder path in your host setup.`,
             );
-            // eslint-disable-next-line no-console -- aid for self-host debugging
             console.warn(`Load ${rt} failed:`, getErrorMessage(e));
             setFiles([]);
             setSubdirEntries(null);
         } finally {
-            setLoading(false);
+            // A superseded load must not clear the spinner the newer one set.
+            if (isCurrent()) setLoading(false);
         }
     }
 
@@ -671,7 +693,18 @@ export default function FileBrowser({
         await loadFiles(query, searchMode, root);
         if (root === "downloads") refreshDownloadsCount();
         if (failures.length > 0) {
-            setError(`Couldn't delete ${failures.length} of ${candidate.files.length} files.`);
+            // Say WHY, not just how many. The reasons were collected here and
+            // then thrown away, so a non-empty folder or a permission problem
+            // both read as a bare "Couldn't delete 1 of 3 files." with nothing
+            // to act on.
+            const [first, ...rest] = failures;
+            setError(
+                failures.length === 1
+                    ? `Couldn't delete ${first}`
+                    : `Couldn't delete ${failures.length} of ${candidate.files.length} files. ` +
+                          `${first}${rest.length ? ` (+${rest.length} more)` : ""}`,
+            );
+            console.warn("Delete failures:", failures);
         }
     }
 
@@ -1246,14 +1279,13 @@ function FileList({
                 </div>
             ) : (
                 <>
-                    {hasFolders &&
-                        folders!.map((dir) => (
-                            <FolderRow
-                                key={dir.path}
-                                name={dir.name}
-                                onOpen={() => onOpenFolder?.(dir.path)}
-                            />
-                        ))}
+                    {folders?.map((dir) => (
+                        <FolderRow
+                            key={dir.path}
+                            name={dir.name}
+                            onOpen={() => onOpenFolder?.(dir.path)}
+                        />
+                    ))}
                     {files.map((file) => (
                         <FileBrowserItem
                             key={file.path}

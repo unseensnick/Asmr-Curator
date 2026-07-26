@@ -7,6 +7,7 @@ import itertools
 import json
 import os
 import re
+import secrets
 import shutil
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from backend.main import (
     reject_if_exists,
     require_file,
     root_for,
+    validate_strictly_under_root,
     validate_under_library,
     validate_under_root,
 )
@@ -111,10 +113,10 @@ def search_files(
     """
     root_path = root_for(root).resolve()
     if not root_path.exists():
-        raise HTTPException(
-            404,
-            f"Audio root not found at {root_path} — check the {root.upper()}_PATH mount",
-        )
+        # Name the env var, not the resolved path — this is a normal
+        # user-facing endpoint and the host layout isn't the caller's
+        # business. /api/files/debug exists for mount diagnosis.
+        raise HTTPException(404, f"Audio root not found — check the {root.upper()}_PATH mount")
 
     q_lower = q.strip().lower()
     if search_in not in ("filename", "folder", "both"):
@@ -191,15 +193,18 @@ def search_files(
 
 @router.get("/api/files/debug")
 def debug_files(root: str = "library"):
-    """Show what's visible at the chosen root — diagnoses mount issues."""
+    """Show what's visible at the chosen root — diagnoses mount issues.
+
+    Reports the configured `root_path`: that IS the diagnosis this endpoint
+    exists for, so it stays. What doesn't stay is a failure dressed up as a
+    success — this used to answer HTTP 200 with an `{"error": ...}` body
+    carrying a raw exception string, so a client couldn't tell a broken
+    mount from an empty one.
+    """
     root_path = root_for(root).resolve()
     env_name = f"{root.upper()}_PATH"
     if not root_path.exists():
-        return {
-            "error": f"{env_name} does not exist: {root_path}",
-            "root_path": str(root_path),
-            "root": root,
-        }
+        raise HTTPException(404, f"{env_name} does not exist: {root_path}")
 
     top_level = []
     try:
@@ -210,8 +215,11 @@ def debug_files(root: str = "library"):
                     "type": "dir" if entry.is_dir() else "file",
                 }
             )
-    except Exception as e:
-        return {"error": str(e), "root_path": str(root_path), "root": root}
+    except OSError as e:
+        # Log the detail, return a clean message — a raw OSError string can
+        # carry paths and errno text the caller has no use for.
+        log.error("debug_files: could not list %s: %s", env_name, e)
+        raise HTTPException(500, f"Could not read {env_name}. Check the server log.")
 
     return {
         "root": root,
@@ -471,6 +479,22 @@ def bulk_write(body: BulkWriteIn):
     # same batch can't both try to land at the same library/to_subdir/name.
     proposed_move_dests: set[Path] = set()
 
+    # Sources this batch will rename away. A target that collides with one of
+    # them is not a real collision — the occupant is leaving. Without this,
+    # two files whose canonical names swap (a→b, b→a) aborted the whole batch
+    # with "Target name already exists" and the user had no way to finish the
+    # operation from the sheet. Phase 2 parks the occupant under a temp name
+    # so the swap can't overwrite anything.
+    vacated: set[Path] = set()
+    if body.rename:
+        for item in body.items:
+            try:
+                candidate = validate_under_root(item.path, root_path)
+            except HTTPException:
+                continue  # re-reported per item in the main pass below
+            if item.new_name and item.new_name.strip() != candidate.name:
+                vacated.add(candidate)
+
     for item in body.items:
         try:
             src = validate_under_root(item.path, root_path)
@@ -509,7 +533,7 @@ def bulk_write(body: BulkWriteIn):
             except HTTPException as e:
                 errors.append({"path": item.path, "ok": False, "error": str(e.detail)})
                 continue
-            if dest_candidate.exists():
+            if dest_candidate.exists() and dest_candidate not in vacated:
                 errors.append(
                     {"path": item.path, "ok": False, "error": "Target name already exists."},
                 )
@@ -576,6 +600,10 @@ def bulk_write(body: BulkWriteIn):
         )
 
     # ── Phase 2: apply each item, best-effort ────────────────────────────────
+    # Files temporarily moved aside so another item could take their name,
+    # keyed by the path they'll be renamed FROM when their own turn comes.
+    # Anything still parked after the loop is put back.
+    parked: dict[Path, Path] = {}
     results: list[dict] = []
     for plan in planned:
         item: BulkWriteItem = plan["item"]
@@ -586,7 +614,18 @@ def bulk_write(body: BulkWriteIn):
         moved_to_library = False
         try:
             if dest is not None:
-                src.rename(dest)
+                # If this item was parked earlier to free its name for
+                # another item, rename from where it actually sits now.
+                actual_src = parked.pop(src, src)
+                # Target still occupied? It belongs to another item in this
+                # batch (phase 1 only allows that case). Park it under a
+                # hidden temp name first — Path.rename overwrites silently on
+                # POSIX, so renaming straight over it would destroy that file.
+                if dest.exists() and dest != actual_src:
+                    holding = dest.with_name(f".{dest.name}.bulk-{secrets.token_hex(4)}.tmp")
+                    dest.rename(holding)
+                    parked[dest] = holding
+                actual_src.rename(dest)
                 target = dest
                 new_path_rel = str(dest.relative_to(root_path.resolve()))
             else:
@@ -647,6 +686,15 @@ def bulk_write(body: BulkWriteIn):
             # the right tab + re-derive the Move-to picker's anchor.
             entry["new_root"] = "library"
         results.append(entry)
+
+    # Any file still parked means its own rename never ran — the item errored
+    # after we moved it aside. Put it back under its original name rather than
+    # leaving the user with a hidden .tmp and a missing track.
+    for original, holding in parked.items():
+        try:
+            holding.rename(original)
+        except OSError as e:
+            log.error("bulk-write could not restore parked file %s: %s", original.name, e)
 
     return {"ok": True, "results": results}
 
@@ -750,7 +798,7 @@ def _plan_move(
     HTTPException; the batch caller converts each into a per-item error.
     """
     src_root = root_for(from_root)
-    src = validate_under_root(from_path, src_root)
+    src = validate_strictly_under_root(from_path, src_root, action="move")
     require_file(src)  # misnamed but applies to dirs too
 
     to_subdir_clean = (to_subdir or "").strip()
@@ -949,7 +997,7 @@ def delete_path(body: DeleteIn):
     if not rel or rel in (".", ".."):
         raise HTTPException(400, "Refusing to delete the root directory.")
 
-    target = validate_under_root(rel, root_path)
+    target = validate_strictly_under_root(rel, root_path, action="delete")
     if not target.exists():
         raise HTTPException(404, "Path does not exist.")
 
@@ -1036,7 +1084,7 @@ def rename_path(body: RenamePathIn):
     if not rel or rel in (".", ".."):
         raise HTTPException(400, "Refusing to rename the root directory.")
 
-    src = validate_under_root(rel, root_path)
+    src = validate_strictly_under_root(rel, root_path, action="rename")
     if not src.exists():
         raise HTTPException(404, "Path does not exist.")
 
@@ -1106,18 +1154,26 @@ def rename_file(body: RenameIn):
     # checks the bulk-write phase-1 collector and mkdir use.
     new_name = _validate_name(body.new_name, max_bytes=255, term="Filename")
 
-    dest = validate_under_root(str(src.parent.relative_to(root_path) / new_name), root_path)
-    reject_if_exists(dest)
+    # An unchanged name means "write the tags, leave the filename alone".
+    # Skipping the rename also skips `reject_if_exists`, which would
+    # otherwise 409 the file against itself. Mirrors /api/rename-path's
+    # same-name short-circuit.
+    did_rename = new_name != src.name
+    if did_rename:
+        dest = validate_under_root(str(src.parent.relative_to(root_path) / new_name), root_path)
+        reject_if_exists(dest)
 
-    try:
-        src.rename(dest)
-    except OSError as e:
-        raise _handle_rename_error(
-            e,
-            src.name,
-            dest.name,
-            too_long_message=f"Filename too long ({len(new_name)} chars). Remove some tags to shorten it.",
-        )
+        try:
+            src.rename(dest)
+        except OSError as e:
+            raise _handle_rename_error(
+                e,
+                src.name,
+                dest.name,
+                too_long_message=f"Filename too long ({len(new_name)} chars). Remove some tags to shorten it.",
+            )
+    else:
+        dest = src
 
     metadata_error: str | None = None
     if body.metadata and any(
@@ -1140,7 +1196,7 @@ def rename_file(body: RenameIn):
             metadata_error = str(e)
 
     return {
-        "renamed": True,
+        "renamed": did_rename,
         "old_name": src.name,
         "new_name": dest.name,
         "path": str(dest.relative_to(root_path)),

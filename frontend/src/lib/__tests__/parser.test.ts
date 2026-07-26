@@ -16,13 +16,13 @@ describe("parseLlmJson", () => {
         const raw = JSON.stringify({
             raw_title_line: "My Title | Tag1",
             raw_pill_tags: ["a", "b"],
-            creator_name: "Test Artist",
+            creator_name: "Solar Girl",
             creator_confidence: "high",
         });
         const result = parseLlmJson(raw);
         expect(result.raw_title_line).toBe("My Title | Tag1");
         expect(result.raw_pill_tags).toEqual(["a", "b"]);
-        expect(result.creator_name).toBe("Test Artist");
+        expect(result.creator_name).toBe("Solar Girl");
         expect(result.creator_confidence).toBe("high");
     });
 
@@ -32,6 +32,23 @@ describe("parseLlmJson", () => {
         const raw =
             'Here is the extracted data: {"raw_title_line": "X", "raw_pill_tags": [], "creator_name": null, "creator_confidence": "low"} - hope this helps!';
         expect(parseLlmJson(raw).raw_title_line).toBe("X");
+    });
+
+    it("extracts JSON despite an unmatched closing brace in the preamble", () => {
+        // An unpaired `}` ahead of the real block drove the brace depth
+        // negative, so the block's `{` never registered as a start and the
+        // whole response silently parsed as empty. (A *balanced* object in
+        // the preamble is different — the parser is documented to return the
+        // first complete block, and that's covered above.)
+        const raw =
+            'Remember to close it with } at the end. {"raw_title_line": "Y", "raw_pill_tags": [], "creator_name": null, "creator_confidence": "low"}';
+        expect(parseLlmJson(raw).raw_title_line).toBe("Y");
+    });
+
+    it("extracts JSON when prose opens with a bare closing brace", () => {
+        const raw =
+            '} leftover text {"raw_title_line": "Z", "raw_pill_tags": [], "creator_name": null, "creator_confidence": "low"}';
+        expect(parseLlmJson(raw).raw_title_line).toBe("Z");
     });
 
     it("returns safe defaults on invalid JSON", () => {

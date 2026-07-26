@@ -19,7 +19,7 @@ def _write_sidecar(
     post_id: str,
     *,
     title: str = "Cached Title",
-    artist: str = "Test Artist",
+    artist: str = "Solar Girl",
     tags: list[str] | None = None,
 ):
     """Write a patreon-dl-shaped sidecar under DOWNLOAD_PATH/.patreon-dl/.
@@ -57,7 +57,7 @@ def _stage_audio(download: Path, folder: str, filename: str = "song.mp3") -> str
 class TestLoadCachedMetadata:
     def test_empty_entry_when_no_patreon_dl_dir(self, client):
         c, download, _ = client
-        rel = _stage_audio(download, "Test Artist/12345 - Cached Title")
+        rel = _stage_audio(download, "Solar Girl/12345 - Cached Title")
         r = c.post(
             "/api/files/load-cached-metadata",
             json={"paths": [rel], "root": "downloads"},
@@ -72,10 +72,10 @@ class TestLoadCachedMetadata:
             "solar",
             "12345",
             title="Cached Title",
-            artist="Test Artist",
+            artist="Solar Girl",
             tags=["whisper", "sleep"],
         )
-        rel = _stage_audio(download, "Test Artist/12345 - Cached Title")
+        rel = _stage_audio(download, "Solar Girl/12345 - Cached Title")
         r = c.post(
             "/api/files/load-cached-metadata",
             json={"paths": [rel], "root": "downloads"},
@@ -86,7 +86,7 @@ class TestLoadCachedMetadata:
                 {
                     "path": rel,
                     "title": "Cached Title",
-                    "artist": "Test Artist",
+                    "artist": "Solar Girl",
                     "tags": ["whisper", "sleep"],
                 },
             ],
@@ -109,7 +109,7 @@ class TestLoadCachedMetadata:
         # Folder name "Sleepy whispers" doesn't start with a numeric id, so
         # there's nothing to look up — the entry comes back without
         # metadata fields.
-        rel = _stage_audio(download, "Test Artist/Sleepy whispers")
+        rel = _stage_audio(download, "Solar Girl/Sleepy whispers")
         r = c.post(
             "/api/files/load-cached-metadata",
             json={"paths": [rel], "root": "downloads"},
@@ -120,7 +120,7 @@ class TestLoadCachedMetadata:
     def test_empty_entry_when_post_id_not_in_cache(self, client):
         c, download, _ = client
         _write_sidecar(download, "solar", "12345")
-        rel = _stage_audio(download, "Test Artist/99999 - Other Post")
+        rel = _stage_audio(download, "Solar Girl/99999 - Other Post")
         r = c.post(
             "/api/files/load-cached-metadata",
             json={"paths": [rel], "root": "downloads"},
@@ -132,9 +132,9 @@ class TestLoadCachedMetadata:
         c, download, _ = client
         _write_sidecar(download, "solar", "12345", title="First")
         _write_sidecar(download, "solar", "67890", title="Second")
-        rel_a = _stage_audio(download, "Test Artist/12345 - First", filename="a.mp3")
-        rel_b = _stage_audio(download, "Test Artist/Untagged", filename="b.mp3")
-        rel_c = _stage_audio(download, "Test Artist/67890 - Second", filename="c.mp3")
+        rel_a = _stage_audio(download, "Solar Girl/12345 - First", filename="a.mp3")
+        rel_b = _stage_audio(download, "Solar Girl/Untagged", filename="b.mp3")
+        rel_c = _stage_audio(download, "Solar Girl/67890 - Second", filename="c.mp3")
         r = c.post(
             "/api/files/load-cached-metadata",
             json={"paths": [rel_a, rel_b, rel_c], "root": "downloads"},
@@ -168,12 +168,12 @@ class TestLoadCachedMetadata:
             "solar",
             "12345",
             title="Cached Title",
-            artist="Test Artist",
+            artist="Solar Girl",
         )
-        moved_dir = library / "Test Artist" / "12345 - Cached Title"
+        moved_dir = library / "Solar Girl" / "12345 - Cached Title"
         moved_dir.mkdir(parents=True)
         (moved_dir / "song.mp3").write_bytes(b"fake audio")
-        rel = "Test Artist/12345 - Cached Title/song.mp3"
+        rel = "Solar Girl/12345 - Cached Title/song.mp3"
         r = c.post(
             "/api/files/load-cached-metadata",
             json={"paths": [rel], "root": "library"},
@@ -210,7 +210,7 @@ class TestLoadCurrentMetadata:
         monkeypatch.setattr(main, "DOWNLOAD_PATH", tmp_path / "downloads")
         monkeypatch.setattr(main, "LIBRARY_PATH", library)
         (library / "a.mp3").write_bytes(b"")
-        main._write_metadata(library / "a.mp3", "Sleepy", "Test Artist", "Whispers", "Test Artist")
+        main._write_metadata(library / "a.mp3", "Sleepy", "Solar Girl", "Whispers", "Solar Girl")
         c = TestClient(main.app)
         r = c.post(
             "/api/files/load-current-metadata",
@@ -219,9 +219,9 @@ class TestLoadCurrentMetadata:
         assert r.status_code == 200
         item = r.json()["items"][0]
         assert item["title"] == "Sleepy"
-        assert item["artist"] == "Test Artist"
+        assert item["artist"] == "Solar Girl"
         assert item["album"] == "Whispers"
-        assert item["album_artist"] == "Test Artist"
+        assert item["album_artist"] == "Solar Girl"
 
     def test_empty_fields_for_untagged_file(self, client):
         c, _, library = client
@@ -429,6 +429,72 @@ class TestBulkWriteValidation:
         assert r.status_code == 400
 
 
+class TestBulkWriteSwap:
+    """Two files trading names. The target 'already exists' but its occupant
+    is leaving in the same batch, so it isn't a real collision — and the
+    rename must not overwrite the occupant on the way through."""
+
+    def _swap(self, c, rel_a, rel_b):
+        return c.patch(
+            "/api/files/bulk-write",
+            json={
+                "items": [
+                    {"path": rel_a, "new_name": "b.mp3"},
+                    {"path": rel_b, "new_name": "a.mp3"},
+                ],
+                "shared": {},
+                "rename": True,
+                "root": "library",
+            },
+        )
+
+    def test_swap_is_accepted(self, client):
+        c, _, library = client
+        rel_a = _stage_mp3(library, "a.mp3")
+        rel_b = _stage_mp3(library, "b.mp3")
+        assert self._swap(c, rel_a, rel_b).status_code == 200
+
+    def test_swap_preserves_both_files(self, client):
+        c, _, library = client
+        rel_a = _stage_mp3(library, "a.mp3")
+        rel_b = _stage_mp3(library, "b.mp3")
+        (library / "a.mp3").write_bytes(b"AAA")
+        (library / "b.mp3").write_bytes(b"BBB")
+        self._swap(c, rel_a, rel_b)
+        assert (library / "b.mp3").read_bytes() == b"AAA"
+
+    def test_swap_moves_the_other_file_too(self, client):
+        c, _, library = client
+        rel_a = _stage_mp3(library, "a.mp3")
+        rel_b = _stage_mp3(library, "b.mp3")
+        (library / "a.mp3").write_bytes(b"AAA")
+        (library / "b.mp3").write_bytes(b"BBB")
+        self._swap(c, rel_a, rel_b)
+        assert (library / "a.mp3").read_bytes() == b"BBB"
+
+    def test_leaves_no_temp_files_behind(self, client):
+        c, _, library = client
+        rel_a = _stage_mp3(library, "a.mp3")
+        rel_b = _stage_mp3(library, "b.mp3")
+        self._swap(c, rel_a, rel_b)
+        assert sorted(p.name for p in library.iterdir()) == ["a.mp3", "b.mp3"]
+
+    def test_still_rejects_a_target_nobody_is_vacating(self, client):
+        c, _, library = client
+        rel_a = _stage_mp3(library, "a.mp3")
+        _stage_mp3(library, "occupied.mp3")
+        r = c.patch(
+            "/api/files/bulk-write",
+            json={
+                "items": [{"path": rel_a, "new_name": "occupied.mp3"}],
+                "shared": {},
+                "rename": True,
+                "root": "library",
+            },
+        )
+        assert r.status_code == 422, r.json()
+
+
 class TestBulkWriteCommit:
     """Phase 2 — once validation passes, writes actually hit disk."""
 
@@ -460,9 +526,9 @@ class TestBulkWriteCommit:
                     {"path": rel_b, "title": "B"},
                 ],
                 "shared": {
-                    "artist": "Test Artist",
+                    "artist": "Solar Girl",
                     "album": "Whispers",
-                    "album_artist": "Test Artist",
+                    "album_artist": "Solar Girl",
                 },
                 "rename": False,
                 "root": "library",
@@ -471,9 +537,9 @@ class TestBulkWriteCommit:
         assert r.status_code == 200
         for rel in (rel_a, rel_b):
             tags = _read_id3(library / rel)
-            assert tags["TPE1"] == "Test Artist"
+            assert tags["TPE1"] == "Solar Girl"
             assert tags["TALB"] == "Whispers"
-            assert tags["TPE2"] == "Test Artist"
+            assert tags["TPE2"] == "Solar Girl"
 
     def test_empty_per_file_title_keeps_existing(self, client):
         c, _, library = client
@@ -487,7 +553,7 @@ class TestBulkWriteCommit:
             "/api/files/bulk-write",
             json={
                 "items": [{"path": rel, "title": ""}],
-                "shared": {"artist": "Test Artist"},
+                "shared": {"artist": "Solar Girl"},
                 "rename": False,
                 "root": "library",
             },
@@ -495,7 +561,7 @@ class TestBulkWriteCommit:
         assert r.status_code == 200
         tags = _read_id3(library / rel)
         assert tags["TIT2"] == "Existing title"
-        assert tags["TPE1"] == "Test Artist"
+        assert tags["TPE1"] == "Solar Girl"
 
     def test_shared_clear_removes_tag_frames(self, client):
         c, _, library = client
@@ -522,7 +588,7 @@ class TestBulkWriteCommit:
 
     def test_renames_and_writes_metadata_in_one_call(self, client):
         c, _, library = client
-        rel = _stage_mp3(library, "Test Artist/raw-1.mp3")
+        rel = _stage_mp3(library, "Solar Girl/raw-1.mp3")
         r = c.patch(
             "/api/files/bulk-write",
             json={
@@ -533,19 +599,19 @@ class TestBulkWriteCommit:
                         "new_name": "Sleepy whisper - F4A.mp3",
                     },
                 ],
-                "shared": {"artist": "Test Artist"},
+                "shared": {"artist": "Solar Girl"},
                 "rename": True,
                 "root": "library",
             },
         )
         assert r.status_code == 200
-        assert r.json()["results"][0]["new_path"] == "Test Artist/Sleepy whisper - F4A.mp3"
+        assert r.json()["results"][0]["new_path"] == "Solar Girl/Sleepy whisper - F4A.mp3"
         assert not (library / rel).exists()
-        dest = library / "Test Artist" / "Sleepy whisper - F4A.mp3"
+        dest = library / "Solar Girl" / "Sleepy whisper - F4A.mp3"
         assert dest.exists()
         tags = _read_id3(dest)
         assert tags["TIT2"] == "Sleepy whisper"
-        assert tags["TPE1"] == "Test Artist"
+        assert tags["TPE1"] == "Solar Girl"
 
     def test_rename_false_keeps_file_in_place(self, client):
         c, _, library = client
@@ -598,35 +664,35 @@ class TestBulkWriteMove:
 
     def test_moves_file_into_library_subfolder(self, client):
         c, download, library = client
-        rel = "Test Artist/raw-1.mp3"
-        (download / "Test Artist").mkdir()
+        rel = "Solar Girl/raw-1.mp3"
+        (download / "Solar Girl").mkdir()
         (download / rel).write_bytes(b"")
-        (library / "Test Artist").mkdir()
+        (library / "Solar Girl").mkdir()
         r = c.patch(
             "/api/files/bulk-write",
             json={
                 "items": [{"path": rel}],
-                "shared": {"artist": "Test Artist"},
+                "shared": {"artist": "Solar Girl"},
                 "rename": False,
                 "root": "downloads",
-                "to_subdir": "Test Artist",
+                "to_subdir": "Solar Girl",
             },
         )
         assert r.status_code == 200, r.json()
         result = r.json()["results"][0]
         assert result["ok"] is True
-        assert result["new_path"] == "Test Artist/raw-1.mp3"
+        assert result["new_path"] == "Solar Girl/raw-1.mp3"
         assert result["new_root"] == "library"
         # Source gone, dest landed.
         assert not (download / rel).exists()
-        assert (library / "Test Artist" / "raw-1.mp3").exists()
+        assert (library / "Solar Girl" / "raw-1.mp3").exists()
         # Metadata write still applied to the moved file.
-        assert _read_id3(library / "Test Artist" / "raw-1.mp3")["TPE1"] == "Test Artist"
+        assert _read_id3(library / "Solar Girl" / "raw-1.mp3")["TPE1"] == "Solar Girl"
 
     def test_renames_then_moves_in_one_call(self, client):
         c, download, library = client
-        rel = "Test Artist/raw-1.mp3"
-        (download / "Test Artist").mkdir()
+        rel = "Solar Girl/raw-1.mp3"
+        (download / "Solar Girl").mkdir()
         (download / rel).write_bytes(b"")
         (library / "Whispers").mkdir()
         r = c.patch(
@@ -639,7 +705,7 @@ class TestBulkWriteMove:
                         "new_name": "Sleepy - F4A.mp3",
                     },
                 ],
-                "shared": {"artist": "Test Artist"},
+                "shared": {"artist": "Solar Girl"},
                 "rename": True,
                 "root": "downloads",
                 "to_subdir": "Whispers",
@@ -673,12 +739,12 @@ class TestBulkWriteMove:
 
     def test_collision_at_destination_aborts_batch(self, client):
         c, download, library = client
-        rel = "Test Artist/raw-1.mp3"
-        (download / "Test Artist").mkdir()
+        rel = "Solar Girl/raw-1.mp3"
+        (download / "Solar Girl").mkdir()
         (download / rel).write_bytes(b"")
-        (library / "Test Artist").mkdir()
+        (library / "Solar Girl").mkdir()
         # A file with the same name already sits at the destination.
-        (library / "Test Artist" / "raw-1.mp3").write_bytes(b"existing")
+        (library / "Solar Girl" / "raw-1.mp3").write_bytes(b"existing")
         r = c.patch(
             "/api/files/bulk-write",
             json={
@@ -686,13 +752,13 @@ class TestBulkWriteMove:
                 "shared": {},
                 "rename": False,
                 "root": "downloads",
-                "to_subdir": "Test Artist",
+                "to_subdir": "Solar Girl",
             },
         )
         assert r.status_code == 422
         # Source untouched, existing dest untouched.
         assert (download / rel).exists()
-        assert (library / "Test Artist" / "raw-1.mp3").read_bytes() == b"existing"
+        assert (library / "Solar Girl" / "raw-1.mp3").read_bytes() == b"existing"
 
     def test_within_batch_move_collision_aborts(self, client):
         c, download, library = client
@@ -725,8 +791,8 @@ class TestBulkWriteMove:
 
     def test_missing_destination_folder_returns_404(self, client):
         c, download, _ = client
-        rel = "Test Artist/raw-1.mp3"
-        (download / "Test Artist").mkdir()
+        rel = "Solar Girl/raw-1.mp3"
+        (download / "Solar Girl").mkdir()
         (download / rel).write_bytes(b"")
         r = c.patch(
             "/api/files/bulk-write",

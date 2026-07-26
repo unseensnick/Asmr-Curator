@@ -26,5 +26,15 @@ services:
             - DRIVE_BROWSER_IDLE_TIMEOUT_S=${DRIVE_BROWSER_IDLE_TIMEOUT_S:-300}
             - DRIVE_DOWNLOAD_TIMEOUT_S=${DRIVE_DOWNLOAD_TIMEOUT_S:-14400}
             - DRIVE_DOWNLOAD_RETRIES=${DRIVE_DOWNLOAD_RETRIES:-4}
+        # Resolve through public DNS instead of Docker's embedded resolver
+        # (127.0.0.11 → host resolver). A download that re-resolves its host
+        # once per chunk can stall that resolver under the fan-out, which
+        # surfaces mid-download as "[Errno -5] No address associated with
+        # hostname". A stable Linux host rarely hits this, but pinning a
+        # reliable resolver makes it robust on Docker Desktop / flaky DNS too.
+        # Change or drop these if you run an internal/LAN-only DNS.
+        dns:
+            - 1.1.1.1
+            - 8.8.8.8
         restart: unless-stopped
 

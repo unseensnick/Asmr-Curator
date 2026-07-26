@@ -1,4 +1,14 @@
-import { AlertTriangle, Check, File, Loader2, Music2, PenLine, Repeat } from "lucide-react";
+import {
+    AlertTriangle,
+    Check,
+    File,
+    Loader2,
+    Music2,
+    PenLine,
+    Repeat,
+    RotateCcw,
+    Tags,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,8 +25,30 @@ export function FileIcon({ ext }: { ext: string }) {
     return <File size={18} aria-hidden className="text-muted-foreground shrink-0 mt-0.5" />;
 }
 
+/** Tertiary "put this back the way it was generated" control. Used where an
+ *  editable field has diverged from the value derived from the tag editor. */
+export function ResetLink({ onClick, label }: { onClick: () => void; label: string }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            aria-label={label}
+            className="inline-flex items-center gap-1 min-h-9 px-2 -mx-2 rounded-md text-xs text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        >
+            <RotateCcw size={12} aria-hidden />
+            Reset
+        </button>
+    );
+}
+
+const ACTION_LABELS = {
+    rename: { busy: "Renaming", done: "Renamed", idle: "Rename file", Icon: PenLine },
+    convert: { busy: "Converting", done: "Converted", idle: "Convert file", Icon: Repeat },
+    metadata: { busy: "Saving", done: "Saved", idle: "Save metadata", Icon: Tags },
+} as const;
+
 interface ActionButtonProps {
-    kind: "rename" | "convert";
+    kind: keyof typeof ACTION_LABELS;
     busy: boolean;
     done: boolean;
     disabled?: boolean;
@@ -24,19 +56,8 @@ interface ActionButtonProps {
 }
 
 export function ActionButton({ kind, busy, done, disabled, onClick }: ActionButtonProps) {
-    const label =
-        kind === "rename"
-            ? busy
-                ? "Renaming"
-                : done
-                  ? "Renamed"
-                  : "Rename file"
-            : busy
-              ? "Converting"
-              : done
-                ? "Converted"
-                : "Convert file";
-    const Icon = kind === "rename" ? PenLine : Repeat;
+    const { busy: busyLabel, done: doneLabel, idle, Icon } = ACTION_LABELS[kind];
+    const label = busy ? busyLabel : done ? doneLabel : idle;
     return (
         <Button
             onClick={onClick}

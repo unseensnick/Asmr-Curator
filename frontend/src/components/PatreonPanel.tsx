@@ -218,6 +218,12 @@ export default function PatreonPanel({
 
     const hasResult = post !== null || posts.length > 0;
 
+    // Hoisted so the truthiness check narrows it for the bridge button's
+    // onClick too. Reading lastApplied.audio_path inside the callback would
+    // widen back to string | undefined, since TypeScript can't assume a
+    // mutable field still holds its checked value by the time the handler runs.
+    const bridgeAudioPath = lastApplied?.audio_path;
+
     return (
         <div className="flex flex-col gap-5">
             {/* URL input — always visible; paste a new URL and fetch to replace results */}
@@ -365,22 +371,19 @@ export default function PatreonPanel({
             {hasResult && (
                 <div className="border-t border-border/50 pt-5 flex flex-col gap-4">
                     {applyStatus && <StatusBanner status={applyStatus} />}
-                    {lastApplied?.audio_path && onBridgeToDownloads && (
+                    {bridgeAudioPath && onBridgeToDownloads && (
                         <button
                             type="button"
                             onClick={() => {
                                 const filename =
-                                    lastApplied.audio_path!.split("/").pop() ??
-                                    lastApplied.audio_path!;
-                                onBridgeToDownloads(lastApplied.audio_path!, filename);
+                                    bridgeAudioPath.split("/").pop() ?? bridgeAudioPath;
+                                onBridgeToDownloads(bridgeAudioPath, filename);
                             }}
                             className="text-sm font-medium text-primary hover:underline underline-offset-4 self-start inline-flex items-center gap-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                         >
                             <ExternalLink size={12} aria-hidden />
                             Rename and move{" "}
-                            <span className="font-mono">
-                                {lastApplied.audio_path.split("/").pop()}
-                            </span>
+                            <span className="font-mono">{bridgeAudioPath.split("/").pop()}</span>
                         </button>
                     )}
                     {posts.length > 0 && (
@@ -391,8 +394,20 @@ export default function PatreonPanel({
                             posts found. Click a row to use it.
                         </p>
                     )}
-                    {post && <SinglePostResult post={post} onApply={() => applyPost(post)} />}
-                    {posts.length > 0 && <PatreonResultsList posts={posts} onApply={applyPost} />}
+                    {post && (
+                        <SinglePostResult
+                            post={post}
+                            onApply={() => applyPost(post)}
+                            powerMode={powerMode}
+                        />
+                    )}
+                    {posts.length > 0 && (
+                        <PatreonResultsList
+                            posts={posts}
+                            onApply={applyPost}
+                            powerMode={powerMode}
+                        />
+                    )}
                 </div>
             )}
 
@@ -467,7 +482,15 @@ function phaseLabel(event: PatreonFetchEvent, idleLabel: string): string {
             // has changed since last download" — too long for inline copy.
             return `Skipped #${event.post_id}. Already in your library.`;
         case "phase_done":
-            return "Wrapping up. Tidying the files.";
+            return "Downloads finished. Wrapping up.";
+        case "collecting":
+            return "Reading what came back.";
+        case "tidying":
+            return event.count === 1 ? "Tidying up 1 post." : `Tidying up ${event.count} posts.`;
+        case "filing":
+            return event.count === 1
+                ? "Filing 1 post into your downloads folder."
+                : `Filing ${event.count} posts into your downloads folder.`;
         case "done":
             return "Done.";
         case "error":
@@ -563,9 +586,12 @@ function FieldGroup({ label, disabled, children }: FieldGroupProps) {
 interface SinglePostResultProps {
     post: PatreonPost;
     onApply: () => void;
+    /** Passed to the external-links convert controls so the bitrate override
+     *  shows under the same gate as the other ingest paths. */
+    powerMode?: boolean;
 }
 
-function SinglePostResult({ post, onApply }: SinglePostResultProps) {
+function SinglePostResult({ post, onApply, powerMode = false }: SinglePostResultProps) {
     return (
         <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
@@ -624,6 +650,7 @@ function SinglePostResult({ post, onApply }: SinglePostResultProps) {
                     artist={post.artist}
                     title={post.title}
                     links={post.external_links}
+                    powerMode={powerMode}
                 />
             )}
 

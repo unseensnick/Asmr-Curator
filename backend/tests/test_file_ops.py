@@ -9,7 +9,18 @@ so tests can stage files on disk directly and assert post-move layout.
 import json
 from pathlib import Path
 
+from mutagen.id3 import ID3, ID3NoHeaderError
+
 # `client` fixture is auto-discovered from backend/tests/conftest.py.
+
+
+def _read_title(path: Path) -> str:
+    """Read TIT2 back, or "" when the file carries no ID3 block."""
+    try:
+        frame = ID3(str(path)).get("TIT2")
+    except ID3NoHeaderError:
+        return ""
+    return str(frame.text[0]) if frame is not None and frame.text else ""
 
 
 # ── /api/mkdir ─────────────────────────────────────────────────────────────
@@ -71,6 +82,19 @@ def _stage(download: Path, library: Path) -> Path:
 
 
 class TestMove:
+    def test_refuses_to_move_source_root_reached_by_traversal(self, client):
+        c, download, library = client
+        _stage(download, library)
+        r = c.post(
+            "/api/move",
+            json={
+                "from_path": "post123/..",
+                "from_root": "downloads",
+                "to_subdir": "Test Artist",
+            },
+        )
+        assert r.status_code == 400, r.json()
+
     def test_moves_file_to_library_subfolder(self, client):
         c, download, library = client
         _stage(download, library)
@@ -445,6 +469,37 @@ class TestDelete:
         )
         assert r.status_code == 403
 
+    def test_refuses_root_reached_by_traversal(self, client):
+        # `sub/..` resolves back to the root but reads as an ordinary
+        # relative path, so the old raw-string guard let it through and
+        # rmtree'd the whole library.
+        c, _, library = client
+        (library / "sub").mkdir()
+        r = c.post(
+            "/api/delete",
+            json={"path": "sub/..", "root": "library", "recursive": True},
+        )
+        assert r.status_code == 400, r.json()
+
+    def test_library_survives_root_traversal_delete(self, client):
+        c, _, library = client
+        (library / "sub").mkdir()
+        (library / "sub" / "keep.mp3").write_bytes(b"audio")
+        c.post(
+            "/api/delete",
+            json={"path": "sub/..", "root": "library", "recursive": True},
+        )
+        assert (library / "sub" / "keep.mp3").exists()
+
+    def test_refuses_downloads_root_reached_by_traversal(self, client):
+        c, download, _ = client
+        (download / "post1").mkdir()
+        r = c.post(
+            "/api/delete",
+            json={"path": "post1/..", "root": "downloads", "recursive": True},
+        )
+        assert r.status_code == 400, r.json()
+
     def test_404_on_missing_path(self, client):
         c, _, _ = client
         r = c.post(
@@ -464,10 +519,113 @@ class TestDelete:
         assert not (download / "post999").exists()
 
 
+# ── /api/files/debug ───────────────────────────────────────────────────────
+
+
+class TestDebugFiles:
+    def test_reports_top_level_entries(self, client):
+        c, _, library = client
+        (library / "Test Artist").mkdir()
+        r = c.get("/api/files/debug?root=library")
+        assert r.json()["top_level_count"] == 1
+
+    def test_missing_root_is_404_not_200(self, client, monkeypatch):
+        # Used to answer 200 with an {"error": ...} body, so a client
+        # couldn't tell a broken mount from an empty one.
+        import backend.main as _main
+
+        monkeypatch.setattr(_main, "LIBRARY_PATH", Path("/nonexistent-root-xyz"))
+        c, _, _ = client
+        r = c.get("/api/files/debug?root=library")
+        assert r.status_code == 404, r.json()
+
+
+# ── /api/rename (metadata / filename independence) ─────────────────────────
+
+
+class TestRenameMetadataOnly:
+    def test_same_name_reports_no_rename(self, client):
+        c, _, library = client
+        (library / "song.mp3").write_bytes(b"")
+        r = c.post(
+            "/api/rename",
+            json={
+                "path": "song.mp3",
+                "new_name": "song.mp3",
+                "metadata": {"title": "Kept title"},
+            },
+        )
+        assert r.json()["renamed"] is False, r.json()
+
+    def test_same_name_writes_the_title(self, client):
+        c, _, library = client
+        (library / "song.mp3").write_bytes(b"")
+        c.post(
+            "/api/rename",
+            json={
+                "path": "song.mp3",
+                "new_name": "song.mp3",
+                "metadata": {"title": "Kept title"},
+            },
+        )
+        assert _read_title(library / "song.mp3") == "Kept title"
+
+    def test_same_name_leaves_the_file_in_place(self, client):
+        # Used to 409 against the file itself via reject_if_exists.
+        c, _, library = client
+        (library / "song.mp3").write_bytes(b"")
+        c.post(
+            "/api/rename",
+            json={"path": "song.mp3", "new_name": "song.mp3", "metadata": {"title": "T"}},
+        )
+        assert (library / "song.mp3").exists()
+
+    def test_title_can_differ_from_the_filename(self, client):
+        # The point of the split: a filename trimmed to fit the byte cap
+        # must not drag the embedded title down with it.
+        c, _, library = client
+        (library / "old.mp3").write_bytes(b"")
+        c.post(
+            "/api/rename",
+            json={
+                "path": "old.mp3",
+                "new_name": "short.mp3",
+                "metadata": {"title": "A much longer title | with | every | tag | kept"},
+            },
+        )
+        assert (
+            _read_title(library / "short.mp3") == "A much longer title | with | every | tag | kept"
+        )
+
+    def test_different_name_still_renames(self, client):
+        c, _, library = client
+        (library / "old.mp3").write_bytes(b"")
+        r = c.post("/api/rename", json={"path": "old.mp3", "new_name": "new.mp3"})
+        assert r.json()["renamed"] is True, r.json()
+
+    def test_collision_with_another_file_still_409s(self, client):
+        c, _, library = client
+        (library / "a.mp3").write_bytes(b"")
+        (library / "b.mp3").write_bytes(b"")
+        r = c.post("/api/rename", json={"path": "a.mp3", "new_name": "b.mp3"})
+        assert r.status_code == 409, r.json()
+
+
 # ── /api/rename-path ───────────────────────────────────────────────────────
 
 
 class TestRenamePath:
+    def test_refuses_root_reached_by_traversal(self, client):
+        # Used to reach `src.parent.relative_to(root)` with src == root and
+        # blow up as an unhandled ValueError → 500.
+        c, _, library = client
+        (library / "sub").mkdir()
+        r = c.post(
+            "/api/rename-path",
+            json={"path": "sub/..", "new_name": "pwned", "root": "library"},
+        )
+        assert r.status_code == 400, r.json()
+
     def test_renames_a_folder(self, client):
         c, _, library = client
         (library / "Test Artist").mkdir()

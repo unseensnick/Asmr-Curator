@@ -47,6 +47,8 @@ Topic-scoped detail lives in `.claude/rules/`. Read the matching file before tou
 | Testing (real implementations, one-assertion, no flake retries) | [testing.md](.claude/rules/testing.md) |
 | Commits / CHANGELOG / docs / dep audits | [project-workflow.md](.claude/rules/project-workflow.md) |
 | Release prep (the atomic PR-prep commit) | [release-prep.md](.claude/rules/release-prep.md) |
+| Prose style (sentence-level register for every output) | [prose-style.md](.claude/rules/prose-style.md) |
+| Plan / findings report structure | [plan-output.md](.claude/rules/plan-output.md) |
 
 ## Agents and skills
 
@@ -58,9 +60,16 @@ Specialised reviewers in [`.claude/agents/`](.claude/agents/) — invoke when th
 - `doc-reviewer` — README / CHANGELOG / docstring edits; cross-references docs against actual source.
 - `performance-reviewer` — hot paths, data processing, API endpoints.
 
-Workflow skills in [`.claude/skills/`](.claude/skills/) (`context-budget`, `debug-fix`, `explain`, `impeccable`, `pr-review`, `refactor`, `setupdotclaude`, `ship`, `tdd`, `test-writer`) — invoke by name when the task matches.
+Workflow skills in [`.claude/skills/`](.claude/skills/) — invoke by name when the task matches:
+
+- Investigate before acting: `scout` (plan one non-trivial task from evidence), `code-research` (fan-out research across many files), `explain` (one already-located thing).
+- Build and verify: `tdd`, `test-writer` (automated tests), `test-steps` (a manual script the user runs in the app), `debug-fix`, `refactor`.
+- Review and ship: `pr-review`, `ship`, `tighten` (trim docs and comments that have accumulated cruft).
+- Other: `context-budget`, `impeccable` (frontend design work), `setupdotclaude`.
 
 ## Hooks active in this repo
+
+### Claude Code hooks
 
 Configured in [`.claude/settings.json`](.claude/settings.json):
 
@@ -70,3 +79,13 @@ Configured in [`.claude/settings.json`](.claude/settings.json):
 - **PostToolUse:** `format-on-save.sh` — auto-formats edited files via Prettier / Ruff.
 
 If a hook blocks an action, fix the underlying issue rather than bypassing it. `--no-verify` and `-c commit.gpgsign=false` are off-limits without explicit user approval.
+
+### Git hooks
+
+Tracked in [`.githooks/`](.githooks/), not active until installed. `commit-msg` rejects a message that breaks the commit standard (non-conventional subject, over 72 chars, trailing period, em dash, AI watermark). `pre-commit` lints the staged `CHANGELOG.md` `[Unreleased]` section and checks that `frontend/package.json` and `backend/pyproject.toml` versions match. Install on a fresh clone:
+
+```bash
+cp .githooks/commit-msg .githooks/pre-commit .git/hooks/ && chmod +x .git/hooks/commit-msg .git/hooks/pre-commit
+```
+
+[`.github/workflows/docs-lint.yml`](.github/workflows/docs-lint.yml) runs the same CHANGELOG and lockstep checks in CI.

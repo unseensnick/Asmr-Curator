@@ -26,8 +26,18 @@ with _FORMATS_CONFIG_PATH.open() as _f:
 #   ump    — chunked-streaming opt-in.
 #   srfvp  — "single request first valid position"; left in, the CDN caps
 #            the response to a tiny initial range and returns a stub.
-# Applied both client-side (extension) and server-side as defence in depth.
-STRIP_QUERY_PARAMS = ("ump", "range", "srfvp")
+#   alr    — "allow redirect". With it the CDN may answer a `text/plain`
+#            body ~1.1 KB long whose content is a *different* videoplayback
+#            URL to follow, instead of streaming the audio. The downloader
+#            wrote that pointer to disk and reported it as a truncated
+#            download ("init segment"), so a Drive link failed all its
+#            retries even though the file was fine. Whether the CDN
+#            redirects is its own decision, which is why the same code
+#            worked on one link and failed on the next.
+# None of these appear in the URL's `sparams` / `lsparams` lists, so removing
+# them doesn't invalidate `sig` / `lsig`. (`gir` looks like a candidate — it
+# requests an init segment — but it IS signed, and stripping it yields 403.)
+STRIP_QUERY_PARAMS = ("ump", "range", "srfvp", "alr")
 
 # MIME → extension lookup for filename fallback when Content-Disposition is
 # absent. Conservative — only audio types we expect to see from Drive's CDN.

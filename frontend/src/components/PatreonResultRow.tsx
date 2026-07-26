@@ -12,6 +12,9 @@ interface PatreonResultRowProps {
      * duplicate it per row.
      */
     onApply: (post: PatreonPost) => void;
+    /** Passed through to the external-links convert controls so the bitrate
+     *  override appears there under the same gate as everywhere else. */
+    powerMode?: boolean;
 }
 
 /**
@@ -20,7 +23,11 @@ interface PatreonResultRowProps {
  * as a sibling so its anchor tags stay reachable to keyboards and screen
  * readers without nesting interactive elements inside a button.
  */
-export default function PatreonResultRow({ post, onApply }: PatreonResultRowProps) {
+export default function PatreonResultRow({
+    post,
+    onApply,
+    powerMode = false,
+}: PatreonResultRowProps) {
     const hasExternal = (post.external_links?.length ?? 0) > 0;
 
     return (
@@ -90,6 +97,7 @@ export default function PatreonResultRow({ post, onApply }: PatreonResultRowProp
                         artist={post.artist}
                         title={post.title}
                         links={post.external_links ?? []}
+                        powerMode={powerMode}
                     />
                 </div>
             )}

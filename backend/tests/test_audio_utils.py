@@ -37,6 +37,19 @@ class TestStripQueryParams:
         assert "range=" not in result
         assert "sig=abc" in result  # untouched param survives
 
+    def test_strips_alr(self):
+        # With alr=yes the CDN may return a ~1.1 KB text/plain body holding a
+        # replacement URL instead of the audio, which the downloader recorded
+        # as a truncated file.
+        url = "https://rr.c.drive.google.com/videoplayback?itag=140&alr=yes&sig=abc"
+        assert "alr=" not in strip_query_params(url)
+
+    def test_keeps_gir(self):
+        # gir is listed in the URL's `sparams`, so stripping it invalidates
+        # the signature and Drive answers 403.
+        url = "https://rr.c.drive.google.com/videoplayback?gir=yes&clen=123&sig=abc"
+        assert "gir=yes" in strip_query_params(url)
+
     def test_preserves_byte_identical_values_with_slashes(self):
         # Drive's signed URLs contain `mime=audio/mp4` — a `/` in the value
         # would be percent-encoded by parse_qsl+urlencode, invalidating the

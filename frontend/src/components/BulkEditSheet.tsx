@@ -29,6 +29,7 @@ import {
     stripOuterBrackets,
 } from "@/lib/utils";
 
+import { ResetLink } from "./selectedFile/helpers";
 import { byteLength, MAX_BYTES } from "./selectedFile/utils";
 
 export type BulkEditRoot = "library" | "downloads";
@@ -39,9 +40,14 @@ export type BulkEditRoot = "library" | "downloads";
 interface PerFileEdit {
     title: string;
     tags: string[];
+    /** Hand-edited filename, extension included. `null` means "follow the
+     *  name composed from title + tags". Kept separate from `title` so a
+     *  filename can be shortened to fit the 255-byte limit without
+     *  dropping tags from the embedded title. */
+    nameOverride: string | null;
 }
 
-const EMPTY_EDIT: PerFileEdit = { title: "", tags: [] };
+const EMPTY_EDIT: PerFileEdit = { title: "", tags: [], nameOverride: null };
 
 /** Shared metadata fields applied to every selected file. Suffix is
  *  filename-composition only — it doesn't write to ID3, only joins the
@@ -281,6 +287,7 @@ export default function BulkEditSheet({
                 nextEdits[item.path] = {
                     title: cleanTitle || item.title || "",
                     tags: normalised,
+                    nameOverride: null,
                 };
                 if (item.artist) artistsSeen.add(item.artist);
             }
@@ -355,7 +362,7 @@ export default function BulkEditSheet({
                 if (!hasData) continue;
                 loaded += 1;
                 const { title, tags } = splitPipeTitle(item.title);
-                nextEdits[item.path] = { title, tags };
+                nextEdits[item.path] = { title, tags, nameOverride: null };
                 if (item.artist) artistsSeen.add(item.artist);
                 if (item.album) albumsSeen.add(item.album);
                 if (item.album_artist) albumArtistsSeen.add(item.album_artist);
@@ -504,6 +511,10 @@ export default function BulkEditSheet({
      *  title entered). Returns `""` only if every part sanitized away to
      *  nothing; the preview renders that as a row-level error. */
     function composeProposedName(edit: PerFileEdit, ext: string): string | null {
+        // A hand-edited name wins outright — that's the whole point of the
+        // override, and it stays valid even with no per-file title set
+        // (rename without touching tags).
+        if (edit.nameOverride !== null) return edit.nameOverride;
         if (!edit.title.trim()) return null;
         const sfx = shared.suffix.trim() || "F4A";
         const parts = [edit.title, ...edit.tags, sfx].map(sanitizeFilename).filter(Boolean);
@@ -559,7 +570,9 @@ export default function BulkEditSheet({
     // Mirrors the backend's no-op detection so we don't fire a request
     // that would be a 200 with all `unchanged` rows.
 
-    const hasPerFileEdit = Object.values(edits).some((e) => e.title || e.tags.length > 0);
+    const hasPerFileEdit = Object.values(edits).some(
+        (e) => e.title || e.tags.length > 0 || e.nameOverride !== null,
+    );
     // When linkArtists is on, the album_artist contribution to the commit
     // is `shared.artist`, not the (potentially stale) `shared.album_artist`
     // sitting in state from before the link was toggled. Match the
@@ -1018,26 +1031,64 @@ export default function BulkEditSheet({
                                                             placeholder="Add a tag"
                                                             ariaLabel={`Add a tag for ${file.name}`}
                                                         />
-                                                        {proposed && (
-                                                            <p
-                                                                className={
-                                                                    bytesOver
-                                                                        ? "text-xs text-destructive"
+                                                        {proposed !== null && (
+                                                            <div className="flex flex-col gap-1.5">
+                                                                <div className="flex items-baseline justify-between gap-2">
+                                                                    <label
+                                                                        htmlFor={`bulk-name-${file.path}`}
+                                                                        className="text-xs font-medium text-muted-foreground"
+                                                                    >
+                                                                        Filename
+                                                                    </label>
+                                                                    {edit.nameOverride !== null && (
+                                                                        <ResetLink
+                                                                            onClick={() =>
+                                                                                patchEdit(
+                                                                                    file.path,
+                                                                                    {
+                                                                                        nameOverride:
+                                                                                            null,
+                                                                                    },
+                                                                                )
+                                                                            }
+                                                                            label={`Reset filename for ${file.name}`}
+                                                                        />
+                                                                    )}
+                                                                </div>
+                                                                <Input
+                                                                    id={`bulk-name-${file.path}`}
+                                                                    value={proposed}
+                                                                    onChange={(e) =>
+                                                                        patchEdit(file.path, {
+                                                                            nameOverride:
+                                                                                e.target.value,
+                                                                        })
+                                                                    }
+                                                                    aria-invalid={bytesOver}
+                                                                    aria-describedby={`bulk-name-bytes-${file.path}`}
+                                                                    className="font-mono text-xs h-9 aria-invalid:border-destructive"
+                                                                />
+                                                                <p
+                                                                    id={`bulk-name-bytes-${file.path}`}
+                                                                    className={
+                                                                        bytesOver
+                                                                            ? "text-xs text-destructive"
+                                                                            : bytesWarn
+                                                                              ? "text-xs text-warning"
+                                                                              : "text-xs text-muted-foreground"
+                                                                    }
+                                                                >
+                                                                    <span className="font-mono tabular-nums">
+                                                                        {bytes} / {MAX_BYTES}
+                                                                    </span>{" "}
+                                                                    bytes
+                                                                    {bytesOver
+                                                                        ? ", too long — shorten it here, the title keeps its tags."
                                                                         : bytesWarn
-                                                                          ? "text-xs text-warning"
-                                                                          : "text-xs text-muted-foreground"
-                                                                }
-                                                            >
-                                                                <span className="font-mono tabular-nums">
-                                                                    {bytes} / {MAX_BYTES}
-                                                                </span>{" "}
-                                                                bytes
-                                                                {bytesOver
-                                                                    ? ", too long, remove some tags."
-                                                                    : bytesWarn
-                                                                      ? ", approaching limit."
-                                                                      : "."}
-                                                            </p>
+                                                                          ? ", approaching limit."
+                                                                          : "."}
+                                                                </p>
+                                                            </div>
                                                         )}
                                                     </div>
                                                 </div>

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ASMR Curator Companion",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Syncs your Patreon and Google session cookies to the local ASMR Curator backend so patreon-dl and the Drive scrape can authenticate.",
   "permissions": [
     "cookies",
@@ -31,8 +31,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://*.patreon.com/*"],
-      "js": ["content_script.js"],
+      "matches": [
+        "https://*.patreon.com/*"
+      ],
+      "js": [
+        "content_script.js"
+      ],
       "run_at": "document_idle"
     }
   ],

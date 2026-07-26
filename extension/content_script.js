@@ -5,7 +5,16 @@
  */
 (function () {
   if (window.top !== window.self) return; // only in the top frame
-  const browserApi = window.browser || window.chrome;
+  // Bare globals, not `window.*`: in Firefox a content script's `window` is
+  // the Xray-wrapped PAGE window, which carries no extension APIs, so
+  // `window.browser` is undefined and the pill fails with "browserApi is
+  // undefined". The sandbox global does have them. Chrome is fine either way.
+  const browserApi =
+    typeof browser !== "undefined"
+      ? browser
+      : typeof chrome !== "undefined"
+        ? chrome
+        : undefined;
 
   const STYLE = `
     .asmr-ext-pill {
@@ -68,6 +77,13 @@
     }
     if (!response) {
       setLabel("Failed: no response", "err");
+      return;
+    }
+    // A content script can't call permissions.request() — only an extension
+    // page can, and only from a user gesture. Send the user to the popup
+    // rather than repeating an error they have no way to act on here.
+    if (response.needsPermission) {
+      setLabel("Open the extension popup to grant site access", "err");
       return;
     }
     // Mixed outcome possible — e.g. Patreon ok, Google not logged in. Surface

@@ -11,6 +11,41 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
+## [2.2.0]
+
+### Additions
+
+- **A Google Drive tab, alongside Patreon URL.** Paste a Drive link and download it straight away, with no Patreon fetch first. Use it when you already have the link, when the post isn't fetchable, or when the audio isn't attached to a post at all. Creator and title are optional and only decide which folder it lands in. Drive links on a fetched Patreon post still download from the post card as before.
+- **Downloads can convert as they land, on every path.** The Google Drive tab and the Download buttons under a Patreon post both gained a **Convert after downloading** option, with the same controls the Convert panel uses: output format, quality preset, and a bitrate override under power mode. Off by default, remembered between sessions, shared by both.
+- **"Use for filename" in the Google Drive tab.** Fill in Creator and Title and hand them to the tag editor, exactly as applying a fetched Patreon post does. Tags in the title split into chips and match against your dictionary, ready for Generate filename and the rename form.
+- **The filename and the embedded title are now edited independently.** The "Will become" filename is an editable field, so a name past the 255-byte limit can be shortened in place without deleting tags, and the title written into the file keeps every one. A hand-edited title also stops being overwritten the next time you press Generate, and a Reset control puts either back.
+- **Tags can be written without renaming anything.** When the filename already matches, the action becomes "Save metadata" and only the tags are written. Moving a file to the library now offers rename and tag-write as separate checkboxes, so either can happen without the other.
+- **Help covers the new tab, and the parts that had drifted.** The Google Drive tab has its own section, and the file-library and bulk-edit pages now describe the editable filename, the title that stays put once you edit it, and the separate rename / write-tags checkboxes on Move to library.
+
+### Changes
+
+- **Patreon fetches no longer slow down as your library grows.** Finishing a fetch used to re-scan every post ever downloaded to work out what the run produced, so each new creator made every future fetch a little slower. It now looks up only the posts from the current run. Re-fetching a single post in *Metadata only* mode got the same treatment.
+- **The end of a Patreon fetch narrates itself.** The stretch after the downloads finish (reading results, tidying, filing into your downloads folder) used to sit silently on "Wrapping up", which is where a long fetch felt stalled. Each step now reports what it's doing.
+- **The Compose files pin a public DNS resolver.** Docker's embedded resolver hands lookups to the host, which can stall on Docker Desktop / WSL2 and surface mid-download as "No address associated with hostname". Change or drop the `dns:` lines in `docker-compose.yml` if you run an internal or LAN-only resolver.
+
+### Fixes
+
+- **Renaming two files to each other's names works.** Swapping names across a Bulk edit selection was rejected as "Target name already exists", even though the file holding that name was being renamed away in the same batch.
+- **A hand-edited title survives the rename that follows it.** After renaming, touching a tag reset the title back to the generated one, undoing the edit you just made. Renaming no longer counts as switching to a different file, and the filename field now shows the name actually on disk.
+- **Deleting, renaming, or moving can no longer act on a root folder by accident.** A path that stepped back up to the Library or Downloads root (`sub/..`) slipped past the guard meant to stop it. On a recursive delete, that meant the whole library. All three operations now refuse the root itself.
+- **Drive downloads that failed with "Drive served the init segment" now work.** Two causes: the playback URL can carry an "allow redirect" flag that makes the CDN answer with a text pointer instead of the audio, and downloading from the player's own tab made Google reply in a streaming format the downloader couldn't read. Downloads now run in their own tab, with that flag stripped.
+- **Drive downloads transfer in fewer, larger pieces.** The audio moved from the browser to the app in 64 KB pieces, each waiting on its own round trip; it now moves in 512 KB batches, an eighth of the round trips. Speed is still mostly Google's call, so this removes the app's own overhead rather than making every download faster.
+- **Drive-scrape diagnostics stay inside the downloads folder.** A malformed Drive link could steer the debug dump written on a scrape timeout to a folder outside Downloads.
+- **The file list can't show the wrong folder's contents.** Switching between Library and Downloads while a search was still loading could let the older response arrive last and paint the previous folder's files, with the selection and bulk actions then aimed at them.
+- **Extraction no longer comes back blank when the model's preamble contains a stray `}`.** The title and tags silently parsed as empty.
+- **Error messages no longer show raw JSON.** Failures surfaced as `{"detail":"A file with that name already exists."}`; they now read as the sentence alone.
+- **A failed delete says why.** It reported only how many files failed; the reason (folder not empty, permission denied) was collected and discarded.
+- **The in-page "Sync cookies" pill works again in Firefox.** Clicking it on a Patreon page failed with `browserApi is undefined`, so syncing from the extension popup was the only way through.
+
+### Other
+
+- **Dependencies updated.** Backend: FastAPI 0.136.1 → 0.140.0, Uvicorn 0.47.0 → 0.51.0, mutagen 1.47.0 → 1.48.1, Playwright 1.60.0 → 1.61.0. Frontend: React 19.2.8, Vite 8.1.5, Radix 1.6.7, Tailwind 4.3.3, Vitest 4.1.10, `@types/node` 26, `eslint-plugin-simple-import-sort` 14, plus the rest of the toolchain. No behaviour change. ESLint 10 and TypeScript 7 are held back, both blocked upstream.
+
 ## [2.1.1]
 
 ### Fixes

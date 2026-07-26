@@ -25,8 +25,10 @@ export default defineConfig({
             // The browser extension lives outside frontend/src/ but is
             // tested by the same vitest because both are JS — keeps a
             // single test runner instead of bolting a separate one for
-            // a handful of pure-helper specs in extension/lib/.
-            "../extension/**/__tests__/**/*.{test,spec}.{ts,js}",
+            // a handful of pure-helper specs in extension/lib/. Its specs
+            // live in extension/tests/ (not `__tests__` — Chromium refuses
+            // to load an unpacked extension containing a `_`-prefixed name).
+            "../extension/**/tests/**/*.{test,spec}.{ts,js}",
         ],
         coverage: {
             // v8 (built-in to Node) over istanbul — faster, no Babel pass.

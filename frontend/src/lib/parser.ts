@@ -48,6 +48,12 @@ function findFirstJsonObject(text: string): string | null {
             if (depth === 0) start = i;
             depth++;
         } else if (c === "}") {
+            // A `}` while no object is open is prose, not a close. Counting
+            // it drove depth negative, which stopped the *next* `{` from
+            // registering as a start — so a stray brace anywhere ahead of
+            // the real block (LLMs love "output like {...}" preambles) made
+            // extraction return null and silently blank the title and tags.
+            if (depth === 0) continue;
             depth--;
             if (depth === 0 && start !== -1) {
                 return text.slice(start, i + 1);

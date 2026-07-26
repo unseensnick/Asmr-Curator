@@ -11,22 +11,26 @@ needed by the backend:
   viewer pages and intercepts the audio playback URL. Without it,
   view-only files behind a Drive share return a login page.
 
-Scope: cookies only. Drive downloads themselves are triggered by the
-**Download** button on each post's External Links collapsible inside the
-app — the backend does the scraping server-side using the cookies the
-extension synced. The extension does not watch network traffic, does
-not auto-capture URLs, and does not need `webRequest`.
+Drive downloads themselves are triggered by the **Download** button on each
+post's External Links collapsible inside the app — the backend does the
+scraping server-side using the cookies the extension synced.
 
 > **Versioned independently from the app.** The extension's `manifest.json`
-> version (currently `1.0.0`) is decoupled from the FastAPI app's version
-> (`2.0.4`). The extension ships its own [`CHANGELOG.md`](CHANGELOG.md)
-> and its own GitHub release asset (`asmr-curator-companion-vX.Y.Z.zip`).
-> The cookie-sync API contract is the boundary; both sides bump only when
-> their own behaviour changes.
+> version is decoupled from the FastAPI app's version. The extension ships its
+> own [`CHANGELOG.md`](CHANGELOG.md) and its own GitHub release asset
+> (`asmr-curator-companion-vX.Y.Z.zip`). The cookie-sync API contract is the
+> boundary; both sides bump only when their own behaviour changes.
 
 ## Install
 
 The extension is unpacked-load only (not on the Chrome Web Store / AMO).
+
+`manifest.json` is generated rather than committed, so build it once from the
+repo root after cloning, and again whenever `manifest.base.json` changes:
+
+```bash
+node scripts/build-manifest.mjs
+```
 
 ### Chromium (Chrome, Edge, Brave)
 
@@ -44,6 +48,23 @@ The extension is unpacked-load only (not on the Chrome Web Store / AMO).
    > Note: Firefox unloads temporary add-ons when the browser restarts.
    > For persistent installs, sign and self-distribute the XPI via
    > Mozilla's add-on developer hub.
+
+3. **Grant site access.** Firefox treats a manifest's `host_permissions`
+   as opt-in for MV3 — nothing is granted at install. Until you approve
+   it, `cookies.getAll()` returns nothing and requests to the backend
+   fail, so a sync reports "No Patreon cookies found" even while you're
+   logged in, and Test connection reports a NetworkError even while the
+   backend is up.
+
+   Click **Sync Patreon + Google cookies** in the popup: it detects the
+   missing access, relabels itself **Grant site access, then sync**, and
+   the next click raises Firefox's approval prompt. To do it by hand
+   instead, go to `about:addons` → **Extensions** → *ASMR Curator
+   Companion* → **Permissions** → enable **Access your data for all
+   websites**.
+
+   Re-granting is needed after each temporary-add-on reload, because
+   that counts as a fresh install.
 
 ## First-time setup
 
@@ -86,7 +107,7 @@ your own backend.
 
 ```
 extension/
-├── manifest.json
+├── manifest.base.json     ← manifest source; build-manifest.mjs writes manifest.json
 ├── background.js          ← service worker: cookie sync + daily update check
 ├── content_script.js      ← Sync-cookies pill injected on patreon.com
 ├── popup.html / popup.js  ← toolbar popup UI (single Sync button)
