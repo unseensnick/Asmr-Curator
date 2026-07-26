@@ -20,10 +20,10 @@ jobs:
 
     steps:
       - name: Clone repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "25"
           cache: npm
@@ -35,10 +35,21 @@ jobs:
 
       - name: Audit npm deps for known CVEs
         working-directory: frontend
-        # --audit-level=high filters out low/moderate noise that's common
-        # in transient dev deps. CVEs at high/critical are actionable
-        # signal; tune by overriding the level here when an upstream
-        # advisory needs a temporary hold.
+        # --omit=dev scopes this to what actually reaches a user. The
+        # frontend ships as static assets built into the image, so nothing
+        # in node_modules is served at runtime and a dev-tool advisory
+        # cannot be exploited against a deployment. Auditing dev deps here
+        # only produced permanent red: the ESLint toolchain pulls a
+        # vulnerable brace-expansion through minimatch, and the fix is
+        # gated on eslint-plugin-jsx-a11y supporting ESLint 10. Pinning an
+        # override was tried and breaks ESLint at runtime.
+        #
+        # Dev advisories are still visible: GitHub's Dependabot alerts
+        # report them, and `npm audit` without the flag shows them locally.
+        #
+        # --audit-level=high filters out low/moderate noise. CVEs at
+        # high/critical are actionable signal; tune by overriding the level
+        # here when an upstream advisory needs a temporary hold.
         #
         # Retry loop: the npm registry occasionally returns 503 Service
         # Unavailable on the audit endpoint and the job fails through no
@@ -47,7 +58,7 @@ jobs:
         # returns deterministically).
         run: |
           for attempt in 1 2 3; do
-            if npm audit --audit-level=high; then
+            if npm audit --omit=dev --audit-level=high; then
               exit 0
             fi
             if [ $attempt -lt 3 ]; then
@@ -79,7 +90,7 @@ jobs:
         run: npm test -- --reporter=default --reporter=junit --outputFile.junit=test-results.xml --coverage
 
       - name: Upload frontend test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: success() || failure()
         with:
           name: frontend-test-results
@@ -87,7 +98,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload frontend coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: success() || failure()
         with:
           name: frontend-coverage
@@ -120,10 +131,10 @@ jobs:
 
     steps:
       - name: Clone repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.14"
           cache: "pip"
@@ -137,6 +148,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
+          # Deps for the optional private domain, installed only when it is
+          # checked out. main.py fails loudly when that domain is present but a
+          # dependency is not, which is deliberate: the alternative silently
+          # 404s every route it owns. With no such file this step is a no-op.
+          if [ -f backend/private/requirements.txt ]; then
+            pip install -r backend/private/requirements.txt
+          fi
 
       - name: Install test + lint dependencies
         # Mirrors backend/pyproject.toml's [dependency-groups].dev — the
@@ -189,7 +207,7 @@ jobs:
         run: python scripts/check_api_docs.py
 
       - name: Upload backend test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: success() || failure()
         with:
           name: backend-test-results
@@ -197,7 +215,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload backend coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: success() || failure()
         with:
           name: backend-coverage
@@ -210,7 +228,7 @@ jobs:
 
     steps:
       - name: Clone repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # Full history so gitleaks diffs against the merge base on
           # PRs and the previous SHA on direct pushes. Default
@@ -219,7 +237,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -231,7 +249,7 @@ jobs:
 
     steps:
       - name: Download frontend test results
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         if: success() || failure()
         with:
           name: frontend-test-results
@@ -239,7 +257,7 @@ jobs:
         continue-on-error: true
 
       - name: Download backend test results
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         if: success() || failure()
         with:
           name: backend-test-results
@@ -247,11 +265,19 @@ jobs:
         continue-on-error: true
 
       - name: Publish JUnit summary
-        uses: mikepenz/action-junit-report@v5
+        uses: mikepenz/action-junit-report@v6
         if: success() || failure()
         with:
           include_passed: true
           detailed_summary: true
+          # One check_name per report_path. The action pairs the two lists by
+          # index and warns when the counts differ, which is what the default
+          # single name against two reports was doing. Naming them separately
+          # also splits the summary into a frontend and a backend check
+          # instead of merging both suites under one heading.
+          check_name: |
+            Frontend test report
+            Backend test report
           report_paths: |
             frontend-test-results/test-results.xml
             backend-test-results/backend-test-results.xml

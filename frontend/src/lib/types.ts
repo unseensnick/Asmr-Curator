@@ -165,6 +165,11 @@ export type PatreonFetchEvent =
     | { state: "wrote_file"; path: string }
     | { state: "skipped"; post_id: string; reason: string }
     | { state: "phase_done" }
+    // Post-download tail. Previously ran silently; on a large library it's
+    // the longest stretch with nothing on screen.
+    | { state: "collecting" }
+    | { state: "tidying"; count: number }
+    | { state: "filing"; count: number }
     | ({ state: "done" } & PatreonFetchResponse)
     | { state: "error"; message: string };
 
@@ -233,6 +238,9 @@ export type IngestDriveLinkEvent =
           retry_attempt?: number;
           max_attempts?: number;
       }
+    /** Post-download transcode. Only emitted when a format other than
+     *  "best" was requested. */
+    | { state: "extracting"; audio_format: string }
     | ({ state: "done" } & IngestDriveLinkResponse)
     | {
           state: "error";

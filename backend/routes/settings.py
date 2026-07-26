@@ -10,7 +10,10 @@ import json
 from fastapi import APIRouter, HTTPException, Request
 
 from backend import database, drive_fetch
-from backend.main import GOOGLE_COOKIE_KEY, PATREON_COOKIE_KEY
+from backend.main import (
+    GOOGLE_COOKIE_KEY,
+    PATREON_COOKIE_KEY,
+)
 
 router = APIRouter()
 
@@ -22,6 +25,12 @@ _MAX_COOKIE_BODY_BYTES = 256 * 1024
 
 
 def _reject_oversized_body(request: Request) -> None:
+    """Fast rejection when the client declares an oversized body.
+
+    Only a pre-check — a client that lies, or uses chunked transfer encoding
+    (no Content-Length at all), walks straight past it. `_read_capped_body`
+    is what actually enforces the limit.
+    """
     cl = request.headers.get("content-length")
     if cl is None:
         return
@@ -30,6 +39,25 @@ def _reject_oversized_body(request: Request) -> None:
             raise HTTPException(413, "Cookie body too large")
     except ValueError:
         raise HTTPException(400, "Malformed Content-Length header")
+
+
+async def _read_capped_body(request: Request) -> bytes:
+    """Read the body, aborting as soon as it exceeds the cap.
+
+    The header check above returned early for chunked requests, and the
+    handler then called `request.json()` / `request.body()`, which buffers
+    the entire stream — the OOM the cap was written to prevent. Counting as
+    we stream stops it at 256 KiB no matter what the client declared.
+    """
+    _reject_oversized_body(request)
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > _MAX_COOKIE_BODY_BYTES:
+            raise HTTPException(413, "Cookie body too large")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 # Playwright accepts only these three sameSite values. Browser cookie APIs use
@@ -85,19 +113,19 @@ async def set_patreon_cookie(request: Request):
     """Accepts the cookie as either `application/json {"cookie": "..."}` or as
     a raw text/plain body. The text/plain path lets `curl --data-binary @cookie.txt`
     work without JSON-escaping embedded quotes in `g_state={...}` etc."""
-    _reject_oversized_body(request)
+    raw = await _read_capped_body(request)
     content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
 
     if content_type == "application/json":
         try:
-            data = await request.json()
+            data = json.loads(raw)
         except ValueError:
             raise HTTPException(400, "Invalid JSON body")
         if not isinstance(data, dict):
             raise HTTPException(400, "JSON body must be an object")
         cookie = str(data.get("cookie") or "").strip()
     else:
-        cookie = (await request.body()).decode("utf-8", errors="replace").strip()
+        cookie = raw.decode("utf-8", errors="replace").strip()
 
     if not cookie:
         database.delete_setting(PATREON_COOKIE_KEY)
@@ -126,9 +154,8 @@ async def set_google_cookie(request: Request):
     missing required fields are silently dropped; an empty array clears the
     setting. Always invalidates the shared Playwright context so the next
     scrape picks up the freshly-synced (or cleared) cookies."""
-    _reject_oversized_body(request)
     try:
-        data = await request.json()
+        data = json.loads(await _read_capped_body(request))
     except ValueError:
         raise HTTPException(400, "Invalid JSON body")
     if not isinstance(data, dict):

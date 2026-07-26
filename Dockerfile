@@ -58,6 +58,14 @@ RUN uv pip install --python /opt/venv/bin/python --no-cache-dir -r backend/requi
  && playwright install --with-deps chromium
 
 COPY backend/ ./backend/
+
+# Deps for the optional private domain. The guard is the point: when that
+# directory is absent the build installs nothing extra and needs no edit here.
+RUN if [ -f backend/private/requirements.txt ]; then \
+      uv pip install --python /opt/venv/bin/python --no-cache-dir \
+        -r backend/private/requirements.txt; \
+    fi
+
 COPY --from=frontend-builder /build/frontend/dist ./frontend/dist
 COPY frontend/src/lib/audio-formats.json ./frontend/src/lib/audio-formats.json
 

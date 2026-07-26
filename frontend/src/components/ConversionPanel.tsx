@@ -26,11 +26,13 @@ interface ConversionPanelProps {
     formats: ConvertFormat[];
     format: ConvertFormat;
     quality: ConvertQuality;
-    deleteOriginal: boolean;
     onFormatChange: (f: ConvertFormat) => void;
     onQualityChange: (q: ConvertQuality) => void;
-    onDeleteChange: (v: boolean) => void;
-    checkboxId: string;
+    /** Delete-original checkbox. Omit both to hide it — the ingest paths
+     *  convert in place, so there's no separate original to keep. */
+    deleteOriginal?: boolean;
+    onDeleteChange?: (v: boolean) => void;
+    checkboxId?: string;
     /** When true, show an explicit kbps override input below the Quality
      *  picker. Overrides the preset's VBR target for the lossy codecs
      *  (MP3, OGG); the input is read-only-disabled for FLAC, which has
@@ -185,19 +187,21 @@ export default function ConversionPanel({
                 </div>
             )}
 
-            <label
-                htmlFor={checkboxId}
-                className="flex items-center gap-2 cursor-pointer select-none w-fit"
-            >
-                <Checkbox
-                    id={checkboxId}
-                    checked={deleteOriginal}
-                    onCheckedChange={(v) => onDeleteChange(v === true)}
-                />
-                <span className="text-sm text-muted-foreground">
-                    Delete original after converting
-                </span>
-            </label>
+            {onDeleteChange && (
+                <label
+                    htmlFor={checkboxId}
+                    className="flex items-center gap-2 cursor-pointer select-none w-fit"
+                >
+                    <Checkbox
+                        id={checkboxId}
+                        checked={deleteOriginal}
+                        onCheckedChange={(v) => onDeleteChange(v === true)}
+                    />
+                    <span className="text-sm text-muted-foreground">
+                        Delete original after converting
+                    </span>
+                </label>
+            )}
         </div>
     );
 }

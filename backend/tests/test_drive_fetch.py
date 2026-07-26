@@ -6,6 +6,7 @@ sensitive-param redaction, itag extraction) are pure and cover the bug
 surfaces that recent Drive-scrape iterations kept tripping on.
 """
 
+import asyncio
 import importlib
 
 import backend.drive_fetch as drive_fetch
@@ -16,6 +17,33 @@ from backend.drive_fetch import (
     _request_looks_like_audio,
     drive_id_from_url,
 )
+
+# ── _dump_diagnostics path safety ──────────────────────────────────────────
+
+
+class _StubPage:
+    """Stands in for a Playwright page. Every call raises — `_dump_diagnostics`
+    guards each interaction individually, so the dir is still created."""
+
+    url = "https://drive.google.com/"
+
+    async def screenshot(self, **kwargs):
+        raise RuntimeError("no browser in tests")
+
+    async def title(self):
+        raise RuntimeError("no browser in tests")
+
+
+class TestDumpDiagnosticsPath:
+    def test_traversal_file_id_stays_under_download_path(self, tmp_path, monkeypatch):
+        # `drive_id_from_url` returns the ?id= value byte-for-byte, so a
+        # crafted drive_url can carry `../..` into the debug dir name.
+        download = tmp_path / "downloads"
+        download.mkdir()
+        monkeypatch.setenv("DOWNLOAD_PATH", str(download))
+        out_dir = asyncio.run(drive_fetch._dump_diagnostics(_StubPage(), "../../../../evil", []))
+        assert out_dir.resolve().is_relative_to(download.resolve())
+
 
 # ── drive_id_from_url ──────────────────────────────────────────────────────
 

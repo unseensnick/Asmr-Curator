@@ -51,3 +51,13 @@ services:
         # this automatically but the line is harmless there.
         extra_hosts:
             - "host.docker.internal:host-gateway"
+        # Resolve through public DNS instead of Docker's embedded resolver
+        # (127.0.0.11 → host resolver). On Docker Desktop + WSL2 the host
+        # resolver stalls under high-fan-out lookups: a download that
+        # re-resolves its host once per chunk can sustain that stall, and it
+        # surfaces as "[Errno -5] No address associated with hostname. Giving
+        # up after N retries". Pinning a stable resolver sidesteps it. Change
+        # or drop these if you run an internal/LAN-only DNS.
+        dns:
+            - 1.1.1.1
+            - 8.8.8.8

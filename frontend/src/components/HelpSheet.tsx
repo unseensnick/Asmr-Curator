@@ -11,15 +11,21 @@ import {
     Layers,
     MousePointerClick,
     Network,
+    PenLine,
     Sparkles,
 } from "lucide-react";
 
+import { HelpCard, TopicHeader } from "@/components/HelpPrimitives";
 import SheetHeaderBar from "@/components/SheetHeaderBar";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import type { PrivateHelpTopic } from "@/lib/privateTab";
 
 interface HelpSheetProps {
     open: boolean;
     onClose: () => void;
+    /** Topics contributed by optional private-only tabs. Empty when none are
+     *  registered, and the rail simply has one fewer entry. */
+    extraTopics?: readonly PrivateHelpTopic[];
 }
 
 /**
@@ -35,18 +41,22 @@ interface HelpSheetProps {
  * sections they didn't care about to reach the one they did.
  *
  * Topics are intentionally a flat list, not a tree. A sub-menu would
- * be over-organisation for nine sections; the rail already fits.
+ * be over-organisation at this size; the rail already fits.
  */
-type TopicId =
+type BuiltInTopicId =
     | "overview"
     | "setup"
     | "patreon"
+    | "drive"
     | "screenshot"
     | "library"
     | "bulk"
     | "dictionary"
     | "shortcuts"
     | "selfhost";
+
+/** Built-in ids plus whatever a private tab registers. */
+type TopicId = BuiltInTopicId | (string & {});
 
 interface Topic {
     id: TopicId;
@@ -58,6 +68,7 @@ const TOPICS: readonly Topic[] = [
     { id: "overview", label: "Overview", icon: Sparkles },
     { id: "setup", label: "Getting started", icon: Cookie },
     { id: "patreon", label: "Patreon URL", icon: Globe },
+    { id: "drive", label: "Google Drive", icon: Cloud },
     { id: "screenshot", label: "Screenshot", icon: FileText },
     { id: "library", label: "File library", icon: FolderOpen },
     { id: "bulk", label: "Bulk edit", icon: Layers },
@@ -66,7 +77,7 @@ const TOPICS: readonly Topic[] = [
     { id: "selfhost", label: "Self-hosting", icon: Network },
 ];
 
-export default function HelpSheet({ open, onClose }: HelpSheetProps) {
+export default function HelpSheet({ open, onClose, extraTopics = [] }: HelpSheetProps) {
     // Topic resets to overview on every open. State doesn't survive
     // close + reopen because the sheet is unmounted while closed (and
     // the next visit usually wants the canonical entry point anyway).
@@ -105,7 +116,7 @@ export default function HelpSheet({ open, onClose }: HelpSheetProps) {
                         className="flex flex-col gap-1 w-52 shrink-0 px-3 py-3 border-r border-border bg-muted/15 overflow-y-auto"
                         aria-label="Help topics"
                     >
-                        {TOPICS.map((t) => (
+                        {[...TOPICS, ...extraTopics].map((t) => (
                             <TopicButton
                                 key={t.id}
                                 icon={t.icon}
@@ -121,7 +132,7 @@ export default function HelpSheet({ open, onClose }: HelpSheetProps) {
                         aria-live="polite"
                         aria-atomic="true"
                     >
-                        <TopicContent topic={topic} />
+                        <TopicContent topic={topic} extraTopics={extraTopics} />
                     </main>
                 </div>
             </SheetContent>
@@ -165,7 +176,17 @@ function TopicButton({
 // otherwise. Update in place when the workflow shifts — none of this
 // is generated.
 
-function TopicContent({ topic }: { topic: TopicId }) {
+function TopicContent({
+    topic,
+    extraTopics,
+}: {
+    topic: TopicId;
+    extraTopics: readonly PrivateHelpTopic[];
+}) {
+    // A registered private topic renders itself; the switch only knows built-ins.
+    const extra = extraTopics.find((t) => t.id === topic);
+    if (extra) return <>{extra.render()}</>;
+
     switch (topic) {
         case "overview":
             return <OverviewTopic />;
@@ -173,6 +194,8 @@ function TopicContent({ topic }: { topic: TopicId }) {
             return <SetupTopic />;
         case "patreon":
             return <PatreonTopic />;
+        case "drive":
+            return <DriveTopic />;
         case "screenshot":
             return <ScreenshotTopic />;
         case "library":
@@ -188,21 +211,12 @@ function TopicContent({ topic }: { topic: TopicId }) {
     }
 }
 
-function TopicHeader({ title, lede }: { title: string; lede: string }) {
-    return (
-        <div className="flex flex-col gap-1.5 mb-5">
-            <h2 className="text-base font-medium tracking-wide text-foreground">{title}</h2>
-            <p className="text-sm text-muted-foreground leading-relaxed max-w-prose">{lede}</p>
-        </div>
-    );
-}
-
 function OverviewTopic() {
     return (
         <article className="flex flex-col gap-5">
             <TopicHeader
                 title="Overview"
-                lede="ASMR Curator pulls audio out of Patreon (including Drive-hosted links) and writes consistent filenames against a tag dictionary you control. Everything runs locally; nothing leaves your machine."
+                lede="ASMR Curator pulls audio out of Patreon and Google Drive, and writes consistent filenames against a tag dictionary you control. Everything runs locally; nothing leaves your machine."
             />
             <section className="flex flex-col gap-3">
                 <h3 className="text-sm font-medium text-foreground">A typical session</h3>
@@ -225,12 +239,17 @@ function OverviewTopic() {
                 </ol>
             </section>
             <section className="flex flex-col gap-3">
-                <h3 className="text-sm font-medium text-foreground">Why three source modes</h3>
+                <h3 className="text-sm font-medium text-foreground">Why four source modes</h3>
                 <div className="flex flex-col gap-2.5">
                     <HelpCard
                         icon={<Globe size={14} aria-hidden />}
                         title="Patreon URL"
                         body="The accurate path. Reads the post directly when the cookie is valid; pre-fills everything."
+                    />
+                    <HelpCard
+                        icon={<Cloud size={14} aria-hidden />}
+                        title="Google Drive"
+                        body="The direct one. Paste a Drive address when you already have the link and there's no post to fetch first."
                     />
                     <HelpCard
                         icon={<FileText size={14} aria-hidden />}
@@ -395,12 +414,53 @@ function PatreonTopic() {
             <HelpCard
                 icon={<Sparkles size={14} aria-hidden />}
                 title="Live progress while it runs"
-                body="A small status line under the URL narrates what's happening: looking up the post, downloading X of Y MB, saving the file, moving on. A creator pull may scroll through many of these — that's normal, the app isn't stuck."
+                body="A small status line under the URL narrates what's happening: looking up the post, downloading X of Y MB, saving the file, moving on. A creator pull may scroll through many of these — that's normal, the app isn't stuck. After the last download it switches to wrapping up, tidying, and filing while the posts are sorted into your Downloads folder."
             />
             <HelpCard
                 icon={<Cloud size={14} aria-hidden />}
                 title="Drive-hosted audio still works"
-                body="When a creator links to Google Drive instead of uploading to Patreon, an External links section appears under the post. Click Download next to the link and the app opens the link in the background using your Google sign-in and pulls the file down for you. Nothing downloads in your browser tab."
+                body="When a creator links to Google Drive instead of uploading to Patreon, an External links section appears under the post. Click Download next to the link and the app opens the link in the background using your Google sign-in and pulls the file down for you. Nothing downloads in your browser tab. Already have the Drive address, or can't fetch the post? The Google Drive tab takes the same link on its own."
+            />
+        </article>
+    );
+}
+
+function DriveTopic() {
+    return (
+        <article className="flex flex-col gap-5">
+            <TopicHeader
+                title="Google Drive"
+                lede="For audio that lives in Drive. Paste the file's address and it downloads straight away — no Patreon post needed first."
+            />
+            <HelpCard
+                icon={<Cloud size={14} aria-hidden />}
+                title="When to use this instead of the post"
+                body="Drive links found on a post you've fetched still have their own Download buttons, and those stay the better route when you have them — the post supplies the creator and title. Use this tab when you already have the link, when the post can't be fetched, or when the audio isn't attached to a post at all."
+            />
+            <HelpCard
+                icon={<Cookie size={14} aria-hidden />}
+                title="It needs your Google session"
+                body="The app opens the file in a background browser signed in as you, so your Google cookie has to be synced. If the session has lapsed you'll get a short message with a link straight to the cookie settings."
+            />
+            <HelpCard
+                icon={<FolderOpen size={14} aria-hidden />}
+                title="Creator and title are optional"
+                body="They only decide which folder the download lands in — same shape as a Patreon download, so everything sits together. Leave them blank and the file is filed under Drive's own id for the file."
+            />
+            <HelpCard
+                icon={<PenLine size={14} aria-hidden />}
+                title="Use for filename"
+                body="Fill in Creator and Title and this hands them to the tag editor, exactly as applying a fetched Patreon post does. Pipe-separated tags in the title split into chips and get matched against your dictionary, so Generate filename and the rename form work from them straight away."
+            />
+            <HelpCard
+                icon={<FileAudio size={14} aria-hidden />}
+                title="Convert after downloading"
+                body="Off by default, which keeps whatever Drive serves — the fastest option, and it loses nothing. Turn it on to re-encode once the download lands, with the same output format and quality controls the Convert panel uses (MP3, FLAC, or OGG; power mode adds a bitrate override). Your choice is remembered and shared across every download path."
+            />
+            <HelpCard
+                icon={<Sparkles size={14} aria-hidden />}
+                title="If the link is rejected"
+                body="The address needs to point at a single file — the one you get from Share, or from the address bar with the file open. A folder or My Drive listing has no file in it to download, and comes back asking for a file link."
             />
         </article>
     );
@@ -456,7 +516,9 @@ function LibraryTopic() {
                     <li>
                         <span className="text-foreground/90">Rename and move</span>: write the
                         canonical filename and tags into the file&apos;s metadata, then file it into
-                        a Library subfolder.
+                        a Library subfolder. Inside Move to library, renaming during the move and
+                        writing tags during the move are separate checkboxes, both off unless you
+                        tick them — a plain Move just relocates the file.
                     </li>
                     <li>
                         <span className="text-foreground/90">Convert</span>: re-encode any of WAV,
@@ -475,6 +537,28 @@ function LibraryTopic() {
                     </li>
                 </ul>
             </section>
+            <section className="flex flex-col gap-3">
+                <h3 className="text-sm font-medium text-foreground">
+                    The filename and the title are separate
+                </h3>
+                <div className="flex flex-col gap-2.5">
+                    <HelpCard
+                        icon={<FileAudio size={14} aria-hidden />}
+                        title="Will become is editable"
+                        body="It starts from the tags above, but you can type in it. That matters when a name runs past the length your filesystem allows — shorten it here and the Title field keeps every tag, instead of having to delete tags to make the name fit."
+                    />
+                    <HelpCard
+                        icon={<FileText size={14} aria-hidden />}
+                        title="An edited Title stays edited"
+                        body="Once you change the Title by hand it stops following the generated one, so pressing Generate again won't overwrite what you wrote. Reset, next to either field, puts the generated value back."
+                    />
+                    <HelpCard
+                        icon={<Sparkles size={14} aria-hidden />}
+                        title="Tags without renaming"
+                        body="When the filename already matches the file on disk, the button reads Save metadata and only the tags are written. Useful for fixing tags on a file that's already named correctly."
+                    />
+                </div>
+            </section>
             <HelpCard
                 icon={<MousePointerClick size={14} aria-hidden />}
                 title="Multi-select works in both tabs"
@@ -489,7 +573,7 @@ function BulkTopic() {
         <article className="flex flex-col gap-5">
             <TopicHeader
                 title="Bulk edit"
-                lede="One sheet that writes metadata and renames across a selection. Pick two or more files in the file list, then click Bulk edit. Per-row title and tags, a shared block for artist / album / album artist / suffix, and an optional rename + move pass on commit."
+                lede="One sheet that writes metadata and renames across a selection. Pick two or more files in the file list, then click Bulk edit. Per-row title, tags, and filename, a shared block for artist / album / album artist / suffix, and an optional rename + move pass on commit."
             />
             <section className="flex flex-col gap-3">
                 <h3 className="text-sm font-medium text-foreground">The two load buttons</h3>
@@ -536,7 +620,7 @@ function BulkTopic() {
                     <HelpCard
                         icon={<FileAudio size={14} aria-hidden />}
                         title="Rename to canonical filenames"
-                        body="Toggle Rename on to write each file's new filename when the commit lands. Each per-row preview shows the proposed name with a small character count next to it; the count turns amber if the name is getting long, and red if it's too long for your operating system to save."
+                        body="Toggle Rename on to write each file's new filename when the commit lands. Each row gets its own Filename field you can type into, with a byte count under it — amber when the name is getting long, red when it's too long for your operating system to save. Shorten the filename there and that row's title keeps all its tags; Reset puts the generated name back."
                     />
                     <HelpCard
                         icon={<FolderOpen size={14} aria-hidden />}
@@ -615,8 +699,8 @@ function ShortcutsTopic() {
                     />
                     <HelpCard
                         icon={<Keyboard size={14} aria-hidden />}
-                        title="Enter in the Patreon URL field"
-                        body="Submits the URL and starts the fetch. No need to click the Fetch button."
+                        title="Enter in the Patreon URL or Google Drive field"
+                        body="Submits the address and starts the fetch or download. No need to click the button."
                     />
                     <HelpCard
                         icon={<Keyboard size={14} aria-hidden />}
@@ -761,15 +845,3 @@ function SelfhostTopic() {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function HelpCard({ icon, title, body }: { icon: React.ReactNode; title: string; body: string }) {
-    return (
-        <div className="flex flex-col gap-1 px-3 py-2.5 rounded-md border border-border bg-background">
-            <div className="flex items-center gap-2 text-foreground/90">
-                <span className="text-muted-foreground/80">{icon}</span>
-                <span className="text-sm font-medium">{title}</span>
-            </div>
-            <p className="text-sm text-muted-foreground leading-relaxed max-w-prose">{body}</p>
-        </div>
-    );
-}

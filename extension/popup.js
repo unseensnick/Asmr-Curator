@@ -6,10 +6,12 @@
   const browserApi = window.browser || window.chrome;
   // lib/storage.js (loaded before this script in popup.html) populates
   // window.AsmrExt with the shared repo-slug constants.
-  const { RELEASES_LATEST_URL } = window.AsmrExt;
+  const { RELEASES_LATEST_URL, getBackendUrl } = window.AsmrExt;
 
   const uiElements = {
     syncBtn: document.getElementById("sync-cookie"),
+    // The private track section, when present, mounts itself just above this.
+    cookieSection: document.getElementById("cookie-section"),
     cookieStatus: document.getElementById("cookie-status"),
     optionsLink: document.getElementById("options-link"),
     updateBanner: document.getElementById("update-banner"),
@@ -38,8 +40,47 @@
     if (kind) uiElements.cookieStatus.classList.add(kind);
   }
 
+  const SYNC_LABEL = "Sync Patreon + Google cookies";
+  const GRANT_LABEL = "Grant site access, then sync";
+  // Origins the background reported as ungranted. Set means the next click
+  // should ask for them first. `permissions.request()` has to run from a user
+  // gesture in an extension page, which is why this lives here and not in
+  // the background script or the on-page pill.
+  let pendingOrigins = null;
+
+  async function requestPendingPermissions() {
+    setStatus("Waiting for you to approve site access…");
+    let granted;
+    try {
+      granted = await browserApi.permissions.request({ origins: pendingOrigins });
+    } catch (err) {
+      setStatus(`Couldn't request access: ${err.message || err}`, "err");
+      return false;
+    }
+    if (!granted) {
+      setStatus(
+        "Access denied. Without it the extension can't read your cookies " +
+          "or reach the backend.",
+        "err",
+      );
+      return false;
+    }
+    pendingOrigins = null;
+    uiElements.syncBtn.textContent = SYNC_LABEL;
+    return true;
+  }
+
   async function onSyncCookie() {
     uiElements.syncBtn.disabled = true;
+    // A grant prompt is queued from a previous attempt — clear it first, then
+    // fall through into the normal sync so one click does both.
+    if (pendingOrigins) {
+      const ok = await requestPendingPermissions();
+      if (!ok) {
+        uiElements.syncBtn.disabled = false;
+        return;
+      }
+    }
     setStatus("Syncing Patreon + Google cookies…");
     let res;
     try {
@@ -51,6 +92,13 @@
     }
     if (!res) {
       setStatus("Failed: no response from background", "err");
+      uiElements.syncBtn.disabled = false;
+      return;
+    }
+    if (res.needsPermission) {
+      pendingOrigins = res.origins;
+      uiElements.syncBtn.textContent = GRANT_LABEL;
+      setStatus(`${res.error} Click again to approve.`, "err");
       uiElements.syncBtn.disabled = false;
       return;
     }
@@ -68,10 +116,18 @@
     uiElements.syncBtn.disabled = false;
   }
 
+
   uiElements.syncBtn.addEventListener("click", onSyncCookie);
   uiElements.optionsLink.addEventListener("click", (e) => {
     e.preventDefault();
     browserApi.runtime.openOptionsPage();
   });
   checkForUpdateBanner();
+
+  // Optional private-only surface. Absent unless that domain is checked out, so
+  // a failed import is an expected path, not an error worth reporting. The
+  // module builds its own DOM, which is why popup.html carries no markup for it.
+  import("./private/track.js")
+    .then((m) => m.init({ browserApi, anchor: uiElements.cookieSection, getBackendUrl }))
+    .catch(() => {});
 })();

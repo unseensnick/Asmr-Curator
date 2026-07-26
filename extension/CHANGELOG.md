@@ -14,6 +14,18 @@ The format is a simplified version of [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
+## [1.1.0]
+
+### Additions
+
+- **The popup can grant its own site access.** Firefox doesn't hand an MV3 extension site access at install, and without it the extension reads no cookies and can't reach the backend. Sync now detects that, relabels the button **Grant site access, then sync**, and raises Firefox's prompt on the next click.
+
+### Fixes
+
+- **"No Patreon cookies found" no longer appears when you're already logged in.** Missing site access looked like a logged-out session and a dead server. Both messages now name the real cause and point at the popup, which is the only place Firefox allows the prompt.
+- **The in-page "Sync cookies" pill works in Firefox.** It failed with `browserApi is undefined`, so syncing from the toolbar popup was the only way through.
+- **The unpacked extension now loads in Chromium.** A reserved `_`-prefixed folder name was blocking **Load unpacked**; the dev test folder was renamed and is no longer in the release zip.
+
 ## [1.0.0]
 
 ### Additions

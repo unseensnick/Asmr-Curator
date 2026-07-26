@@ -13,7 +13,7 @@ Self-hosted tool for organising a local ASMR library. Pulls audio from Patreon (
 - [Migrating from `asmr-filename-gen`](#migrating-from-the-old-asmr-filename-gen-image) — if your `docker pull` is failing
 - [Quickstart](#quickstart) — copy-paste `docker-compose.yml`, ~60 seconds to running
 - [Stack](#stack)
-- [Workflows](#workflows) — the three ways audio gets into your library
+- [Workflows](#workflows) — how audio gets into your library
 - [Features](#features) — file browser, conversion, tags, extension, UI
 - [Running locally (devcontainer)](#running-locally-devcontainer)
 - [API Reference](#api-reference)
@@ -112,12 +112,12 @@ Open **http://localhost:8000**. The dictionary database is created and seeded au
 
 ## Workflows
 
-Three independent paths get audio + metadata into your library. Use #1 by default; reach for #2 / #3 when it doesn't apply.
+Each numbered path below gets audio + metadata into your library. Use #1 by default; the others cover what it can't reach.
 
 | # | Input | How it works | Best for |
 | - | ----- | ------------ | -------- |
 | 1 | Patreon post or creator URL | `patreon-dl` authenticates with your synced cookie, downloads the audio, reads structured metadata | Primary path — most accurate |
-| 2 | Drive link surfaced by workflow 1 | Headless Chromium opens the viewer, captures the playback URL, streams audio | When a creator links to Drive instead of uploading directly |
+| 2 | Drive link — surfaced by workflow 1, or pasted into the **Google Drive** tab | Headless Chromium opens the viewer, captures the playback URL, streams audio | When a creator links to Drive instead of uploading directly |
 | 3 | Screenshot (paste/drop image) | Local vision LLM reads title + tag chips off the page pixels | Fallback for posts you can't fetch (no subscription, public preview, old screenshot) |
 
 ### 1. Patreon URL → audio + metadata (primary)
@@ -131,9 +131,14 @@ Paste a Patreon post or creator URL into the **Patreon URL** tab. The bundled [`
 
 ### 2. Drive download (for Drive-hosted audio)
 
-Some Patreon creators link to Google Drive instead of uploading audio. The Patreon fetch surfaces those links in an **External Links** collapsible on each post card, with a per-link **Download** button.
+Some Patreon creators link to Google Drive instead of uploading audio. There are two ways in:
 
-The backend launches headless Chromium (Playwright) with your synced Google session cookie, opens the Drive viewer, intercepts the playback URL, strips the chunked-streaming parameters (`ump`, `range`, `srfvp`), and streams the audio into `DOWNLOAD_PATH/<creator>/<post_id> - <title>/` (matches patreon-dl; falls back to legacy `<post_id>/` when no metadata is supplied). Real-time percentage in the row label. Multiple Download clicks on the same post are serialised (Drive's mid-playback cookie rotation breaks concurrent scrapes); long files have a 4 h default timeout (override via `DRIVE_DOWNLOAD_TIMEOUT_S`). Expired-session redirects fail in ~1 s with a "re-sync your cookie" message.
+- **From a fetched post** — the Patreon fetch surfaces those links in an **External Links** collapsible on each post card, with a per-link **Download** button.
+- **Straight from a link** — paste the Drive address into the **Google Drive** tab. Nothing is fetched from Patreon first, so this is the path when you already have the link, the post isn't fetchable, or the audio isn't tied to a post at all. Creator and title are optional and only shape the download folder; without them the file lands under the Drive file id.
+
+Both routes offer **Convert after downloading**, off by default. Leave it off and the file is saved exactly as Drive serves it; turn it on and the same controls the Convert panel uses appear — output format (MP3 / FLAC / OGG), quality preset, and a bitrate override under power mode. The choice is remembered between sessions and shared across every download path, since they all run the same post-download ffmpeg step.
+
+The backend launches headless Chromium (Playwright) with your synced Google session cookie, opens the Drive viewer, intercepts the playback URL, strips the parameters that make the CDN answer with something other than the audio (`ump`, `range`, `srfvp`, `alr`), and streams it into `DOWNLOAD_PATH/<creator>/<post_id or file id> - <title>/` (matches patreon-dl; falls back to the bare id when no metadata is supplied). Real-time percentage in the row label. Multiple Download clicks on the same post are serialised (Drive's mid-playback cookie rotation breaks concurrent scrapes); long files have a 4 h default timeout (override via `DRIVE_DOWNLOAD_TIMEOUT_S`). Expired-session redirects fail in ~1 s with a "re-sync your cookie" message.
 
 Saved filenames come from each link's visible anchor text so multiple downloads from the same post stay distinct. Requires the browser extension for cookie sync — see [`extension/README.md`](extension/README.md).
 
@@ -175,7 +180,7 @@ For posts that can't be fetched via patreon-dl, drop or paste an image into the 
 
 ### Extension
 
-Optional MV3 browser extension (in [`extension/`](extension/)) for Chromium and Firefox 121+. One click syncs your Patreon and Google session cookies to the backend so `patreon-dl` and the headless-Chromium Drive scrape can authenticate. Replaces the manual DevTools copy/paste — that's the extension's entire job.
+Optional MV3 browser extension (in [`extension/`](extension/)) for Chromium and Firefox 121+. One click syncs your Patreon and Google session cookies to the backend so `patreon-dl` and the headless-Chromium Drive scrape can authenticate, replacing the manual DevTools copy/paste. Its `manifest.json` is generated, so run `node scripts/build-manifest.mjs` once after cloning.
 
 ### Interface
 
@@ -289,7 +294,7 @@ Interactive docs at **http://localhost:8000/docs** (Swagger UI, auto-generated).
 | PUT    | `/api/settings/patreon-cookie`  | Save the Patreon cookie. Accepts `application/json` (`{"cookie":"..."}`) or raw `text/plain` body     |
 | POST   | `/api/patreon/fetch`            | Fetch a Patreon post or creator URL via `patreon-dl`. **Returns `text/event-stream`** with live phases — `starting`, `resolving`, `fetching_posts` (`{ fetched, total }`), `posts_found`, `post_progress` (`{ post_id, title }`), `downloading` (`{ bytes, total, percent, speed_kbs }`), `wrote_file`, `skipped`, `phase_done`, terminating in `done` or `error`. The final `done` frame carries the same payload the synchronous endpoint used to return: `{ output_dir, count, metadata_only, dry_run, posts: [{post_id, title, tags, artist, post_dir, audio_path, external_links}] }`. Request: `{ "url": "...", "metadata_only"?: false, "content_types"?: ["audio"], "published_after"?: "YYYY-MM-DD", "published_before"?: "YYYY-MM-DD", "dry_run"?: false }`. `external_links` lists third-party file-host URLs (Drive / Mega / MediaFire / Dropbox) found in the post body. Audio files land at `DOWNLOAD_PATH/<creator>/<post_id> - <post_title>/<original_filename>` (flattened out of patreon-dl's nesting); patreon-dl's own tree + status DB stay isolated under `DOWNLOAD_PATH/.patreon-dl/`. Legacy `<post_id>/<file>` paths from before the layout change are still resolved by the cached-sidecar fast path. `content_types` defaults to `["audio"]`; allowed: `audio` / `video` / `image` / `attachment` / `external`. Both single-post and creator URLs in `metadata_only` mode short-circuit through a cached-sidecar fast path (creator matching uses the campaign vanity from the sidecar with a slugified-artist fallback) |
 | POST   | `/api/patreon/ingest-external-audio` | Download a signed third-party audio URL into `DOWNLOAD_PATH/<creator>/<post_id> - <title>/` when `artist` or `title` is supplied (legacy `<post_id>/` otherwise). Request: `{ "post_id": "12345", "source_url": "https://...", "filename"?: "optional.mp3", "title"?, "artist"?, "album"?, "album_artist"? }`. Streams via `httpx` to a `.part` temp file, renames on success. Host resolution checked against private/loopback/link-local ranges to block SSRF |
-| POST   | `/api/patreon/ingest-drive-link` | **Server-side Drive scrape.** Returns a `text/event-stream` with progress events (`launching_browser` → `loading_page` → `waiting_for_player` → `captured` → `downloading` → `done`/`error`; contested requests get a `queued` stage with `ahead` count). Headless Chromium loads the Drive viewer with your synced Google cookie, captures the first `videoplayback?…` URL on a recognised Drive host, prefers `itag=140` (m4a audio) over `itag=134` (mp4 video) with a 5 s grace window, strips `ump`/`range`/`srfvp`, streams the body to disk in bounded-memory chunks. Sign-in redirects fail fast with `code="auth_expired"`. Request: `{ "post_id": "12345", "drive_url": "https://drive.google.com/file/d/<ID>/view", "filename"?: "optional.m4a" }`. Response: `{ audio_path, size, source_url, file_id }` |
+| POST   | `/api/patreon/ingest-drive-link` | **Server-side Drive scrape.** Returns a `text/event-stream` with progress events (`launching_browser` → `loading_page` → `waiting_for_player` → `captured` → `downloading` → `done`/`error`; contested requests get a `queued` stage with `ahead` count). Headless Chromium loads the Drive viewer with your synced Google cookie, captures the first `videoplayback?…` URL on a recognised Drive host, prefers `itag=140` (m4a audio) over `itag=134` (mp4 video) with a 5 s grace window, strips `ump`/`range`/`srfvp`/`alr`, and downloads from a sibling page in the same browser context (the player's own tab is served a UMP stream instead of the audio), streaming to disk in bounded-memory chunks. Sign-in redirects fail fast with `code="auth_expired"`. Request: `{ "post_id"?: "12345", "drive_url": "https://drive.google.com/file/d/<ID>/view", "filename"?: "optional.m4a", "title"?, "artist"?, "audio_format"?: "best" }`. Omit `post_id` — as the Google Drive tab does — and the Drive file id keys the download folder instead, so a Drive link can be ingested without a Patreon post behind it. `audio_format` (`best` / `mp3` / `flac` / `ogg`) transcodes after the download via ffmpeg and emits an extra `extracting` phase; `best` keeps Drive's own m4a and skips ffmpeg entirely. `audio_quality` and `bitrate_kbps` are validated against the same preset tables `/api/convert` uses (so `flac` takes only `lossless`, and a bitrate override is rejected for it), and the whole combination is checked before the scrape starts rather than after. Response: `{ audio_path, size, source_url, file_id }` |
 | GET    | `/api/settings/google-cookie`   | Status — `{ set: bool, count: number, length: number }` (never the values) |
 | PUT    | `/api/settings/google-cookie`   | Store a Google session cookie array. Body: `{ "cookies": [...] }` where each entry is a `chrome.cookies.getAll`-style object. Empty array clears |
 
@@ -431,11 +436,17 @@ Versions before v2.0.1 used a single `LIBRARY_PATH`. Now both paths are required
 
 Contributions welcome. The full conventions live in [`CLAUDE.md`](CLAUDE.md) and the path-scoped rules under [`.claude/rules/`](.claude/rules/); the short version:
 
-- **Commits** follow conventional-commit format (`feat:` / `fix:` / `docs:` / `chore:` / `refactor:` / `build:`). No `Co-Authored-By` watermarks.
-- **CHANGELOG** — every code change adds a bullet under `## [Unreleased]` in `CHANGELOG.md` (categories: Additions, Changes, Fixes, Other). Lead with the user-visible effect; keep each bullet to 1–3 sentences.
+- **Commits** follow conventional-commit format (`feat:` / `fix:` / `docs:` / `chore:` / `refactor:` / `build:`). Subject stays under 72 characters with no trailing period, and the message carries no em dashes and no `Co-Authored-By` watermarks.
+- **CHANGELOG** — every code change adds a bullet under `## [Unreleased]` in `CHANGELOG.md` (categories: Additions, Changes, Fixes, Other). Lead with the user-visible effect and keep each bullet short: a bold headline plus one or two sentences, capped at 420 characters.
+- **Git hooks** — `.githooks/` holds `commit-msg` (the commit rules above) and `pre-commit` (CHANGELOG structure + version lockstep). They are tracked but inactive until installed:
+
+  ```bash
+  cp .githooks/commit-msg .githooks/pre-commit .git/hooks/ && chmod +x .git/hooks/commit-msg .git/hooks/pre-commit
+  ```
+
 - **Tests** — pure-helper coverage is expected for new helpers; integration-test infrastructure isn't part of the project.
-- **Line endings** — CRLF repo-wide (`.gitattributes`). LF exceptions for `dev.sh` and `.claude/hooks/*.sh` (Linux exec).
-- **CI gate** — `build_check.yml` runs lint + build + tests + dep audits + API-docs drift check + secret scan on every push. Green PRs only.
+- **Line endings** — CRLF repo-wide (`.gitattributes`). LF exceptions for `dev.sh`, `.claude/hooks/*.sh` and `.githooks/*` (Linux exec).
+- **CI gate** — `build_check.yml` runs lint + build + tests + dep audits + API-docs drift check + secret scan on every push; `docs-lint.yml` re-runs the CHANGELOG and version-lockstep checks so a PR is covered even without the local hooks. Green PRs only.
 
 ## License and responsible use
 

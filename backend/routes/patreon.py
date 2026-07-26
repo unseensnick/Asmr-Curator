@@ -14,6 +14,7 @@ import ipaddress
 import json
 import os
 import socket
+import time
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlparse
@@ -23,7 +24,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from backend import audio_utils, database, drive_fetch
+from backend import audio_convert, audio_utils, database, drive_fetch
 from backend import main as _main
 from backend.main import (
     EXTERNAL_AUDIO_HTTPX_TIMEOUTS,
@@ -68,6 +69,59 @@ def _validate_iso_date(value: str | None, field: str) -> str | None:
         return date.fromisoformat(value).isoformat()
     except ValueError as e:
         raise HTTPException(400, f"{field}: {e}")
+
+
+def _convert_ingested_audio(
+    src: Path,
+    audio_format: str,
+    quality: str | None = None,
+    bitrate_kbps: int | None = None,
+) -> tuple[Path, int]:
+    """Transcode a freshly-downloaded file, replacing the original.
+
+    `"best"` keeps whatever the source served, which is the default and skips
+    ffmpeg entirely. `quality` defaults to the format's own sensible preset —
+    FLAC only accepts `lossless`, so a caller that hardcoded `high` would be
+    rejected for every lossless request. Returns the `(path, size)` to report.
+    """
+    if audio_format == "best":
+        return src, src.stat().st_size
+    dest = src.with_suffix(audio_convert.ext_for_format(audio_format))
+    if dest == src:
+        return src, src.stat().st_size  # already in the requested format
+    effective_quality = quality or audio_convert.default_quality_for(audio_format)
+    started = time.monotonic()
+    audio_convert.convert_audio(src, dest, audio_format, effective_quality, bitrate_kbps)
+    log.info(
+        "ingest: converted %s to %s (%s%s) in %.1fs",
+        src.name,
+        audio_format,
+        effective_quality,
+        f", {bitrate_kbps}kbps" if bitrate_kbps else "",
+        time.monotonic() - started,
+    )
+    with contextlib.suppress(OSError):
+        src.unlink()
+    return dest, dest.stat().st_size
+
+
+def _validated_convert_opts(
+    audio_format: str | None,
+    audio_quality: str | None,
+    bitrate_kbps: int | None,
+) -> tuple[str, str | None, int | None]:
+    """Normalise + validate the convert-on-download options for an ingest
+    request, so a bad combination 400s before the multi-minute download
+    rather than after it."""
+    fmt = (audio_format or "best").lower()
+    if fmt == "best":
+        return "best", None, None
+    quality = (audio_quality or audio_convert.default_quality_for(fmt)).lower()
+    try:
+        audio_convert.validate_conversion_request(fmt, quality, bitrate_kbps)
+    except audio_convert.ConversionError as e:
+        raise HTTPException(400, str(e))
+    return fmt, quality, bitrate_kbps
 
 
 def _ingest_dest_dir(post_id: str, artist: str | None, title: str | None) -> Path:
@@ -439,8 +493,19 @@ async def ingest_external_audio(body: IngestExternalAudioIn):
 
 
 class IngestDriveLinkIn(BaseModel):
-    post_id: str
+    # Optional so a Drive link can be ingested on its own, with no Patreon
+    # post behind it (the Google Drive tab). Omitted → the Drive file id
+    # becomes the folder key, the same shape every id-keyed ingest writes.
+    # Parsed server-side so the Drive URL grammar stays in `drive_fetch`
+    # rather than being reimplemented in the UI.
+    post_id: str | None = None
     drive_url: str
+    # Convert-on-download. "best" (default) keeps Drive's own m4a and skips
+    # ffmpeg entirely. Anything else runs through the same preset tables
+    # `/api/convert` uses, so the formats are MP3 / FLAC / OGG.
+    audio_format: str = "best"
+    audio_quality: str | None = None
+    bitrate_kbps: int | None = None
     filename: str | None = None
     # Post metadata used for the flattened layout. Without either field, the
     # legacy `<post_id>/` shape is used so external callers keep working.
@@ -457,8 +522,25 @@ async def ingest_drive_link(body: IngestDriveLinkIn):
     Google session cookie to be set via `/api/settings/google-cookie`
     (typically by the browser extension).
     """
-    post_id = _validate_post_id(body.post_id)
     drive_url = require_non_empty(body.drive_url, "drive_url")
+    if body.post_id:
+        post_id = _validate_post_id(body.post_id)
+    else:
+        derived = drive_fetch.drive_id_from_url(drive_url)
+        if not derived:
+            raise HTTPException(
+                400,
+                "Couldn't find a file id in that Drive link. Use the "
+                "'Share' or address-bar URL for the file.",
+            )
+        # Still validated: drive_id_from_url returns the `?id=` value
+        # byte-for-byte, so it can carry separators.
+        post_id = _validate_post_id(derived)
+
+    # Validated before the multi-minute scrape rather than after it.
+    audio_format, audio_quality, bitrate_kbps = _validated_convert_opts(
+        body.audio_format, body.audio_quality, body.bitrate_kbps
+    )
 
     raw_cookie = database.get_setting(GOOGLE_COOKIE_KEY) or ""
     if not raw_cookie:
@@ -514,17 +596,34 @@ async def ingest_drive_link(body: IngestDriveLinkIn):
                     explicit_filename=body.filename,
                     on_progress=push,
                 )
-                download_path = _main.DOWNLOAD_PATH.resolve()
-                audio_path = str(result.audio_path.relative_to(download_path))
-                await queue.put(
-                    {
-                        "state": "done",
-                        "audio_path": audio_path,
-                        "size": result.size,
-                        "source_url": result.source_url,
-                        "file_id": result.file_id,
-                    }
-                )
+
+            # Transcode OUTSIDE the scrape lock. The semaphore exists to stop
+            # concurrent Drive sessions racing Google's cookie rotation —
+            # ffmpeg touches neither, so holding it through a multi-second
+            # convert just makes the next queued download wait on unrelated
+            # CPU work.
+            if audio_format != "best":
+                await queue.put({"state": "extracting", "audio_format": audio_format})
+            # ffmpeg is blocking; keep it off the event loop so the SSE
+            # stream stays responsive.
+            final_path, final_size = await asyncio.to_thread(
+                _convert_ingested_audio,
+                result.audio_path,
+                audio_format,
+                audio_quality,
+                bitrate_kbps,
+            )
+            download_path = _main.DOWNLOAD_PATH.resolve()
+            audio_path = str(final_path.relative_to(download_path))
+            await queue.put(
+                {
+                    "state": "done",
+                    "audio_path": audio_path,
+                    "size": final_size,
+                    "source_url": result.source_url,
+                    "file_id": result.file_id,
+                }
+            )
         except drive_fetch.DriveFetchError as e:
             await queue.put(
                 {

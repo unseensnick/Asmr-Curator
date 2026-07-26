@@ -3,10 +3,11 @@ import { AlertTriangle, ChevronDown } from "lucide-react";
 import ConversionPanel from "@/components/ConversionPanel";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { ConvertFormat, ConvertQuality, RenameSep } from "@/lib/types";
 
-import { ActionButton, MetaField } from "./selectedFile/helpers";
+import { ActionButton, MetaField, ResetLink } from "./selectedFile/helpers";
 import { MAX_BYTES } from "./selectedFile/utils";
 
 interface RequiredConversionProps {
@@ -70,12 +71,18 @@ interface RenameSectionProps {
     metaAlbum: string;
     metaAlbumArtist: string;
     linkArtists: boolean;
+    titleDirty: boolean;
+    onResetTitle: () => void;
     onMetaTitleChange: (v: string) => void;
     onMetaArtistChange: (v: string) => void;
     onMetaAlbumChange: (v: string) => void;
     onMetaAlbumArtistChange: (v: string) => void;
     onLinkArtistsChange: (v: boolean) => void;
     newName: string | null;
+    onNewNameChange: (v: string) => void;
+    nameOverridden: boolean;
+    onResetName: () => void;
+    isMetadataOnly: boolean;
     bytes: number;
     bytesOver: boolean;
     bytesWarn: boolean;
@@ -106,12 +113,18 @@ export default function RenameSection(props: RenameSectionProps) {
         metaAlbum,
         metaAlbumArtist,
         linkArtists,
+        titleDirty,
+        onResetTitle,
         onMetaTitleChange,
         onMetaArtistChange,
         onMetaAlbumChange,
         onMetaAlbumArtistChange,
         onLinkArtistsChange,
         newName,
+        onNewNameChange,
+        nameOverridden,
+        onResetName,
+        isMetadataOnly,
         bytes,
         bytesOver,
         bytesWarn,
@@ -202,24 +215,46 @@ export default function RenameSection(props: RenameSectionProps) {
                         <span className="text-sm text-muted-foreground">Same as artist</span>
                     </label>
                 </div>
+                {titleDirty && (
+                    <div className="sm:col-start-2">
+                        <ResetLink onClick={onResetTitle} label="Reset title to generated" />
+                    </div>
+                )}
             </div>
 
-            {/* Rename preview */}
+            {/* Filename — editable, so it can be shortened to fit the
+             *  255-byte limit without touching the embedded title above. */}
             <div className="flex flex-col gap-1.5">
-                <span className="text-sm font-medium tracking-wide text-muted-foreground">
-                    Will become
-                </span>
-                <div className="bg-muted/40 border border-border rounded-md px-3 py-2.5 font-mono text-sm leading-relaxed break-all min-h-10">
-                    {newName ? (
-                        <span className="text-foreground">{newName}</span>
-                    ) : (
+                <div className="flex items-baseline justify-between gap-2">
+                    <label
+                        htmlFor="rename-filename"
+                        className="text-sm font-medium tracking-wide text-muted-foreground"
+                    >
+                        Will become
+                    </label>
+                    {nameOverridden && (
+                        <ResetLink onClick={onResetName} label="Reset filename to generated" />
+                    )}
+                </div>
+                {newName !== null ? (
+                    <Input
+                        id="rename-filename"
+                        value={newName}
+                        onChange={(e) => onNewNameChange(e.target.value)}
+                        aria-invalid={bytesOver}
+                        aria-describedby="rename-filename-bytes"
+                        className="font-mono text-sm h-auto py-2.5 aria-invalid:border-destructive"
+                    />
+                ) : (
+                    <div className="bg-muted/40 border border-border rounded-md px-3 py-2.5 font-mono text-sm leading-relaxed break-all min-h-10">
                         <span className="text-muted-foreground italic">
                             Generate a filename above first.
                         </span>
-                    )}
-                </div>
-                {newName && (
+                    </div>
+                )}
+                {newName !== null && (
                     <p
+                        id="rename-filename-bytes"
                         className={
                             bytesOver
                                 ? "text-xs text-destructive"
@@ -233,16 +268,21 @@ export default function RenameSection(props: RenameSectionProps) {
                         </span>{" "}
                         bytes
                         {bytesOver
-                            ? ", too long, remove some tags."
+                            ? ", too long — shorten the filename here, the title above keeps its tags."
                             : bytesWarn
                               ? ", approaching limit."
                               : "."}
                     </p>
                 )}
+                {isMetadataOnly && !bytesOver && (
+                    <p className="text-xs text-muted-foreground">
+                        Filename already matches. Only the tags will be written.
+                    </p>
+                )}
             </div>
 
             <ActionButton
-                kind="rename"
+                kind={isMetadataOnly ? "metadata" : "rename"}
                 busy={renaming}
                 done={renamed}
                 disabled={!newName || bytesOver}

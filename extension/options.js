@@ -1,11 +1,16 @@
 (function () {
+  const browserApi = self.browser || self.chrome;
   const { getBackendUrl, setBackendUrl, DEFAULT_BACKEND_URL } = self.AsmrExt;
   const els = {
     input: document.getElementById("backend-url"),
+    actionsRow: document.getElementById("actions-row"),
     save: document.getElementById("save"),
     test: document.getElementById("test"),
     status: document.getElementById("status"),
   };
+
+  // Extra save handlers contributed by the optional private domain.
+  const saveHooks = [];
 
   function setStatus(text, kind) {
     els.status.textContent = text;
@@ -30,7 +35,12 @@
     const url = sanitize(els.input.value);
     els.input.value = url;
     await setBackendUrl(url);
-    setStatus(`Saved: ${url}`, "ok");
+
+    for (const hook of saveHooks) {
+      await hook();
+    }
+
+    setStatus("Settings saved.", "ok");
   });
 
   els.test.addEventListener("click", async () => {
@@ -49,4 +59,17 @@
   });
 
   load();
+
+  // Optional private-only settings. Absent unless that domain is checked out,
+  // so a failed import is an expected path. The module builds its own fields,
+  // which is why options.html carries no markup for them.
+  import("./private/options.js")
+    .then((m) =>
+      m.init({
+        browserApi,
+        anchor: els.actionsRow,
+        onSave: (fn) => saveHooks.push(fn),
+      }),
+    )
+    .catch(() => {});
 })();

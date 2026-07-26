@@ -441,14 +441,22 @@ def fetch(
     tail_lines: collections.deque[str] = collections.deque(maxlen=400)
     returncode: int
     last_download_emit: list[float] = [0.0]  # boxed so closure can mutate
+    # Post ids seen this run. Lets the post-processing step address the
+    # sidecars directly instead of walking every post ever downloaded.
+    # Written from the drain thread, read only after it's joined.
+    seen_post_ids: set[str] = set()
 
     def _drain(stream) -> None:
         for line in iter(stream.readline, ""):
             tail_lines.append(line)
-            if on_progress is None:
-                continue
             event = parse_progress_line(line.rstrip("\r\n"))
             if event is None:
+                continue
+            if event["state"] in ("post_progress", "skipped"):
+                post_id = event.get("post_id")
+                if post_id:
+                    seen_post_ids.add(str(post_id))
+            if on_progress is None:
                 continue
             # Throttle `downloading` events — patreon-dl emits one per chunk
             # on fast streams, which would saturate the SSE queue without
@@ -497,7 +505,11 @@ def fetch(
     if returncode != 0:
         raise PatreonFetchError(f"patreon-dl exited with code {returncode}. log tail: {log_tail}")
 
-    posts = _collect_posts(output_dir, since=fetch_started_at)
+    # Everything from here to the return used to run silently — on a large
+    # library it's seconds of walking, moving and tidying with the UI still
+    # showing the last download line. Narrate each step.
+    _safe_emit(on_progress, {"state": "collecting"})
+    posts = _collect_posts(output_dir, since=fetch_started_at, post_ids=seen_post_ids)
 
     # Skip post-fetch cleanup + flatten in dry-run (nothing was written
     # to clean up or move).
@@ -508,11 +520,13 @@ def fetch(
         # (which we can't disable without losing post-api.json), so the
         # only way to suppress them is to delete after the fact.
         if "image" not in opts.content_types:
+            _safe_emit(on_progress, {"state": "tidying", "count": len(posts)})
             _cleanup_info_media(posts)
         # Pull each audio file out of patreon-dl's
         # <campaign>/posts/<id>/audio/ nesting into the flattened
         # <DOWNLOAD_PATH>/<creator>/<post_id> - <title>/ layout. The
         # actual path construction lives in audio_utils.flatten_dest_parts.
+        _safe_emit(on_progress, {"state": "filing", "count": len(posts)})
         posts = _flatten_audio(posts, output_dir)
 
     return FetchResult(output_dir=str(output_dir), posts=posts, log_tail=log_tail)
@@ -780,9 +794,17 @@ def _published_at_from_payload(payload: dict) -> str:
     return ""
 
 
-def _iter_cached_posts(output_dir: Path):
+def _iter_cached_posts(output_dir: Path, only_post_id: str | None = None):
     """Yield `(FetchedPost, published_at, raw_payload)` for every parseable
     sidecar under `output_dir`.
+
+    `only_post_id` narrows the walk to a single post. The sidecar's
+    grandparent directory is `<post_id>` or `<post_id> - <title>`, so the id
+    is matched off that name BEFORE the read + JSON parse + audio resolution
+    — a single-post lookup shouldn't cost one full parse per post in the
+    archive. A directory that doesn't match the convention is left in rather
+    than skipped, so an unrecognised layout degrades to the old cost instead
+    of returning nothing.
 
     Shared walker for the metadata-only re-fetch fast paths (single-post
     by id, creator-URL by vanity). Both need the same parse + audio-path
@@ -802,6 +824,11 @@ def _iter_cached_posts(output_dir: Path):
     write", which is the opposite of "what's cached from earlier runs".
     """
     for api_file in output_dir.rglob("post-api.json"):
+        # patreon-dl layout: <posts>/<post_id> - <title>/post_info/post-api.json
+        if only_post_id is not None:
+            match = _POST_DIR_ID_RE.match(api_file.parent.parent.name)
+            if match is not None and match.group(1) != only_post_id:
+                continue
         try:
             data = json.loads(api_file.read_text(encoding="utf-8"))
         except OSError, json.JSONDecodeError:
@@ -896,15 +923,50 @@ def _find_cached_post(output_dir: Path, post_id: str) -> FetchedPost | None:
     sidecar so the user doesn't have to nuke `.patreon-dl/` to recover
     it.
     """
-    for post, _, _ in _iter_cached_posts(output_dir):
+    for post, _, _ in _iter_cached_posts(output_dir, only_post_id=post_id):
         if post.post_id == post_id:
             return post
     return None
 
 
+# A post directory is `<post_id>` or `<post_id> - <title>`. Same convention
+# `routes/files.py` uses to map a downloaded folder back to its post.
+_POST_DIR_ID_RE = re.compile(r"^(\d+)(?: - .+)?$", re.DOTALL)
+
+
+def _sidecars_for_ids(output_dir: Path, post_ids: set[str]) -> list[Path]:
+    """Resolve the post-api.json sidecars for specific post ids without
+    walking the whole archive.
+
+    patreon-dl's layout is
+    `<output_dir>/<campaign>/posts/<post_id> - <title>/post_info/post-api.json`.
+    Listing each `posts` directory is one scandir per campaign; the
+    whole-tree rglob this replaces did a scandir per directory across every
+    post ever downloaded, plus a descent into each one.
+
+    Returns an empty list when nothing matches, which the caller treats as
+    "fall back to the full walk" — a layout change must not silently turn a
+    successful fetch into "no posts found".
+    """
+    sidecars: list[Path] = []
+    for posts_dir in output_dir.glob("*/posts"):
+        if not posts_dir.is_dir():
+            continue
+        for entry in posts_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            match = _POST_DIR_ID_RE.match(entry.name)
+            if match is None or match.group(1) not in post_ids:
+                continue
+            # One level down: `post_info/` today, `info/` in older trees.
+            sidecars.extend(entry.glob("*/post-api.json"))
+    return sidecars
+
+
 def _collect_posts(
     output_dir: Path,
     since: float | None = None,
+    post_ids: set[str] | None = None,
 ) -> list[FetchedPost]:
     """Walk patreon-dl's output and pull title/tags/audio out of each post-api.json.
 
@@ -912,9 +974,31 @@ def _collect_posts(
     posts patreon-dl previously downloaded and skipped on this run via
     `use.status.cache`. Without this filter, every re-fetch returns stale
     results from prior runs.
+
+    `post_ids` are the ids the drain thread saw go past during this run. When
+    present we resolve those sidecars directly instead of walking the whole
+    archive.
+
+    The full walk stays the fallback for runs with no parseable post lines
+    (dry runs, odd log shapes) AND for a targeted lookup that comes back
+    empty. That second case matters: if patreon-dl's on-disk layout shifts,
+    the shortcut silently finds nothing and a successful fetch reports "no
+    posts found" while the audio sits on disk. Costing a wasted walk in that
+    situation is much cheaper than losing the run.
     """
     posts: list[FetchedPost] = []
-    for api_file in output_dir.rglob("post-api.json"):
+    candidates: list[Path] | None = None
+    if post_ids:
+        candidates = _sidecars_for_ids(output_dir, post_ids)
+        if not candidates:
+            log.warning(
+                "post-id lookup matched no sidecars for %d id(s); falling back to full walk",
+                len(post_ids),
+            )
+            candidates = None
+    if candidates is None:
+        candidates = list(output_dir.rglob("post-api.json"))
+    for api_file in candidates:
         if since is not None:
             try:
                 if api_file.stat().st_mtime < since:
@@ -1164,11 +1248,19 @@ def _find_first_audio(post_dir: Path) -> Path | None:
         for entry in sorted(audio_dir.iterdir()):
             if entry.is_file() and entry.suffix.lower() in AUDIO_EXTS:
                 return entry
-    # Fallback: scan the whole post directory in case the layout changes
-    for entry in sorted(post_dir.rglob("*")):
-        if entry.is_file() and entry.suffix.lower() in AUDIO_EXTS:
-            return entry
-    return None
+    # Fallback: scan the whole post directory in case the layout changed.
+    # Collect the audio entries and take the smallest rather than sorting
+    # the entire recursive listing — same pick, and the listing is mostly
+    # non-audio. This path runs for every already-flattened post, where
+    # `audio/` has been rmdir'd away.
+    return min(
+        (
+            entry
+            for entry in post_dir.rglob("*")
+            if entry.is_file() and entry.suffix.lower() in AUDIO_EXTS
+        ),
+        default=None,
+    )
 
 
 # ─── Flatten patreon-dl's nested output ──────────────────────────────────────

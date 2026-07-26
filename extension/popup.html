@@ -166,6 +166,14 @@
         filter: none;
         transform: none;
       }
+      .btn-stack { display: flex; flex-direction: column; gap: 0.5rem; }
+      button.outline {
+        background: transparent;
+        color: var(--foreground);
+        border-color: var(--border);
+      }
+      button.outline:hover { background: var(--muted); filter: none; }
+      button.outline:disabled { background: var(--muted); color: var(--muted-foreground); }
 
       .status {
         font-size: 0.8125rem;
@@ -206,7 +214,7 @@
       <a id="update-banner-link" href="#" target="_blank" rel="noopener noreferrer">View release →</a>
     </div>
 
-    <section>
+    <section id="cookie-section">
       <span class="eyebrow">Session cookies</span>
       <button id="sync-cookie" class="primary">Sync Patreon + Google cookies</button>
       <p id="cookie-status" class="status">

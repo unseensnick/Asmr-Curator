@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# Docs and release enforcement (see .claude/rules/project-workflow.md and release-prep.md).
+#   CHANGELOG.md - every new [Unreleased] entry under Additions / Changes / Fixes leads with a
+#     self-contained bold headline ending in . ! or ? (Other is exempt), stays under a length cap,
+#     and carries no em dash. Only [Unreleased] is checked; released sections are history.
+#   extension release guard - a commit that cuts an app release must not leave unreleased
+#     entries sitting in extension/CHANGELOG.md.
+#   version lockstep - frontend/package.json and backend/pyproject.toml must agree whenever
+#     either one is staged.
+# Tracked here as the source of truth; activate on a clone with:
+#   cp .githooks/commit-msg .githooks/pre-commit .git/hooks/
+#   chmod +x .git/hooks/commit-msg .git/hooks/pre-commit
+set -u
+
+staged() { git diff --cached --name-only | grep -qx "$1"; }
+fail=0
+
+# ===== CHANGELOG.md: structure of the staged [Unreleased] section =====
+if staged CHANGELOG.md; then
+  issues=$(git show :CHANGELOG.md | awk '
+    /^## \[Unreleased\]/ { u=1; next }
+    /^## \[/             { u=0 }
+    !u                  { next }
+    /^### /             { sec=$0; sub(/^### /,"",sec); next }
+    /^\*\*/             { next }
+    /^- / {
+      if (length($0) > 420)
+        print "  - over the length cap (>420 chars); trim to a bold headline + one or two sentences:\n    " $0
+      if (sec != "Other" && $0 !~ /^- \*\*[^*]+[.!?]\*\*/)
+        print "  - needs a self-contained bold headline ending in . ! or ? (Other is exempt):\n    " $0
+      if (index($0, "—") > 0)
+        print "  - contains an em dash; use commas, parentheses, periods or colons:\n    " $0
+    }
+  ')
+  if [ -n "$issues" ]; then
+    echo "CHANGELOG [Unreleased] entry issues:"
+    echo "$issues"
+    fail=1
+  fi
+fi
+
+# ===== Extension release guard =====
+# Cutting an app release while the extension still has unreleased entries is how
+# 2.3.0 shipped with no extension zip: the Firefox fixes sat in
+# extension/CHANGELOG.md's [Unreleased] while the app's section was renamed. If
+# this commit adds a versioned heading to CHANGELOG.md, the extension's
+# [Unreleased] has to be empty.
+if staged CHANGELOG.md && [ -f extension/CHANGELOG.md ]; then
+  cutting=$(git diff --cached -U0 -- CHANGELOG.md | grep -E '^\+## \[[0-9]' || true)
+  if [ -n "$cutting" ]; then
+    pending=$(awk '
+      /^## \[Unreleased\]/ { u=1; next }
+      /^## \[/             { u=0 }
+      u && /^- /           { print "    " $0 }
+    ' extension/CHANGELOG.md)
+    if [ -n "$pending" ]; then
+      echo "This commit cuts an app release, but extension/CHANGELOG.md still has unreleased entries:"
+      echo "$pending"
+      echo "Cut the extension too: rename its [Unreleased], add a fresh one, and bump"
+      echo "extension/manifest.json (see .claude/rules/release-prep.md)."
+      fail=1
+    fi
+  fi
+fi
+
+# ===== Version lockstep: package.json and pyproject.toml must match =====
+if staged frontend/package.json || staged backend/pyproject.toml; then
+  fe=$(git show :frontend/package.json 2>/dev/null | sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+  be=$(git show :backend/pyproject.toml 2>/dev/null | sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+  if [ -n "$fe" ] && [ -n "$be" ] && [ "$fe" != "$be" ]; then
+    echo "version lockstep broken: frontend/package.json is $fe, backend/pyproject.toml is $be."
+    echo "Both must carry the same SemVer (see .claude/rules/release-prep.md)."
+    fail=1
+  fi
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo
+  echo "Fix the file, or use 'git commit --no-verify' if this is intentional."
+  exit 1
+fi
+exit 0

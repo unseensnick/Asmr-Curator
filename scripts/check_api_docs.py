@@ -29,8 +29,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from fastapi.routing import APIRoute  # noqa: E402
-
 from backend.main import app  # noqa: E402
 
 SKIP_PATHS = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc", "/"}
@@ -53,6 +51,30 @@ def _path_to_regex(path: str) -> re.Pattern[str]:
     return re.compile(loose)
 
 
+def _registered_routes() -> list[tuple[str, str]]:
+    """Return `(METHOD, path)` for every documented route, via the OpenAPI schema.
+
+    Deliberately not a walk over `app.routes`: FastAPI 0.140 stopped
+    flattening `include_router`'s routes into that list, leaving an
+    `_IncludedRouter` wrapper (no `.routes`, just `original_router`) in their
+    place. The previous `isinstance(route, APIRoute)` pass silently dropped
+    from 38 routes to 0 and reported success. `app.openapi()` is the public
+    contract, already carries fully-resolved paths including any router
+    prefix, and doesn't move with FastAPI's internals.
+    """
+    schema = app.openapi()
+    found: list[tuple[str, str]] = []
+    for path, operations in schema.get("paths", {}).items():
+        if path in SKIP_PATHS:
+            continue
+        for method in sorted(operations):
+            upper = method.upper()
+            if upper in SKIP_METHODS:
+                continue
+            found.append((upper, path))
+    return found
+
+
 def _is_documented(method: str, path: str, readme_text: str) -> bool:
     path_re = _path_to_regex(path)
     method_re = re.compile(rf"\b{re.escape(method)}\b")
@@ -69,16 +91,18 @@ def main() -> int:
 
     readme_text = README.read_text(encoding="utf-8")
 
-    routes: list[tuple[str, str]] = []
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
-            continue
-        if route.path in SKIP_PATHS:
-            continue
-        for method in sorted(route.methods or set()):
-            if method in SKIP_METHODS:
-                continue
-            routes.append((method, route.path))
+    routes = _registered_routes()
+
+    # A silent zero means the route walk broke against a new FastAPI layout,
+    # not that the app has no routes. Fail loudly rather than green-lighting
+    # a check that verified nothing.
+    if not routes:
+        print(
+            "No API routes discovered — the route walk is broken (FastAPI "
+            "layout change?). Refusing to report success.",
+            file=sys.stderr,
+        )
+        return 2
 
     missing = [(m, p) for m, p in routes if not _is_documented(m, p, readme_text)]
 

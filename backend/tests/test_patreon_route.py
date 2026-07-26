@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from backend import drive_fetch
 from backend.patreon_fetch import FetchedPost, FetchResult, PatreonFetchError
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -83,6 +84,129 @@ def _make_post(post_id: str, **overrides) -> FetchedPost:
     }
     defaults.update(overrides)
     return FetchedPost(**defaults)
+
+
+# ── Standalone Drive ingest (Google Drive tab, no Patreon post) ────────────
+
+
+class TestDriveIngestWithoutPostId:
+    """`post_id` is optional: a Drive link can be ingested on its own, keyed
+    by the Drive file id instead."""
+
+    def _google_cookie(self, patreon_client_tuple):
+        c, _, db = patreon_client_tuple
+        db.set_setting("google_cookie", json.dumps([{"name": "SID", "value": "x"}]))
+        return c
+
+    def test_omitted_post_id_is_accepted(self, patreon_client, monkeypatch):
+        # Gets past validation into the stream — a 400 would mean post_id was
+        # still treated as required.
+        c = self._google_cookie(patreon_client)
+
+        async def _boom(**kwargs):
+            raise RuntimeError("stop here — validation is what's under test")
+
+        monkeypatch.setattr(drive_fetch, "fetch_drive_audio", _boom)
+        r = c.post(
+            "/api/patreon/ingest-drive-link",
+            json={"drive_url": "https://drive.google.com/file/d/1abcDEF123/view"},
+        )
+        assert r.status_code == 200, r.text
+
+    def test_unparseable_drive_url_is_rejected(self, patreon_client):
+        c = self._google_cookie(patreon_client)
+        r = c.post(
+            "/api/patreon/ingest-drive-link",
+            json={"drive_url": "https://drive.google.com/drive/my-drive"},
+        )
+        assert r.status_code == 400, r.text
+
+    def test_traversal_in_drive_id_is_rejected(self, patreon_client):
+        # drive_id_from_url returns the ?id= value byte-for-byte, so the
+        # derived post_id still has to clear _validate_post_id.
+        c = self._google_cookie(patreon_client)
+        r = c.post(
+            "/api/patreon/ingest-drive-link",
+            json={"drive_url": "https://drive.google.com/open?id=../../escape"},
+        )
+        assert r.status_code == 400, r.text
+
+    def test_unknown_audio_format_is_rejected(self, patreon_client):
+        # Rejected up front, before the multi-minute scrape.
+        c = self._google_cookie(patreon_client)
+        r = c.post(
+            "/api/patreon/ingest-drive-link",
+            json={
+                "drive_url": "https://drive.google.com/file/d/1abcDEF123/view",
+                "audio_format": "wav",
+            },
+        )
+        assert r.status_code == 400, r.text
+
+    def test_format_the_converter_cannot_produce_is_rejected(self, patreon_client):
+        # m4a and opus were offered in the UI for a while; ffmpeg's preset
+        # table has no entry for either, so the request has to fail loudly
+        # rather than after the download.
+        c = self._google_cookie(patreon_client)
+        r = c.post(
+            "/api/patreon/ingest-drive-link",
+            json={
+                "drive_url": "https://drive.google.com/file/d/1abcDEF123/view",
+                "audio_format": "m4a",
+            },
+        )
+        assert r.status_code == 400, r.text
+
+    def test_flac_defaults_to_lossless_not_high(self, patreon_client, monkeypatch):
+        # FLAC's only preset is `lossless`. Defaulting the quality to `high`
+        # made every FLAC request fail validation.
+        c = self._google_cookie(patreon_client)
+
+        async def _boom(**kwargs):
+            raise RuntimeError("stop after validation")
+
+        monkeypatch.setattr(drive_fetch, "fetch_drive_audio", _boom)
+        r = c.post(
+            "/api/patreon/ingest-drive-link",
+            json={
+                "drive_url": "https://drive.google.com/file/d/1abcDEF123/view",
+                "audio_format": "flac",
+            },
+        )
+        assert r.status_code == 200, r.text
+
+    def test_quality_that_the_format_lacks_is_rejected(self, patreon_client):
+        c = self._google_cookie(patreon_client)
+        r = c.post(
+            "/api/patreon/ingest-drive-link",
+            json={
+                "drive_url": "https://drive.google.com/file/d/1abcDEF123/view",
+                "audio_format": "flac",
+                "audio_quality": "high",
+            },
+        )
+        assert r.status_code == 400, r.text
+
+    def test_bitrate_override_rejected_for_flac(self, patreon_client):
+        c = self._google_cookie(patreon_client)
+        r = c.post(
+            "/api/patreon/ingest-drive-link",
+            json={
+                "drive_url": "https://drive.google.com/file/d/1abcDEF123/view",
+                "audio_format": "flac",
+                "audio_quality": "lossless",
+                "bitrate_kbps": 192,
+            },
+        )
+        assert r.status_code == 400, r.text
+
+    def test_missing_google_cookie_still_returns_412(self, patreon_client):
+        c, _, _ = patreon_client
+        r = c.post(
+            "/api/patreon/ingest-drive-link",
+            json={"drive_url": "https://drive.google.com/file/d/1abcDEF123/view"},
+        )
+        assert r.status_code == 412, r.text
 
 
 # ── Up-front validation (pre-stream JSON errors) ───────────────────────────

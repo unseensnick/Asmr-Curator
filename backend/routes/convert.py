@@ -1,20 +1,14 @@
 """Audio-format conversion via ffmpeg subprocess."""
 
 import contextlib
-import subprocess
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from backend.audio_convert import ConversionError, convert_audio, validate_conversion_request
 from backend.main import (
     AUDIO_EXTS,
-    BITRATE_OVERRIDE_FORMATS,
-    BITRATE_OVERRIDE_MAX_KBPS,
-    BITRATE_OVERRIDE_MIN_KBPS,
-    FFMPEG_SUBPROCESS_TIMEOUT_S,
     OUTPUT_FORMATS,
-    QUALITY_FLAGS,
-    log,
     reject_if_exists,
     require_file,
     root_for,
@@ -53,22 +47,11 @@ def convert_file(body: ConvertIn):
         raise HTTPException(400, f"{src.suffix} is not a supported audio format")
 
     fmt = body.output_format.lower()
-    if fmt not in QUALITY_FLAGS:
-        raise HTTPException(400, f"Unsupported output format: {fmt}")
-
     quality = body.quality.lower()
-    if quality not in QUALITY_FLAGS[fmt]:
-        raise HTTPException(400, f"Unsupported quality '{quality}' for format '{fmt}'")
-
-    if body.bitrate_kbps is not None:
-        if fmt not in BITRATE_OVERRIDE_FORMATS:
-            raise HTTPException(400, f"Bitrate override is not supported for {fmt}")
-        if not (BITRATE_OVERRIDE_MIN_KBPS <= body.bitrate_kbps <= BITRATE_OVERRIDE_MAX_KBPS):
-            raise HTTPException(
-                400,
-                f"Bitrate must be between {BITRATE_OVERRIDE_MIN_KBPS} and "
-                f"{BITRATE_OVERRIDE_MAX_KBPS} kbps",
-            )
+    try:
+        validate_conversion_request(fmt, quality, body.bitrate_kbps)
+    except ConversionError as e:
+        raise HTTPException(400, str(e))
 
     fmt_info = next(f for f in OUTPUT_FORMATS if f["value"] == fmt)
     if src.suffix.lower() == fmt_info["ext"]:
@@ -76,33 +59,13 @@ def convert_file(body: ConvertIn):
     dest = src.with_suffix(fmt_info["ext"])
     reject_if_exists(dest)
 
-    # Preset argv is `[-codec:a, <codec>, -q:a, <n>]`. When a bitrate
-    # override is in play, keep the codec pair and replace the rate-control
-    # pair with `-b:a <N>k`.
-    preset_flags = QUALITY_FLAGS[fmt][quality]
-    if body.bitrate_kbps is not None:
-        codec_flags = [*preset_flags[:2], "-b:a", f"{body.bitrate_kbps}k"]
-    else:
-        codec_flags = preset_flags
-    cmd = ["ffmpeg", "-i", str(src), "-vn", *codec_flags, str(dest)]
-
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=FFMPEG_SUBPROCESS_TIMEOUT_S,
-        )
-    except FileNotFoundError:
-        raise HTTPException(500, "ffmpeg not found — make sure it is installed")
-    except subprocess.TimeoutExpired:
-        raise HTTPException(504, "Conversion timed out")
-
-    if result.returncode != 0:
-        # Log full stderr server-side; return a generic message so internal
-        # filesystem paths + command lines don't leak.
-        log.error("ffmpeg conversion failed for %s: %s", src.name, result.stderr)
-        raise HTTPException(500, "Conversion failed. Check the server log for ffmpeg output.")
+        convert_audio(src, dest, fmt, quality, body.bitrate_kbps)
+    except ConversionError as e:
+        # ffmpeg stderr is already logged inside convert_audio; the message
+        # here is the user-safe one. Timeout keeps its own status.
+        status = 504 if "timed out" in str(e) else 500
+        raise HTTPException(status, str(e))
 
     if body.delete_original:
         with contextlib.suppress(OSError):

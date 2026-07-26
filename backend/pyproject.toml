@@ -1,24 +1,24 @@
 [project]
 name = "asmr-curator"
-version = "2.1.1"
+version = "2.2.0"
 description = "Self-hosted ASMR Curator: vision LLM extraction, tag dictionary, file rename + ID3, audio conversion"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "fastapi==0.136.1",
-    # Pinned ahead of FastAPI 0.136.1's open-ended `starlette>=0.46.0` bound
-    # for the 1.3.1 security fixes (CVE-2026-48817/48818 multipart DoS,
-    # CVE-2026-54282/54283). Keep in lockstep with backend/requirements.txt.
+    "fastapi==0.140.0",
+    # Pinned ahead of FastAPI's open-ended lower bound for the 1.3.1 security
+    # fixes (CVE-2026-48817/48818 multipart DoS, CVE-2026-54282/54283).
+    # Keep in lockstep with backend/requirements.txt.
     "starlette==1.3.1",
-    "uvicorn[standard]==0.47.0",
-    "playwright==1.60.0",
+    "uvicorn[standard]==0.51.0",
+    "playwright==1.61.0",
     # Pinned to match backend/requirements.txt — pyproject.toml drives
     # `uv sync` in the devcontainer; requirements.txt drives the Docker
     # build. Both must list the same direct deps or one path silently
     # misses imports (httpx is in main.py for external-audio streaming
     # + the SSE response client; mutagen writes ID3/FLAC/MP4 tags).
     "httpx==0.28.1",
-    "mutagen==1.47.0",
+    "mutagen==1.48.1",
 ]
 
 [dependency-groups]

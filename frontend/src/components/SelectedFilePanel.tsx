@@ -48,6 +48,9 @@ interface SelectedFilePanelProps {
 interface RenameResponse {
     path: string;
     new_name: string;
+    // False when the filename was already correct and only the tags were
+    // written — the metadata-only path.
+    renamed: boolean;
     // Set when the rename succeeded but the optional ID3/FLAC/MP4 metadata
     // embed step failed. The file is still on disk under the new name.
     metadata_error?: string;
@@ -95,6 +98,12 @@ export default function SelectedFilePanel({
     const [converting, setConverting] = useState(false);
     const [converted, setConverted] = useState(false);
 
+    // Filename and embedded title are edited independently. `nameOverride`
+    // null means "follow the generated name"; `titleDirty` means the user
+    // has taken the embedded title off the generated value.
+    const [nameOverride, setNameOverride] = useState<string | null>(null);
+    const [titleDirty, setTitleDirty] = useState(false);
+
     // Metadata fields
     const [metaTitle, setMetaTitle] = useState("");
     const [metaArtist, setMetaArtist] = useState("");
@@ -109,6 +118,9 @@ export default function SelectedFilePanel({
     // "setState on unmounted component" warning.
     const renamedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const convertedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Destination of a rename we just performed, so the file-change reset
+    // below can tell "same file, new name" from "user picked another file".
+    const selfRenamedPathRef = useRef<string | null>(null);
     useEffect(() => {
         return () => {
             if (renamedTimerRef.current) clearTimeout(renamedTimerRef.current);
@@ -120,10 +132,31 @@ export default function SelectedFilePanel({
     // editable by the user after the sync, so we can't just derive it on
     // every render — we need state that *starts* as outputPipe and accepts
     // edits.
+    //
+    // Once the user hand-edits the title the sync stops: the embedded title
+    // and the filename are independent, so trimming tags to fit the 255-byte
+    // filename limit must not rewrite the tag the user already settled on.
     useEffect(() => {
+        if (titleDirty) return;
         // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing editable state from prop
         setMetaTitle(outputPipe);
-    }, [outputPipe]);
+    }, [outputPipe, titleDirty]);
+
+    // A new file is a new editing session — drop both overrides so the
+    // generated name and title take over again.
+    //
+    // A rename also changes `selected.path`, but that's the SAME file and
+    // the user's edits still apply to it. Resetting there would throw away
+    // a hand-edited title the moment they touched a tag afterwards, so the
+    // rename records its own destination and this skips it once.
+    useEffect(() => {
+        if (selfRenamedPathRef.current === selected.path) {
+            selfRenamedPathRef.current = null;
+            return;
+        }
+        setNameOverride(null);
+        setTitleDirty(false);
+    }, [selected.path]);
 
     // Pre-populate artist when a new file is selected OR a fresh extract
     // lands (Patreon / Screenshot). Mirrors the TagsEditor's
@@ -151,11 +184,16 @@ export default function SelectedFilePanel({
 
     const needsConversion = !!selected.needs_conversion || NEEDS_CONVERSION_EXTS.has(selected.ext);
 
-    const newName = (() => {
+    const generatedName = (() => {
         const text = renameSep === "dash" ? outputDash : outputPipe;
         if (!text) return null;
         return sanitizeFilename(text) + getExt(selected.name);
     })();
+
+    const newName = nameOverride ?? generatedName;
+    // Nothing to rename when the name matches what's already on disk — the
+    // action becomes a metadata-only write.
+    const isMetadataOnly = !!newName && newName === selected.name;
 
     const bytes = newName ? byteLength(newName) : 0;
     const bytesOver = bytes > MAX_BYTES;
@@ -190,6 +228,12 @@ export default function SelectedFilePanel({
                     album_artist: linkArtists ? metaArtist : metaAlbumArtist,
                 },
             });
+            selfRenamedPathRef.current = data.path;
+            // Pin the field to what's actually on disk now. Without this the
+            // preview would snap back to the name composed from the current
+            // tags, which after a hand-shortened rename is not the file's
+            // name — it'd read as though the rename hadn't taken.
+            setNameOverride(data.new_name);
             onSelectedChange({
                 ...selected,
                 path: data.path,
@@ -202,7 +246,11 @@ export default function SelectedFilePanel({
             // embed didn't. The file is on disk under the new name, but the
             // user expected tags written too.
             if (data.metadata_error) {
-                onError(`Renamed, but metadata embed failed: ${data.metadata_error}`);
+                onError(
+                    data.renamed
+                        ? `Renamed, but metadata embed failed: ${data.metadata_error}`
+                        : `Couldn't save the metadata: ${data.metadata_error}`,
+                );
             }
             onListReload();
         } catch (e) {
@@ -306,12 +354,21 @@ export default function SelectedFilePanel({
                     metaAlbum={metaAlbum}
                     metaAlbumArtist={metaAlbumArtist}
                     linkArtists={linkArtists}
-                    onMetaTitleChange={setMetaTitle}
+                    titleDirty={titleDirty}
+                    onResetTitle={() => setTitleDirty(false)}
+                    onMetaTitleChange={(v) => {
+                        setTitleDirty(true);
+                        setMetaTitle(v);
+                    }}
                     onMetaArtistChange={setMetaArtist}
                     onMetaAlbumChange={setMetaAlbum}
                     onMetaAlbumArtistChange={setMetaAlbumArtist}
                     onLinkArtistsChange={setLinkArtists}
                     newName={newName}
+                    onNewNameChange={setNameOverride}
+                    nameOverridden={nameOverride !== null}
+                    onResetName={() => setNameOverride(null)}
+                    isMetadataOnly={isMetadataOnly}
                     bytes={bytes}
                     bytesOver={bytesOver}
                     bytesWarn={bytesWarn}

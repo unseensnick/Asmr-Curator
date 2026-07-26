@@ -41,7 +41,7 @@ const ENDPOINT_TIMEOUTS: Array<{ match: RegExp; ms: number }> = [
     { match: /^\/api\/preview-tags\b/, ms: 120_000 },
     { match: /^\/api\/convert\b/, ms: 600_000 }, // ffmpeg encodes; matches backend timeout
     { match: /^\/api\/patreon\/ingest-external-audio\b/, ms: 600_000 },
-    // `/api/patreon/fetch`, `/api/patreon/ingest-drive-link`, and
+    // `/api/patreon/fetch`, `/api/patreon/ingest-drive-link` and
     // `/api/move/batch` are SSE streams (see fetchPatreonPost /
     // ingestDriveLinkStream / moveBatchStream) — no total timeout, that
     // would cut healthy long streams short.
@@ -54,12 +54,60 @@ function timeoutFor(path: string): number {
     return DEFAULT_TIMEOUT_MS;
 }
 
+/** A non-2xx response, with FastAPI's `detail` already unwrapped.
+ *
+ *  `message` is what the UI shows, so it must never be a raw JSON envelope —
+ *  components render it verbatim and users were seeing
+ *  `{"detail":"A file with that name already exists."}`. `detail` keeps the
+ *  structured payload for the few callers that need more than a sentence
+ *  (bulk-write's per-item results), so they don't re-parse `message`. */
+export class ApiError extends Error {
+    readonly status: number;
+    readonly detail: unknown;
+    constructor(message: string, status: number, detail: unknown) {
+        super(message);
+        this.name = "ApiError";
+        this.status = status;
+        this.detail = detail;
+    }
+}
+
+async function errorFor(r: Response): Promise<ApiError> {
+    const raw = await r.text();
+    let detail: unknown;
+    try {
+        const parsed: unknown = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && "detail" in parsed) {
+            detail = (parsed as { detail: unknown }).detail;
+        }
+    } catch {
+        // Not JSON — a proxy error page or plain text. Fall through and use
+        // the body as-is.
+    }
+
+    if (typeof detail === "string" && detail) {
+        return new ApiError(detail, r.status, detail);
+    }
+    // Structured detail: `/api/delete`'s `{message, count, path}` and
+    // bulk-write's `{ok, results}`. Prefer an embedded message; otherwise the
+    // status is more use to the user than a dumped object.
+    if (detail && typeof detail === "object") {
+        const embedded = (detail as { message?: unknown }).message;
+        return new ApiError(
+            typeof embedded === "string" && embedded ? embedded : `Request failed (${r.status}).`,
+            r.status,
+            detail,
+        );
+    }
+    return new ApiError(raw || `Request failed (${r.status}).`, r.status, detail);
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeoutFor(path));
     try {
         const r = await fetch(path, { ...init, signal: controller.signal });
-        if (!r.ok) throw new Error(await r.text());
+        if (!r.ok) throw await errorFor(r);
         return (await r.json()) as T;
     } catch (e) {
         // Surface a clearer message than the default AbortError.
@@ -165,18 +213,30 @@ export function clearGoogleCookies(): Promise<GoogleCookieStatus> {
  * on `done`, rejects on `error`. `AbortSignal` cancels mid-stream — the
  * backend tears down the Playwright session on client disconnect.
  */
+/** `postId` is null for a standalone Drive link (the Google Drive tab) —
+ *  the backend then keys the download folder off the Drive file id. */
 export async function ingestDriveLinkStream(
-    postId: string,
+    postId: string | null,
     driveUrl: string,
     onEvent: (event: IngestDriveLinkEvent) => void,
     options: {
         filename?: string;
         title?: string;
         artist?: string;
+        /** Convert-on-download. Omit or "best" to keep Drive's own m4a. */
+        audioFormat?: string;
+        audioQuality?: string;
+        bitrateKbps?: number | null;
         signal?: AbortSignal;
     } = {},
 ): Promise<IngestDriveLinkResponse> {
-    const body: Record<string, unknown> = { post_id: postId, drive_url: driveUrl };
+    const body: Record<string, unknown> = { drive_url: driveUrl };
+    if (postId) body.post_id = postId;
+    if (options.audioFormat && options.audioFormat !== "best") {
+        body.audio_format = options.audioFormat;
+        if (options.audioQuality) body.audio_quality = options.audioQuality;
+        if (options.bitrateKbps != null) body.bitrate_kbps = options.bitrateKbps;
+    }
     if (options.filename) body.filename = options.filename;
     if (options.title) body.title = options.title;
     if (options.artist) body.artist = options.artist;
@@ -594,20 +654,16 @@ export async function bulkWrite(body: BulkWriteRequest): Promise<BulkWriteRespon
     try {
         return await apiPatch<BulkWriteResponse>(API.bulkWrite, body);
     } catch (err) {
-        if (err instanceof Error && err.message.startsWith("{")) {
-            try {
-                const parsed = JSON.parse(err.message) as {
-                    detail?: { ok?: boolean; results?: BulkWriteItemResult[] };
-                };
-                const results = parsed.detail?.results;
-                if (Array.isArray(results)) {
-                    const firstFailure = results.find((r) => !r.ok);
-                    const msg = firstFailure?.error ?? "Validation failed.";
-                    throw new BulkWriteValidationError(msg, results);
-                }
-            } catch (parseErr) {
-                if (parseErr instanceof BulkWriteValidationError) throw parseErr;
-                // JSON.parse failed — fall through to the original error.
+        // `request` already unwrapped `detail`; read it off the error rather
+        // than re-parsing the message.
+        if (err instanceof ApiError && err.detail && typeof err.detail === "object") {
+            const results = (err.detail as { results?: BulkWriteItemResult[] }).results;
+            if (Array.isArray(results)) {
+                const firstFailure = results.find((r) => !r.ok);
+                throw new BulkWriteValidationError(
+                    firstFailure?.error ?? "Validation failed.",
+                    results,
+                );
             }
         }
         throw err;

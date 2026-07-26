@@ -19,9 +19,14 @@ def _stage_source(downloads, name: str = "in.wav") -> str:
 
 
 def _fake_subprocess_run(monkeypatch, *, returncode: int = 0):
-    """Replace `backend.routes.convert.subprocess.run` with a recorder
-    that always 'succeeds' and writes a dest stub so the handler's post-
-    convert bookkeeping passes."""
+    """Replace `backend.audio_convert.subprocess.run` with a recorder that
+    always 'succeeds' and writes a dest stub so the handler's post-convert
+    bookkeeping passes.
+
+    The ffmpeg call lives in `backend.audio_convert` — one argv builder
+    shared by /api/convert and the Drive ingest — so that's what gets
+    patched, not the route module.
+    """
     calls: list[list[str]] = []
 
     def fake_run(cmd, *args, **kwargs):
@@ -36,7 +41,7 @@ def _fake_subprocess_run(monkeypatch, *, returncode: int = 0):
         return result
 
     monkeypatch.setattr(
-        "backend.routes.convert.subprocess.run",
+        "backend.audio_convert.subprocess.run",
         fake_run,
     )
     return calls
@@ -269,7 +274,7 @@ class TestSubprocessFailures:
         def boom(*a, **kw):
             raise FileNotFoundError("ffmpeg")
 
-        monkeypatch.setattr("backend.routes.convert.subprocess.run", boom)
+        monkeypatch.setattr("backend.audio_convert.subprocess.run", boom)
         r = c.post(
             "/api/convert",
             json={
@@ -289,7 +294,7 @@ class TestSubprocessFailures:
         def boom(*a, **kw):
             raise subprocess.TimeoutExpired("ffmpeg", 30)
 
-        monkeypatch.setattr("backend.routes.convert.subprocess.run", boom)
+        monkeypatch.setattr("backend.audio_convert.subprocess.run", boom)
         r = c.post(
             "/api/convert",
             json={

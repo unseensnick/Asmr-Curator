@@ -14,7 +14,9 @@
 
   "postCreateCommand": "sudo chown -R devuser:devuser /workspaces/asmr-curator && sudo chmod -R u+rw /workspaces/asmr-curator",
   "// postStartCommand pins": "node + patreon-dl versions duplicate the production Dockerfile (`volta install node@25` + `npm install -g patreon-dl@${PATREON_DL_VERSION}`, ARG default 3.9.0). Keep these two pinned-version strings in sync — devcontainer.json can't read Docker ARGs at runtime, so the duplication is by design. Bump both files together.",
-  "postStartCommand": "uv pip install --python /home/devuser/.venv/bin/python -r /workspaces/asmr-curator/backend/requirements.txt -q && volta install node@25 && npm install -g patreon-dl@3.9.0",
+  "// private deps": "backend/private/requirements.txt is installed only when that optional domain is present, mirroring the Dockerfile's if-exists guard. Without this the routes it owns 404 at runtime while the backend still starts cleanly.",
+  "// dev deps": "The venv lives in the container filesystem, not a volume, so a compose recreate wipes it and only what postStartCommand installs comes back. Without the `--group dev` line, pytest / ruff / hypothesis disappear and the gate can't be run until they're reinstalled by hand. Sourced from backend/pyproject.toml's [dependency-groups].dev so there's one list, not a copy.",
+  "postStartCommand": "uv pip install --python /home/devuser/.venv/bin/python -r /workspaces/asmr-curator/backend/requirements.txt -q && uv pip install --python /home/devuser/.venv/bin/python --group dev --project /workspaces/asmr-curator/backend -q && if [ -f /workspaces/asmr-curator/backend/private/requirements.txt ]; then uv pip install --python /home/devuser/.venv/bin/python -r /workspaces/asmr-curator/backend/private/requirements.txt -q; fi && volta install node@25 && npm install -g patreon-dl@3.9.0",
 
   "customizations": {
     "vscode": {

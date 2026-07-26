@@ -14,6 +14,7 @@ from backend.patreon_fetch import (
     ExternalLink,
     FetchedPost,
     _anchor_text,
+    _collect_posts,
     _extract_external_links,
     _find_cached_creator_posts,
     _find_cached_post,
@@ -78,11 +79,13 @@ class TestNormalizeTargetUrl:
     def test_strips_vanity_from_single_post(self):
         # The reported bug: address-bar post URL carries the creator vanity,
         # which patreon-dl rejects with "Unknown URL".
-        url = "https://www.patreon.com/testartistasmr/posts/some-slug-91850144"
-        assert _normalize_target_url(url) == "https://www.patreon.com/posts/some-slug-91850144"
+        url = "https://www.patreon.com/testartistasmr/posts/no-ads-gentle-of-91850144"
+        assert (
+            _normalize_target_url(url) == "https://www.patreon.com/posts/no-ads-gentle-of-91850144"
+        )
 
     def test_canonical_post_url_is_unchanged(self):
-        url = "https://www.patreon.com/posts/some-slug-91850144"
+        url = "https://www.patreon.com/posts/no-ads-gentle-of-91850144"
         assert _normalize_target_url(url) == url
 
     def test_bare_id_post_url_is_unchanged(self):
@@ -469,6 +472,66 @@ def _write_sidecar(post_dir: Path, post_id: str, title: str = "Test", artist: st
         "included": [{"type": "user", "id": "u1", "attributes": {"full_name": artist}}],
     }
     (info_dir / "post-api.json").write_text(json.dumps(sidecar), encoding="utf-8")
+
+
+class TestCollectPostsByIds:
+    """`post_ids` addresses this run's sidecars directly instead of walking
+    every post ever downloaded.
+
+    The real on-disk shape is
+    `<output_dir>/<campaign>/posts/<post_id> - <title>/post_info/` — the post
+    directory carries the title after the id, and there is no `Patreon`
+    level. Fixtures here mirror that exactly; an earlier version of these
+    tests used a bare `<post_id>` directory and passed against a lookup that
+    found nothing in production.
+    """
+
+    def _archive(self, tmp_path: Path, ids: list[str]) -> Path:
+        output_dir = tmp_path / ".patreon-dl"
+        for post_id in ids:
+            post_dir = (
+                output_dir
+                / "testartistasmr - Test Artist ASMR"
+                / "posts"
+                / f"{post_id} - Post title"
+            )
+            _write_sidecar(post_dir, post_id, title=f"Post {post_id}")
+        return output_dir
+
+    def test_finds_post_dir_carrying_the_title(self, tmp_path: Path):
+        output_dir = self._archive(tmp_path, ["164584463"])
+        posts = _collect_posts(output_dir, post_ids={"164584463"})
+        assert [p.post_id for p in posts] == ["164584463"]
+
+    def test_falls_back_to_full_walk_when_ids_match_nothing(self, tmp_path: Path):
+        # A layout shift must not turn a successful fetch into "no posts".
+        output_dir = tmp_path / ".patreon-dl"
+        _write_sidecar(output_dir / "unexpected" / "layout", "999")
+        posts = _collect_posts(output_dir, post_ids={"999"})
+        assert [p.post_id for p in posts] == ["999"]
+
+    def test_returns_only_the_requested_post(self, tmp_path: Path):
+        output_dir = self._archive(tmp_path, ["111", "222", "333"])
+        posts = _collect_posts(output_dir, post_ids={"222"})
+        assert [p.post_id for p in posts] == ["222"]
+
+    def test_ignores_ids_absent_from_disk(self, tmp_path: Path):
+        output_dir = self._archive(tmp_path, ["111"])
+        posts = _collect_posts(output_dir, post_ids={"111", "does-not-exist"})
+        assert [p.post_id for p in posts] == ["111"]
+
+    def test_empty_ids_falls_back_to_full_walk(self, tmp_path: Path):
+        # Dry runs and odd log shapes produce no ids — the old behaviour
+        # has to still surface everything.
+        output_dir = self._archive(tmp_path, ["111", "222"])
+        posts = _collect_posts(output_dir, post_ids=set())
+        assert [p.post_id for p in posts] == ["111", "222"]
+
+    def test_matches_the_full_walk_for_the_same_posts(self, tmp_path: Path):
+        output_dir = self._archive(tmp_path, ["111", "222"])
+        by_ids = _collect_posts(output_dir, post_ids={"111", "222"})
+        by_walk = _collect_posts(output_dir)
+        assert [p.post_id for p in by_ids] == [p.post_id for p in by_walk]
 
 
 class TestFindCachedPost:

@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 
+import DrivePanel from "@/components/DrivePanel";
 import FileBrowser from "@/components/FileBrowser";
 import Header from "@/components/Header";
 import OutputPanel from "@/components/OutputPanel";
@@ -32,11 +33,25 @@ import type { BulkEditRoot } from "@/components/BulkEditSheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { API, apiGet, apiPatch, apiPost } from "@/lib/api";
+import type { PrivateTab } from "@/lib/privateTab";
 import type { AppDict, DictionaryApiResponse, FileEntry, VocabEntry } from "@/lib/types";
 import { dictFromApiResponse, emptyDict } from "@/lib/types";
 import { getErrorMessage, sanitizeFilename, stripOuterBrackets } from "@/lib/utils";
 
-type SourceMode = "patreon" | "screenshot";
+// Optional private-only source tabs. The glob resolves to nothing when
+// `src/private/` is absent, so the tabs disappear with the directory and
+// nothing here needs editing. See lib/privateTab.ts.
+const privateTabModules = import.meta.glob<{ tab?: PrivateTab }>("./private/index.tsx", {
+    eager: true,
+});
+const privateTabs: PrivateTab[] = Object.values(privateTabModules).flatMap((m) =>
+    m.tab ? [m.tab] : [],
+);
+const privateHelpTopics = privateTabs.flatMap((t) => (t.helpTopic ? [t.helpTopic] : []));
+
+// Built-in modes plus whatever the private domain registers. Radix Tabs keys on
+// strings, so a widened type costs nothing here.
+type SourceMode = string;
 
 const POWER_MODE_KEY = "app.powerMode";
 
@@ -85,7 +100,9 @@ export default function App() {
         setBulkEditFiles((prev) => prev.filter((f) => f.path !== path));
     }
     const [extractedArtist, setExtractedArtist] = useState("");
-    const [sourceMode, setSourceMode] = useState<SourceMode>("patreon");
+    const [sourceMode, setSourceMode] = useState<SourceMode>(
+        () => privateTabs.find((t) => t.shouldAutoSelect?.())?.id ?? "patreon",
+    );
     const [powerMode, setPowerMode] = useState<boolean>(() => loadPowerMode());
     // Cold-load dictionary error: surfaced (with a Retry) instead of letting
     // the app silently come up with an empty vocabulary that reads as broken.
@@ -102,6 +119,12 @@ export default function App() {
             // non-fatal
         }
     }, [powerMode]);
+
+    // Let each private tab clear the URL params it consumed, so a refresh
+    // doesn't re-apply them. URL bar only, no setState.
+    useEffect(() => {
+        privateTabs.forEach((t) => t.consumeUrlParams?.());
+    }, []);
 
     // ── Filename generation ───────────────────────────────────────────────────
     function generate() {
@@ -139,7 +162,6 @@ export default function App() {
                 setDictLoadError(
                     "Couldn't reach the dictionary. Tags won't match canonical forms until this resolves.",
                 );
-                // eslint-disable-next-line no-console -- aid for self-host debugging
                 console.warn("Dictionary load failed:", getErrorMessage(e));
             });
     }
@@ -269,6 +291,21 @@ export default function App() {
                                     Patreon URL
                                 </TabsTrigger>
                                 <TabsTrigger
+                                    value="drive"
+                                    className="px-4 py-2.5 text-xs font-medium tracking-[0.04em] whitespace-nowrap rounded-none"
+                                >
+                                    Google Drive
+                                </TabsTrigger>
+                                {privateTabs.map((t) => (
+                                    <TabsTrigger
+                                        key={t.id}
+                                        value={t.id}
+                                        className="px-4 py-2.5 text-xs font-medium tracking-[0.04em] whitespace-nowrap rounded-none"
+                                    >
+                                        {t.label}
+                                    </TabsTrigger>
+                                ))}
+                                <TabsTrigger
                                     value="screenshot"
                                     className="px-4 py-2.5 text-xs font-medium tracking-[0.04em] whitespace-nowrap rounded-none"
                                 >
@@ -295,6 +332,37 @@ export default function App() {
                                     }
                                 />
                             </TabsContent>
+
+                            <TabsContent
+                                value="drive"
+                                className="flex-1 mt-0 min-h-0 flex flex-col data-[state=inactive]:hidden"
+                            >
+                                <DrivePanel
+                                    dict={dict}
+                                    onExtracted={handleExtracted}
+                                    powerMode={powerMode}
+                                    onOpenCookies={() => setCookiesOpen(true)}
+                                    onBridgeToDownloads={(path, filename) =>
+                                        setBridgeRequest({ path, filename })
+                                    }
+                                />
+                            </TabsContent>
+
+                            {privateTabs.map((t) => (
+                                <TabsContent
+                                    key={t.id}
+                                    value={t.id}
+                                    className="flex-1 mt-0 min-h-0 flex flex-col data-[state=inactive]:hidden"
+                                >
+                                    {t.render({
+                                        dict,
+                                        powerMode,
+                                        onExtracted: handleExtracted,
+                                        onBridgeToDownloads: (path, filename) =>
+                                            setBridgeRequest({ path, filename }),
+                                    })}
+                                </TabsContent>
+                            ))}
 
                             <TabsContent
                                 value="screenshot"
@@ -408,7 +476,13 @@ export default function App() {
                     )}
                 </Suspense>
                 <Suspense fallback={null}>
-                    {helpOpen && <HelpSheet open={helpOpen} onClose={() => setHelpOpen(false)} />}
+                    {helpOpen && (
+                        <HelpSheet
+                            open={helpOpen}
+                            onClose={() => setHelpOpen(false)}
+                            extraTopics={privateHelpTopics}
+                        />
+                    )}
                 </Suspense>
             </div>
         </TooltipProvider>

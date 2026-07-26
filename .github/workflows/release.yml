@@ -29,15 +29,16 @@ jobs:
 
     steps:
       - name: Clone repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Compute lowercase image name
         # GHCR rejects uppercase characters in repository names, but
         # ${{ github.repository }} preserves the GitHub repo's case
-        # (currently `unseensnick/Asmr-Curator`). Lowercase once here and
-        # reuse via env.IMAGE / env.REPO_NAME_LC downstream.
+        # (e.g. `unseensnick/Asmr-Curator`), and the image name derives
+        # per-repo. Lowercase once here and reuse via env.IMAGE /
+        # env.REPO_NAME_LC downstream.
         shell: bash
         run: |
           IMAGE_LC="ghcr.io/${GITHUB_REPOSITORY,,}"
@@ -50,12 +51,17 @@ jobs:
       - name: Get changelog
         id: changelog
         shell: bash
+        env:
+          # Through `env:`, never a `${{ }}` expression inside `run:`:
+          # expressions are substituted before bash parses the script, so a
+          # crafted input would execute rather than be read as a string.
+          RELEASE_VERSION: ${{ github.event.inputs.version }}
         run: |
           # Plain SemVer (major.minor.patch[-pre][+build]) or Unreleased
           VERSION_FORMAT='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z\.-]+)?(\+[0-9A-Za-z\.-]+)?$|^Unreleased$'
           {
             echo "CHANGELOG<<END_OF_FILE"
-            parse-changelog CHANGELOG.md "${{ github.event.inputs.version }}" --version-format "$VERSION_FORMAT" \
+            parse-changelog CHANGELOG.md "$RELEASE_VERSION" --version-format "$VERSION_FORMAT" \
               || parse-changelog CHANGELOG.md Unreleased --version-format "$VERSION_FORMAT" \
               || echo "No documented changes for this version yet."
             echo ""
@@ -63,17 +69,17 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
@@ -100,7 +106,7 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Create draft release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ github.event.inputs.version }}
           name: v${{ github.event.inputs.version }}
@@ -121,7 +127,7 @@ jobs:
 
             ### Browser extension
 
-            Run the [Release Extension](https://github.com/${{ github.repository }}/actions/workflows/release-extension.yml) workflow (extension version + `v${{ github.event.inputs.version }}` as the release tag) to attach the companion zip here. The extension is versioned independently — see `extension/CHANGELOG.md`. The two workflows are independent: a failure in one doesn't block the other.
+            Run the [Release Extension](https://github.com/${{ github.repository }}/actions/workflows/release-extension.yml) workflow (extension version + `v${{ github.event.inputs.version }}` as the release tag) to attach the companion zip here. It appends to this release, draft included, rather than creating its own. The extension is versioned independently, see `extension/CHANGELOG.md`. The two workflows stay separate so a failure in one doesn't block the other.
           draft: true
           prerelease: false
         env:

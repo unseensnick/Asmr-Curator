@@ -16,6 +16,7 @@ the DB is local and per-deployment. Defaults live next to the schema
 the on-disk location; the directory is created if missing on first boot.
 """
 
+import contextlib
 import json
 import os
 import sqlite3
@@ -151,10 +152,23 @@ DEFAULT_SUPPRESSED: list[str] = [
 # ── Connection ────────────────────────────────────────────────────────────────
 
 
+@contextlib.contextmanager
 def get_conn():
+    """Open a connection, commit or roll back, then close it.
+
+    Every caller uses `with get_conn() as conn:`. That used to bind sqlite3's
+    own connection context manager, which commits on success and rolls back
+    on error but never closes — so each helper call leaked a connection until
+    the GC got to it. Wrapping it keeps the transaction semantics identical
+    and adds the close.
+    """
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 # ── Schema ────────────────────────────────────────────────────────────────────

@@ -23,6 +23,17 @@ from backend.audio_utils import AUDIO_FORMATS_CONFIG
 
 _FORMATS_CONFIG = AUDIO_FORMATS_CONFIG
 
+# Without this the backend's own loggers inherit the root logger's default
+# WARNING threshold under uvicorn, so every `log.info` in the codebase — the
+# Drive throughput line, the patreon-fetch fallback warning, the cache-hit
+# notes — is silently discarded and only tracebacks ever reach the terminal.
+# That makes "why was this slow" unanswerable from the logs. `LOG_LEVEL`
+# overrides (e.g. WARNING for a quiet production run, DEBUG when digging).
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(levelname)s [%(name)s] %(message)s",
+)
+
 log = logging.getLogger("asmr_curator")
 
 # Max accepted size for a base64-encoded screenshot in /api/extract. Base64
@@ -173,6 +184,21 @@ def validate_under_root(rel_path: str, root: Path) -> Path:
     return resolved
 
 
+def validate_strictly_under_root(rel_path: str, root: Path, *, action: str) -> Path:
+    """Resolve `rel_path` under `root` and reject the root directory itself.
+
+    For destructive operations. A raw-string check ("is it '.' or '..'?")
+    cannot do this job: `sub/..` looks like an ordinary relative path but
+    resolves back to the root, and `is_relative_to` is true for equality —
+    so the string guard passes and the caller operates on the root. The
+    comparison has to happen on the RESOLVED path.
+    """
+    resolved = validate_under_root(rel_path, root)
+    if resolved == root.resolve():
+        raise HTTPException(400, f"Refusing to {action} the root directory.")
+    return resolved
+
+
 def validate_under_library(rel_path: str) -> Path:
     return validate_under_root(rel_path, LIBRARY_PATH)
 
@@ -213,47 +239,20 @@ NEEDS_CONVERSION_EXTS = set(_FORMATS_CONFIG["needsConversionExts"])
 AUDIO_EXTS = METADATA_COMPATIBLE_EXTS | NEEDS_CONVERSION_EXTS
 OUTPUT_FORMATS = _FORMATS_CONFIG["outputFormats"]
 
-QUALITY_FLAGS: dict[str, dict[str, list[str]]] = {
-    "mp3": {
-        # LAME VBR: -q:a 0 = best (~245kbps avg), 9 = worst (~65kbps avg).
-        # "low" anchors at ~130kbps to match VLC's MP3 default; the earlier
-        # -q:a 7 sat below that floor and made the preset feel cheaper than
-        # a comparable VLC export at the same size.
-        "low": ["-codec:a", "libmp3lame", "-q:a", "5"],  # ~130kbps
-        "standard": ["-codec:a", "libmp3lame", "-q:a", "3"],  # ~160kbps
-        "high": ["-codec:a", "libmp3lame", "-q:a", "2"],  # ~190kbps
-        "best": ["-codec:a", "libmp3lame", "-q:a", "0"],  # ~245kbps
-    },
-    "flac": {
-        # No -ar / -sample_fmt: ffmpeg preserves source rate + bit depth,
-        # so a 48kHz / 24-bit source stays 48kHz / 24-bit instead of being
-        # silently downsampled to 44.1kHz / 16-bit.
-        "lossless": ["-codec:a", "flac", "-compression_level", "8"],
-    },
-    "ogg": {
-        # libvorbis -q:a scale: 0 = worst, 10 = best.
-        "low": ["-codec:a", "libvorbis", "-q:a", "4"],  # ~128kbps
-        "standard": ["-codec:a", "libvorbis", "-q:a", "6"],  # ~192kbps
-        "high": ["-codec:a", "libvorbis", "-q:a", "7"],  # ~224kbps
-        "best": ["-codec:a", "libvorbis", "-q:a", "9"],  # ~320kbps
-    },
-}
-
-# Codecs that support an explicit CBR bitrate override (power-mode field).
-# Wired in `routes/convert.py` — when a request carries `bitrate_kbps`, the
-# preset's `-q:a` flag is swapped for `-b:a <N>k` and the codec is taken
-# from the table above. FLAC is intentionally omitted; lossless has no
-# bitrate target.
-BITRATE_OVERRIDE_FORMATS: frozenset[str] = frozenset({"mp3", "ogg"})
-BITRATE_OVERRIDE_MIN_KBPS = 32
-BITRATE_OVERRIDE_MAX_KBPS = 320
-
+# The ffmpeg preset tables live in `backend.audio_convert` alongside the code
+# that runs them. Re-exported here because routes and tests have imported them
+# from this module since before that split. F401: re-exports, not unused.
+from backend.audio_convert import (  # noqa: E402,F401
+    BITRATE_OVERRIDE_FORMATS,
+    BITRATE_OVERRIDE_MAX_KBPS,
+    BITRATE_OVERRIDE_MIN_KBPS,
+    QUALITY_FLAGS,
+)
 
 # ── Router registration ──────────────────────────────────────────────────────
 # Routers live under `backend/routes/` and import the shared helpers above
 # from this module. Imported here at the bottom so by the time each route
 # module evaluates `from backend.main import …`, the names exist.
-
 from backend.routes import (  # noqa: E402  (deferred to break the import cycle)
     convert,
     dictionary,
@@ -271,3 +270,20 @@ app.include_router(convert.router)
 app.include_router(settings.router)
 app.include_router(patreon.router)
 app.include_router(dictionary.router)
+
+# Optional private-only domain (backend/private/). The import is optional by
+# design: deleting the directory removes what it owns with no edit here.
+#
+# Two steps rather than one try/except around the router import. A single guard
+# cannot tell "the directory is absent" from "the directory is here but one of
+# its dependencies is not": both raise ModuleNotFoundError. That silently served
+# 404s for the whole domain once, with a clean startup log. Probing the package
+# first means a missing dependency fails loudly, which is what it is.
+try:
+    import backend.private  # noqa: F401
+except ModuleNotFoundError:
+    pass  # no private domain checked out, nothing to register
+else:
+    from backend.private.routes import router as _private_router
+
+    app.include_router(_private_router)

@@ -5,9 +5,13 @@ run-name: Build extension v${{ github.event.inputs.extension_version }} → ${{ 
 # Companion to .github/workflows/release.yml. Built as a separate workflow so
 # a Docker-image build failure can't take the extension release down with it
 # (and vice versa). The extension is versioned independently from the main
-# app — its release notes come from extension/CHANGELOG.md, and a single
+# app: its release notes come from extension/CHANGELOG.md, and a single
 # project release on GitHub can carry an extension zip whose version doesn't
-# match.
+# match. Like release.yml, it attaches to whatever repo it's dispatched in.
+#
+# Run release.yml FIRST. This workflow only ever appends to an existing
+# project release (draft or published) and fails if that release is missing;
+# it never creates one of its own.
 
 on:
   workflow_dispatch:
@@ -34,17 +38,19 @@ jobs:
 
     steps:
       - name: Clone repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Normalize attach_to_release tag
-        # Strip any leading `v`, then prepend one. Lets dispatchers type
-        # either `2.0.4` or `v2.0.4` without softprops/action-gh-release
-        # creating a second draft at the unprefixed tag because no
-        # matching release exists yet.
+        # Strip any leading `v`, then prepend one, so a dispatcher can type
+        # either `2.0.4` or `v2.0.4` and still land on the same release.
+        # Inputs reach the shell through `env:`, never through a `${{ }}`
+        # expression inside `run:`: expressions are substituted into the
+        # script before bash sees it, so a crafted input would execute.
         shell: bash
+        env:
+          RAW_TAG: ${{ github.event.inputs.attach_to_release }}
         run: |
-          TAG="${{ github.event.inputs.attach_to_release }}"
-          TAG="${TAG#v}"
+          TAG="${RAW_TAG#v}"
           echo "ATTACH_TO_RELEASE=v$TAG" >> "$GITHUB_ENV"
 
       - name: Setup CHANGELOG parser
@@ -53,27 +59,42 @@ jobs:
       - name: Get extension changelog
         id: changelog
         shell: bash
+        env:
+          EXTENSION_VERSION: ${{ github.event.inputs.extension_version }}
         run: |
           # Plain SemVer (major.minor.patch[-pre][+build]) or Unreleased.
           VERSION_FORMAT='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z\.-]+)?(\+[0-9A-Za-z\.-]+)?$|^Unreleased$'
           {
             echo "CHANGELOG<<END_OF_FILE"
-            parse-changelog extension/CHANGELOG.md "${{ github.event.inputs.extension_version }}" --version-format "$VERSION_FORMAT" \
+            parse-changelog extension/CHANGELOG.md "$EXTENSION_VERSION" --version-format "$VERSION_FORMAT" \
               || parse-changelog extension/CHANGELOG.md Unreleased --version-format "$VERSION_FORMAT" \
               || echo "No documented extension changes for this version yet."
             echo ""
             echo "END_OF_FILE"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Generate extension manifest
+        shell: bash
+        # manifest.json is gitignored and built from manifest.base.json plus the
+        # optional private fragment when that domain is present. With no
+        # fragment the same command yields a manifest carrying only the base
+        # content scripts.
+        run: |
+          node scripts/build-manifest.mjs
+          echo "content_scripts:"
+          node -e 'console.log(JSON.stringify(require("./extension/manifest.json").content_scripts.flatMap(c => c.js)))'
+
       - name: Bump extension manifest version
         shell: bash
+        env:
+          EXTENSION_VERSION: ${{ github.event.inputs.extension_version }}
         run: |
           # Keep extension/manifest.json's version field in lockstep with the
           # workflow input. Chrome Web Store and AMO both refuse uploads that
           # don't bump the version, so each release ships a freshly-versioned
-          # zip. Ephemeral edit — lives in the workflow checkout only, never
+          # zip. Ephemeral edit: lives in the workflow checkout only, never
           # committed back.
-          jq --arg v "${{ github.event.inputs.extension_version }}" \
+          jq --arg v "$EXTENSION_VERSION" \
              '.version = $v' extension/manifest.json > extension/manifest.json.tmp
           mv extension/manifest.json.tmp extension/manifest.json
           echo "Extension manifest version:"
@@ -82,38 +103,71 @@ jobs:
       - name: Build extension zip
         id: zip
         shell: bash
+        env:
+          EXTENSION_VERSION: ${{ github.event.inputs.extension_version }}
         run: |
           # Chrome Web Store + AMO expect manifest.json at the zip root, so
           # cd into extension/ first instead of zipping the parent directory.
-          # CHANGELOG.md is excluded — the version-specific release notes are
-          # already in the GitHub release body via the previous step.
-          ZIP_NAME="asmr-curator-companion-v${{ github.event.inputs.extension_version }}.zip"
-          (cd extension && zip -r "../$ZIP_NAME" . -x "*.DS_Store" -x ".git/*" -x "CHANGELOG.md")
+          # CHANGELOG.md is excluded: the version-specific release notes are
+          # already in the GitHub release body via the previous step. tests/
+          # is excluded because vitest specs are dev-only and shouldn't ship.
+          # The two manifest sources go too: manifest.base.json and, when the
+          # private domain is checked out, its fragment. Both are only inputs
+          # to the manifest.json already sitting at the zip root.
+          ZIP_NAME="asmr-curator-companion-v$EXTENSION_VERSION.zip"
+          (cd extension && zip -r "../$ZIP_NAME" . -x "*.DS_Store" -x ".git/*" -x "CHANGELOG.md" -x "tests/*" -x "manifest.base.json" -x "private/manifest.fragment.json")
           ls -lh "$ZIP_NAME"
           echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
           echo "zip_path=$GITHUB_WORKSPACE/$ZIP_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Attach to release
-        uses: softprops/action-gh-release@v2
-        with:
-          # Attaches the zip + appends the body section to the named project
-          # release (created by the main Release workflow). softprops appends
-          # to an existing release; if it doesn't exist yet, it creates a
-          # fresh draft using this tag. env.ATTACH_TO_RELEASE is the
-          # `v`-prefixed form (see the Normalize step above) so this matches
-          # whatever the Release workflow produced.
-          tag_name: ${{ env.ATTACH_TO_RELEASE }}
-          name: ${{ env.ATTACH_TO_RELEASE }}
-          body: |
-            ### Browser extension (`${{ steps.zip.outputs.zip_name }}`)
-
-            ${{ steps.changelog.outputs.CHANGELOG }}
-
-            Download the zip from the Assets section below and load it as an unpacked extension via `chrome://extensions` (Chrome / Edge) or `about:debugging` (Firefox 121+). See [`extension/README.md`](https://github.com/${{ github.repository }}/blob/${{ env.ATTACH_TO_RELEASE }}/extension/README.md) for the install walkthrough.
-          append_body: true
-          files: |
-            ${{ steps.zip.outputs.zip_path }}
-          draft: true
-          prerelease: false
+        # Uses the gh CLI rather than softprops/action-gh-release because the
+        # target is normally still a DRAFT. softprops resolves a release through
+        # the REST "get release by tag" endpoint, which never returns drafts (a
+        # draft has no git tag yet, only an intended one). It therefore 404s and
+        # creates a second draft at the same tag, which is where the duplicate
+        # drafts came from. `gh release view` lists releases and matches drafts
+        # by tag, so it finds the one the Release workflow just made.
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ZIP_NAME: ${{ steps.zip.outputs.zip_name }}
+          ZIP_PATH: ${{ steps.zip.outputs.zip_path }}
+          CHANGELOG: ${{ steps.changelog.outputs.CHANGELOG }}
+        run: |
+          set -euo pipefail
+          TAG="$ATTACH_TO_RELEASE"
+
+          # Fail loudly instead of silently creating a release nobody expects.
+          # The extension never gets a release of its own: it always rides on a
+          # project release, so a missing tag means the Release workflow hasn't
+          # run yet or the tag was mistyped.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::No release found at $TAG. Run the Release workflow for that version first, then dispatch this one with the same tag."
+            exit 1
+          fi
+
+          # --clobber so re-running the same extension version replaces its zip
+          # rather than failing on a duplicate asset name.
+          gh release upload "$TAG" "$ZIP_PATH" --clobber
+
+          # Append the extension section, but only once per zip name so a re-run
+          # doesn't stack duplicate sections in the notes.
+          CURRENT=$(gh release view "$TAG" --json body --jq .body)
+          if printf '%s' "$CURRENT" | grep -qF "$ZIP_NAME"; then
+            echo "Release notes already mention $ZIP_NAME; leaving them unchanged."
+            exit 0
+          fi
+
+          {
+            printf '%s\n\n' "$CURRENT"
+            printf '### Browser extension (`%s`)\n\n' "$ZIP_NAME"
+            printf '%s\n\n' "$CHANGELOG"
+            printf 'Download the zip from the Assets section below and load it as an unpacked extension via `chrome://extensions` (Chrome / Edge) or `about:debugging` (Firefox 121+). See [`extension/README.md`](https://github.com/%s/blob/%s/extension/README.md) for the install walkthrough.\n' \
+              "$GITHUB_REPOSITORY" "$TAG"
+          } > release-notes.md
+
+          # `gh release edit` leaves draft/prerelease state alone, so a draft
+          # stays a draft and a published release stays published.
+          gh release edit "$TAG" --notes-file release-notes.md
+          echo "Attached $ZIP_NAME to $TAG."
